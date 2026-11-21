@@ -10,14 +10,14 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::{Arc, LazyLock};
 
 use regex::Regex;
-use ruff_python_ast::visitor::{walk_expr, Visitor};
 use ruff_python_ast::{Expr, ExprCall, Operator};
 use ruff_text_size::Ranged;
 use sqlty_sql::analyzer::{self, Nullability};
 
 use crate::analyses::Analyses;
-use crate::calls::{helper_calls, is_marked, Call};
+use crate::calls::{helper_calls_in, is_marked, Call};
 use crate::checker::{self, Diagnostic};
+use crate::facts::ModuleFacts;
 use crate::frozen::Table;
 use crate::index::HelperIndex;
 use crate::rewriter::ImportStyle;
@@ -203,63 +203,47 @@ struct Declared<'a> {
     span: (usize, usize),
 }
 
-struct DeclaredCalls<'a, 's> {
-    source: &'a Source,
-    wrapper: &'s str,
-    found: Vec<Declared<'a>>,
-}
-
-impl<'a> Visitor<'a> for DeclaredCalls<'a, '_> {
-    #[recursive::recursive]
-    fn visit_expr(&mut self, expr: &'a Expr) {
-        if let Expr::Call(call) = expr {
-            if let Some(found) = self.declared(call) {
-                self.found.push(found);
-            }
-        }
-        walk_expr(self, expr);
+/// The `SQL[R, P]("...")` call `call` is, if it is one.
+fn declared<'a>(source: &Source, wrapper: &str, call: &'a ExprCall) -> Option<Declared<'a>> {
+    let Expr::Subscript(func) = call.func.as_ref() else {
+        return None;
+    };
+    let Expr::Tuple(items) = func.slice.as_ref() else {
+        return None;
+    };
+    let [_, params] = items.elts.as_slice() else {
+        return None;
+    };
+    if dotted(&func.value).as_deref() != Some(wrapper) {
+        return None;
     }
-}
-
-impl<'a> DeclaredCalls<'a, '_> {
-    fn declared(&self, call: &'a ExprCall) -> Option<Declared<'a>> {
-        let Expr::Subscript(func) = call.func.as_ref() else {
-            return None;
-        };
-        let Expr::Tuple(items) = func.slice.as_ref() else {
-            return None;
-        };
-        let [_, params] = items.elts.as_slice() else {
-            return None;
-        };
-        if dotted(&func.value).as_deref() != Some(self.wrapper) {
-            return None;
-        }
-        let Some(Expr::StringLiteral(query)) = call.arguments.args.first() else {
-            return None;
-        };
-        Some(Declared {
-            line: self.source.line(call.start()),
-            params,
-            query: crate::parse::text(query, &self.source.text),
-            span: (call.start().to_usize(), call.end().to_usize()),
-        })
-    }
+    let Some(Expr::StringLiteral(query)) = call.arguments.args.first() else {
+        return None;
+    };
+    Some(Declared {
+        line: source.line(call.start()),
+        params,
+        query: crate::parse::text(query, &source.text),
+        span: (call.start().to_usize(), call.end().to_usize()),
+    })
 }
 
 /// Each `SQL[R, P]("...")` call, in source order.
-fn declared_params<'a>(source: &'a Source, wrapper: &str, import_line: &str) -> Vec<Declared<'a>> {
+fn declared_params<'a>(
+    facts: &ModuleFacts<'a>,
+    wrapper: &str,
+    import_line: &str,
+) -> Vec<Declared<'a>> {
+    let source = facts.source;
     if !may_wrap(&source.text, import_line) || !names_params(&source.text, wrapper) {
         return Vec::new();
     }
-    let mut calls = DeclaredCalls {
-        source,
-        wrapper,
-        found: Vec::new(),
-    };
-    calls.visit_body(source.body());
-    calls.found.sort_by_key(|call| call.span);
-    calls.found
+    let mut found: Vec<Declared<'a>> = facts
+        .calls()
+        .filter_map(|call| declared(source, wrapper, call))
+        .collect();
+    found.sort_by_key(|call| call.span);
+    found
 }
 
 /// `is_any`: whether `expr` is `typing.Any`, quoted or in `Annotated` too.
@@ -287,44 +271,6 @@ fn is_any(expr: &Expr, source: &Source) -> bool {
         }
         _ => source.typing_name(expr) == Some("Any"),
     }
-}
-
-/// `ParsedSource.literals`: the string literals that are not an operand of `+`.
-struct Literals<'a> {
-    source: &'a str,
-    operands: HashSet<usize>,
-    found: HashSet<String>,
-}
-
-impl<'a> Visitor<'a> for Literals<'a> {
-    #[recursive::recursive]
-    fn visit_expr(&mut self, expr: &'a Expr) {
-        match expr {
-            Expr::BinOp(op) if op.op == Operator::Add => {
-                self.operands.insert(op.left.start().to_usize());
-                self.operands.insert(op.right.start().to_usize());
-            }
-            Expr::StringLiteral(text) if !self.operands.contains(&expr.start().to_usize()) => {
-                self.found.insert(crate::parse::text(text, self.source));
-            }
-            Expr::FString(_) | Expr::TString(_) => {
-                self.found
-                    .extend(crate::unparse::constants(expr, self.source));
-            }
-            _ => {}
-        }
-        walk_expr(self, expr);
-    }
-}
-
-fn literals(source: &Source) -> HashSet<String> {
-    let mut visitor = Literals {
-        source: &source.text,
-        operands: HashSet::new(),
-        found: HashSet::new(),
-    };
-    visitor.visit_body(source.body());
-    visitor.found
 }
 
 const NUMBERS: [&str; 4] = ["int", "float", "bool", "decimal.Decimal"];
@@ -466,6 +412,7 @@ struct Module<'a, 'r> {
     run: &'r Run<'r>,
     ctx: Check<'a>,
     source: &'a Source,
+    facts: &'r ModuleFacts<'a>,
     /// Helper calls.
     found: Vec<Call<'a>>,
     driver_calls: Vec<Call<'a>>,
@@ -485,7 +432,7 @@ impl<'a> Module<'a, '_> {
     }
 
     fn params(&self, query: &str) -> Option<Vec<analyzer::Param>> {
-        analyzer::analyze_params(query, self.dialect(), self.run.settings.options.schema)
+        self.ctx.analyses.params(query)
     }
 
     /// The helper calls with a query, each with its row type as written.
@@ -499,10 +446,11 @@ impl<'a> Module<'a, '_> {
 
     /// Whether the engine reads `query` by its marker: a marked literal of the module.
     fn read_by_marker(&mut self, query: &str) -> bool {
+        let facts = self.facts;
         is_marked(query)
             && self
                 .literals
-                .get_or_insert_with(|| literals(self.source))
+                .get_or_insert_with(|| facts.literals())
                 .contains(query)
     }
 
@@ -1123,10 +1071,11 @@ pub fn sites(
     module: Option<&str>,
     variants: Option<usize>,
 ) -> Vec<Site> {
-    let calls = helper_calls(source, helpers, module, variants);
+    let facts = ModuleFacts::new(source);
+    let calls = helper_calls_in(&facts, helpers, module, variants);
     let mut read: Option<HashSet<String>> = None;
     let mut by_marker = |query: &str| {
-        is_marked(query) && read.get_or_insert_with(|| literals(source)).contains(query)
+        is_marked(query) && read.get_or_insert_with(|| facts.literals()).contains(query)
     };
     calls
         .into_iter()
@@ -1227,11 +1176,26 @@ pub fn unparsed(text: &str, run: &Run<'_>) -> Found {
 
 /// The byte offset of each `SQL[T](...)` call of `source` whose `T` is `typing.Any`.
 pub fn any_calls(source: &Source, style: &ImportStyle) -> Vec<usize> {
-    let (text, wrapper) = (&*source.text, style.wrapper_name.as_str());
-    if !text.contains("Any") || !may_wrap(text, &style.import_line) {
+    any_calls_in(&ModuleFacts::new(source), style)
+}
+
+fn any_calls_in(facts: &ModuleFacts<'_>, style: &ImportStyle) -> Vec<usize> {
+    let source = facts.source;
+    if !may_have_any_calls(&source.text, style) {
         return Vec::new();
     }
-    module::any_calls(source.body(), &source.aliases)
+    named_as_wrapper(
+        module::any_calls_among(facts.calls(), &source.aliases),
+        &style.wrapper_name,
+    )
+}
+
+fn may_have_any_calls(text: &str, style: &ImportStyle) -> bool {
+    text.contains("Any") && may_wrap(text, &style.import_line)
+}
+
+fn named_as_wrapper(calls: Vec<(usize, String)>, wrapper: &str) -> Vec<usize> {
+    calls
         .into_iter()
         .filter(|(_, name)| {
             name == wrapper
@@ -1254,21 +1218,22 @@ pub fn diagnostics(source: &Arc<Source>, run: &Run<'_>) -> Found {
     let settings = run.settings;
     let analyses = Analyses::new(settings.options);
     let (options, rules) = (settings.options, settings.rules);
+    let facts = ModuleFacts::new(source);
     let text = &*source.text;
     let wrapper = options.style.wrapper_name.as_str();
     let import_line = options.style.import_line.as_str();
 
     let mut base = Vec::new();
     if may_need_lexing(text, wrapper) {
-        let any_calls = any_calls(source, &options.style);
+        let any_calls = any_calls_in(&facts, &options.style);
         base = checker::check_source_with(text, options, rules, &any_calls, &analyses);
         checker::add_fix_imports(text, options, &mut base);
     }
 
-    let mut found = helper_calls(source, run.helpers, run.settings.module, run.variants);
+    let mut found = helper_calls_in(&facts, run.helpers, run.settings.module, run.variants);
     let mut driver_calls: Vec<Call<'_>> = Vec::new();
     if drivers::may_hold(text) {
-        for call in drivers::find(text, source.body(), &source.imports) {
+        for call in drivers::find_in(text, source.body(), &source.imports, facts.scan()) {
             driver_calls.push(Call {
                 line: call.line,
                 query: Some(call.query),
@@ -1288,7 +1253,7 @@ pub fn diagnostics(source: &Arc<Source>, run: &Run<'_>) -> Found {
         }
     }
     if MARKED_TEMPLATE.is_match(text) {
-        for template in templates::of(text, source.body(), &source.imports) {
+        for template in templates::of_in(text, &source.imports, facts.scan()) {
             let Some(query) = template.query.filter(|query| is_marked(query)) else {
                 continue;
             };
@@ -1370,7 +1335,7 @@ pub fn diagnostics(source: &Arc<Source>, run: &Run<'_>) -> Found {
     } else {
         Vec::new()
     };
-    let declared = declared_params(source, wrapper, import_line);
+    let declared = declared_params(&facts, wrapper, import_line);
     let mut out = Found {
         diagnostics: base
             .into_iter()
@@ -1414,6 +1379,7 @@ pub fn diagnostics(source: &Arc<Source>, run: &Run<'_>) -> Found {
         run,
         ctx: Check::new(source, settings, queries, named, &names, analyses),
         source,
+        facts: &facts,
         found,
         driver_calls,
         declared,
@@ -1446,9 +1412,18 @@ pub fn diagnostics(source: &Arc<Source>, run: &Run<'_>) -> Found {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
+    use crate::analyses::{ANALYZED, PARSED};
     use crate::options::Options;
 
     fn crash(text: &str, rules: &[(&str, &str)]) -> Vec<Diagnostic> {
+        run_module(text, rules, false)
+            .diagnostics
+            .into_iter()
+            .map(|reported| reported.diagnostic)
+            .collect()
+    }
+
+    fn run_module(text: &str, rules: &[(&str, &str)], parsed: bool) -> Found {
         let options = Options::new("postgres", None, None, false).unwrap();
         let rules = RuleConfig::from_overrides(Some(
             rules
@@ -1468,16 +1443,94 @@ mod tests {
         let lint = |_: &str| -> Vec<Lint> { panic!("lint {}", 1) };
         let run = Run {
             settings: &settings,
+            has_schema: parsed,
+            lint: &lint,
+            helpers: None,
+            variants: None,
+        };
+        let source = parsed
+            .then(|| Source::new(text, (3, 14)).map(Arc::new))
+            .flatten();
+        module(text, source.as_ref(), &run)
+    }
+
+    fn counted(text: &str) -> (usize, usize) {
+        ANALYZED.with(|count| count.set(0));
+        PARSED.with(|count| count.set(0));
+        run_module(text, &[("param-count-mismatch", "error")], true);
+        (
+            ANALYZED.with(std::cell::Cell::get),
+            PARSED.with(std::cell::Cell::get),
+        )
+    }
+
+    #[test]
+    fn a_driver_call_and_a_string_share_one_parse_and_one_analysis() {
+        let text = concat!(
+            "import psycopg\n",
+            "conn = psycopg.connect('')\n",
+            "cur = conn.cursor()\n",
+            "cur.execute('--sql\\nSELECT $1::int AS x', (1,))\n",
+            "q = '--sql\\nSELECT $1::int AS x'\n",
+        );
+        assert_eq!(counted(text), (1, 1));
+    }
+
+    #[test]
+    fn a_driver_call_alone_is_neither_analyzed_nor_parsed_as_written() {
+        let text = concat!(
+            "import psycopg\n",
+            "conn = psycopg.connect('')\n",
+            "cur = conn.cursor()\n",
+            "cur.execute('SELECT $1::int AS x', (1,))\n",
+            "cur.execute('SELECT $1::int AS x', (2,))\n",
+            "cur.execute('SELECT %s::int AS y', (3,))\n",
+        );
+        assert_eq!(counted(text), (0, 0));
+    }
+
+    fn walks(text: &str) -> usize {
+        let options = Options::new("postgres", None, None, false).unwrap();
+        let rules = RuleConfig::from_overrides(None).unwrap();
+        let coerce = HashSet::new();
+        let settings = Settings {
+            options: &options,
+            rules: &rules,
+            index: None,
+            module: None,
+            coerce: &coerce,
+        };
+        let lint = |_: &str| -> Vec<Lint> { Vec::new() };
+        let run = Run {
+            settings: &settings,
             has_schema: false,
             lint: &lint,
             helpers: None,
             variants: None,
         };
-        module(text, None, &run)
-            .diagnostics
-            .into_iter()
-            .map(|reported| reported.diagnostic)
-            .collect()
+        let source = Arc::new(Source::new(text, (3, 14)).unwrap());
+        crate::scopes::WALKS.with(|count| count.set(0));
+        diagnostics(&source, &run);
+        crate::scopes::WALKS.with(std::cell::Cell::get)
+    }
+
+    #[test]
+    fn a_module_is_walked_once_for_every_check() {
+        let text = "import psycopg\nfrom typing import Annotated, Any\n\
+                    from sqlty import SQL, SQL as S\n\
+                    def q(sql: Annotated[str, SQL]): ...\n\
+                    def run(cursor, x):\n\
+                    \x20   q('--sql\\nSELECT 1')\n\
+                    \x20   cursor.execute('--sql\\nSELECT %s', (x,))\n\
+                    t = t'--sql\\nSELECT {1}'\n\
+                    a = SQL[tuple[int], tuple[int]]('--sql\\nSELECT $1::int')\n\
+                    b = SQL[Any]('--sql\\nSELECT 1')\n";
+        assert_eq!(walks(text), 1);
+    }
+
+    #[test]
+    fn a_module_the_prefilters_reject_is_not_walked() {
+        assert_eq!(walks("x = 1\nprint(x)\n"), 0);
     }
 
     #[test]
