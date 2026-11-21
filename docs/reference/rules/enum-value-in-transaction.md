@@ -28,7 +28,7 @@ SET lock_timeout = '2s';
 BEGIN;
 ALTER TYPE order_status ADD VALUE 'refunded';
 -- error: [enum-value-in-transaction] "'refunded' was added to `order_status` in this transaction: PostgreSQL refuses a new enum value until the transaction that added it commits, so `COMMIT` after `ADD VALUE`"
-UPDATE orders SET status = 'refunded' WHERE refunded_at IS NOT NULL;
+UPDATE orders SET status = 'refunded' WHERE id IN (SELECT id FROM orders WHERE refunded_at IS NOT NULL LIMIT 5000);
 COMMIT;
 ```
 
@@ -48,7 +48,7 @@ BEGIN;
 ALTER TYPE order_status ADD VALUE 'refunded';
 COMMIT;
 -- error:
-UPDATE orders SET status = 'refunded' WHERE refunded_at IS NOT NULL;
+UPDATE orders SET status = 'refunded' WHERE id IN (SELECT id FROM orders WHERE refunded_at IS NOT NULL LIMIT 5000);
 ```
 
 ## Configuration

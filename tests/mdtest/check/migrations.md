@@ -145,3 +145,56 @@ ALTER TABLE events_11 VALIDATE CONSTRAINT events_11_at;
 -- error: [constraint-scan] "`ATTACH PARTITION` scans `events_11`"
 ALTER TABLE events ATTACH PARTITION events_11 FOR VALUES FROM ('2026-11-01') TO ('2026-12-01');
 ```
+
+## Rows pinned by key are not a backfill
+
+```sql migration
+SET lock_timeout = '1s';
+-- error:
+UPDATE users SET email = 'a@example.com' WHERE id = 1;
+DELETE FROM users WHERE id IN (2, 3);
+```
+
+## Locks that let writes go on
+
+```sql migration
+BEGIN;
+SET LOCAL lock_timeout = '1s';
+-- error:
+LOCK TABLE users IN ACCESS SHARE MODE;
+ALTER TABLE events SET (fillfactor = 70);
+CREATE TEMP TABLE ids (id BIGINT);
+INSERT INTO ids SELECT id FROM users;
+UPDATE ids SET id = id + 1;
+COMMIT;
+```
+
+## Attaching a partition locks the partition
+
+```sql migration
+BEGIN;
+SET LOCAL lock_timeout = '1s';
+-- error: [constraint-scan] "`ATTACH PARTITION` scans `events_09`"
+ALTER TABLE events ATTACH PARTITION events_09 FOR VALUES FROM ('2026-09-01') TO ('2026-10-01');
+-- error: [locked-backfill] "locks `events_09` against writes"
+UPDATE events_09 SET at = at WHERE at BETWEEN '2026-09-01' AND '2026-09-02';
+COMMIT;
+```
+
+## A pinned key in one branch of OR bounds nothing
+
+```sql migration
+SET lock_timeout = '1s';
+-- error: [unbatched-backfill]
+UPDATE users SET email = '' WHERE id = 1 OR email IS NULL;
+```
+
+## A statement that needs two tables at once
+
+```sql migration
+BEGIN;
+SET LOCAL lock_timeout = '1s';
+-- error:
+LOCK TABLE users, events;
+COMMIT;
+```
