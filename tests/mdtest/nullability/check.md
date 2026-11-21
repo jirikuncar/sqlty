@@ -829,6 +829,7 @@ else:
     OwnerId = int
 
 Tried = NewType("Tried", int)
+Low = High = Tried(0)
 
 class Row(NamedTuple):
     id: int
