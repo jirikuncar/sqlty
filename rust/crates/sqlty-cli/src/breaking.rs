@@ -1366,6 +1366,39 @@ mod tests {
     }
 
     #[test]
+    fn a_snapshot_saved_before_databases_were_recorded_knows_the_default_one() {
+        let root = project(
+            "unrecorded",
+            &[
+                ("pyproject.toml", "[tool.sqlty]\nschema = \"migrations/\"\n"),
+                ("migrations/0001.sql", EVENTS),
+            ],
+        );
+        let path = root.with_extension("json");
+        let saved = snapshot::save(&mut open(&root)).expect("saves");
+        let mut data: serde_json::Value = serde_json::from_str(&saved).expect("parses");
+        let removed = data
+            .as_object_mut()
+            .and_then(|data| data.remove("databases"));
+        assert!(removed.is_some());
+        std::fs::write(&path, data.to_string()).expect("writes");
+        let paths = [PathBuf::from(".")];
+        let mut old = Snapshot::load(&path, &path, "old", &paths, (3, 14)).expect("loads");
+        std::fs::write(root.join("migrations/0002.sql"), INDEX).expect("writes");
+        let sets = migration_sets(&mut open(&root)).expect("reads");
+        let own = &sets[0].settings;
+        let named = old.database(Path::new("."), "events", own);
+        assert!(named.expect("reads").key.0.is_none());
+        let found = judged(migrations("old", &sets, &mut old).expect("judges"));
+        assert_eq!(
+            found,
+            [(PathBuf::from("migrations/0002.sql"), "missing-concurrently")]
+        );
+        std::fs::remove_dir_all(&root).expect("removes");
+        std::fs::remove_file(&path).expect("removes");
+    }
+
+    #[test]
     fn a_database_the_baseline_lacks_has_no_migrations_to_judge() {
         let root = project(
             "lacks",
@@ -1464,6 +1497,18 @@ mod tests {
             (
                 &format!(r#""schemas":[],"settings":[],"directories":{{}},{file}"#),
                 "invalid settings index",
+            ),
+            (
+                r#""schemas":[],"settings":[],"directories":{},"databases":[]"#,
+                "invalid databases",
+            ),
+            (
+                r#""schemas":[],"settings":[],"directories":{},"databases":{".":[]}"#,
+                "invalid databases",
+            ),
+            (
+                r#""schemas":[],"settings":[],"directories":{},"databases":{".":{"default":0}}"#,
+                "invalid schema index",
             ),
         ] {
             std::fs::write(&path, format!(r#"{{"sqlty":1,{body}}}"#)).expect("writes");

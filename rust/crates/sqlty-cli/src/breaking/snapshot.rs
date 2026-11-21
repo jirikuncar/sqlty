@@ -15,7 +15,7 @@ use sqlty_python::index::HelperIndex;
 use sqlty_python::queries::Format;
 use sqlty_python::rules::RuleConfig;
 use sqlty_python::types::stdlib::Version;
-use sqlty_sql::analyzer::Schema;
+use sqlty_sql::analyzer::{self, Schema};
 
 use super::{configured, index_of, Against, File, Queries, Revision, Schemas};
 
@@ -27,8 +27,9 @@ pub struct Snapshot {
     pub label: String,
     schemas: Vec<(Arc<str>, &'static str, super::Types)>,
     directories: HashMap<String, Option<usize>>,
-    /// The schema of each database of the configuration of each directory.
-    databases: HashMap<String, HashMap<String, usize>>,
+    /// The schema of each database of the configuration of each directory; `None` in a
+    /// snapshot saved before they were recorded.
+    databases: Option<HashMap<String, HashMap<String, usize>>>,
     files: Vec<File>,
     /// The index in `files` of each relative path.
     paths: HashMap<PathBuf, usize>,
@@ -195,7 +196,7 @@ impl Snapshot {
             label: label.to_string(),
             schemas: Vec::new(),
             directories: HashMap::new(),
-            databases: HashMap::new(),
+            databases: None,
             files: Vec::new(),
             paths: HashMap::new(),
             loaded: HashMap::new(),
@@ -281,16 +282,19 @@ impl Snapshot {
             let schema = schema_index(Some(schema))?;
             snapshot.directories.insert(name.clone(), schema);
         }
-        // Snapshots saved before databases were recorded have none.
-        let databases = data.get("databases").map(Value::as_object);
-        for (name, named) in databases.flatten().into_iter().flatten() {
-            let named = named.as_object().ok_or_else(|| invalid("databases"))?;
-            let mut schemas = HashMap::new();
-            for (database, schema) in named {
-                let schema = position(schema, count).ok_or_else(|| invalid("schema index"))?;
-                schemas.insert(database.clone(), schema);
+        if let Some(databases) = data.get("databases") {
+            let databases = databases.as_object().ok_or_else(|| invalid("databases"))?;
+            let mut recorded = HashMap::new();
+            for (name, named) in databases {
+                let named = named.as_object().ok_or_else(|| invalid("databases"))?;
+                let mut schemas = HashMap::new();
+                for (database, schema) in named {
+                    let schema = position(schema, count).ok_or_else(|| invalid("schema index"))?;
+                    schemas.insert(database.clone(), schema);
+                }
+                recorded.insert(name.clone(), schemas);
             }
-            snapshot.databases.insert(name.clone(), schemas);
+            snapshot.databases = Some(recorded);
         }
         for (name, file) in get("files")?.as_object().ok_or_else(|| invalid("files"))? {
             let relative = PathBuf::from(name);
@@ -415,7 +419,8 @@ impl Schemas for Snapshot {
     }
 
     /// The schema the snapshot recorded for the database `name` of the configuration of
-    /// `directory`, or of the nearest directory it recorded above.
+    /// `directory`, or of the nearest directory it recorded above. A snapshot saved
+    /// before databases were recorded knows the project's own only, as its directory's.
     fn database(
         &mut self,
         directory: &Path,
@@ -423,7 +428,13 @@ impl Schemas for Snapshot {
         own: &FileSettings,
     ) -> Result<Against, String> {
         let probe = directory.join("_");
-        let named = super::parents(&probe).find_map(|at| self.databases.get(&posix(at)));
+        let Some(databases) = &self.databases else {
+            return match name == analyzer::DEFAULT {
+                true => self.against(&probe, own),
+                false => Ok(Against::none(own)),
+            };
+        };
+        let named = super::parents(&probe).find_map(|at| databases.get(&posix(at)));
         let index = named.and_then(|named| named.get(name)).copied();
         self.against_schema(index, own)
     }
