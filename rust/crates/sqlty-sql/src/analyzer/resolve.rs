@@ -178,17 +178,13 @@ impl<'a> Analyzer<'a> {
 
     /// A column of one source, when it has it.
     fn find_column(&self, table: &str, column: &str) -> Option<ColumnRef<'_>> {
-        if let Some(columns) = self.virtual_columns(table) {
-            return columns
-                .iter()
-                .find(|col| self.same_column(&col.name, column))
-                .map(|column| ColumnRef::Virtual {
-                    column,
-                    local: self.virtuals.contains_key(table),
-                });
+        if let Some(found) = self.virtual_column(table, column) {
+            return found.map(|column| ColumnRef::Virtual {
+                column,
+                local: self.virtuals.contains_key(table),
+            });
         }
-        let columns = self.schema.table(table)?;
-        match columns.iter().find(|col| col.name == column) {
+        match self.schema.column(table, column)? {
             Some(col) => Some(ColumnRef::Schema(col)),
             None => self.system_column(column).map(ColumnRef::System),
         }
@@ -552,12 +548,10 @@ impl<'a> Analyzer<'a> {
         }
         // Columns of a source that is itself unknown are explained where it is declared.
         let unreadable = candidates.iter().any(|source| {
-            source.table.named().is_none_or(|table| {
-                !self.knows_table(table)
-                    || self
-                        .virtual_columns(table)
-                        .is_some_and(|columns| columns.iter().any(Column::is_unknown_star))
-            })
+            source
+                .table
+                .named()
+                .is_none_or(|table| !self.knows_table(table) || self.has_unknown_star(table))
         });
         if unreadable {
             return self.diag.explain_silently();
@@ -778,10 +772,11 @@ impl<'a> Analyzer<'a> {
         {
             return self.diag.explain_silently();
         }
-        if tables.iter().filter_map(Table::named).any(|table| {
-            self.virtual_columns(table)
-                .is_some_and(|columns| columns.iter().any(Column::is_unknown_star))
-        }) {
+        if tables
+            .iter()
+            .filter_map(Table::named)
+            .any(|table| self.has_unknown_star(table))
+        {
             return self.explain_view_star(reference.as_deref(), scope);
         }
         self.diag.record(

@@ -213,8 +213,9 @@ make bench-codspeed   # benchmarks/test_benchmarks.py, as CI's CodSpeed job meas
   the budget rules.
 - `bench-rust` covers catalog load (50 to 5000 tables with functions), the
   analyzer per query kind, `check_source`/`rewrite_source` on 1k/4k queries,
-  name-index prefix lookups and `complete` at 50, 540 and 5000 tables, and
-  `query_at` in a module of 4000 queries. Use it to find where time goes and to
+  name-index prefix lookups and `complete` at 50, 540 and 5000 tables,
+  `query_at` in a module of 4000 queries, and the check of one query by size
+  (`one_query`). Use it to find where time goes and to
   compare a branch (`ARGS="--save-baseline main"`, then `ARGS="--baseline main"`).
 - `bench-codspeed` runs each query kind of `synth.KINDS` through
   `analyze_select`/`analyze_params`, the schema load, `rewrite_source`,
@@ -237,7 +238,6 @@ src/sqlty/
 ├── _core.pyi            # Stub for sqlty._core (rust/crates/sqlty-ext/src/lib.rs)
 ├── _cli.py              # `sqlty` entry point: runs the Rust CLI, reports crashes
 ├── _config.py           # Configuration from sqlty.toml, pyproject.toml or Cargo.toml
-├── _check.py            # Calls the Rust checks for check_source
 ├── _lint.py             # Lint rules and the Diagnostic type
 ├── _decode.py           # Magic codec decoder
 ├── magic.py             # Magic codec registration
@@ -313,7 +313,7 @@ The version is pinned only in the `Makefile` (`ZENSICAL`); CI runs `make docs`.
 ```bash
 make docs           # strict build into site/ (fails on broken links or anchors)
 make docs-serve     # live preview at http://localhost:8000/sqlty/
-make generate-docs  # regenerate the tables of configuration.md and cli.md
+make generate-docs  # regenerate the tables of configuration.md, cli.md and rules.md
 make lint-docs      # rumdl and Vale on the docs
 ```
 

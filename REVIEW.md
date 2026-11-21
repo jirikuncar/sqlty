@@ -29,8 +29,7 @@ Style, naming and refactoring suggestions are Nit at most.
 - New features and behavior changes have an mdtest in `tests/mdtest/`;
   user-visible behavior is also documented in `docs/`.
 - New lint rules have a page in `docs/reference/rules/` with its front matter (the only place
-  its name, severity, group and summary are written) and a row in
-  `docs/reference/rules.md`.
+  its name, severity, group and summary are written).
 - A new lint rule is on by default, per [Lint rule defaults](CONTRIBUTING.md#lint-rule-defaults);
   one that ships off names on its rule page the rule or workflow it conflicts with.
 - Test SQL uses `--sql\n`, never `--sql ` followed by a space.
@@ -106,7 +105,7 @@ Style, naming and refactoring suggestions are Nit at most.
 - **Performance claims** come with numbers from `make bench-ci`, `bench-rust` or a
   script in the PR, against the merge base, same machine, and identical output.
 - **Public surface**: new API in `sqlty.core.__all__` and
-  `docs/reference/python-api.md`; new config keys in `KEY_DOCS` and the playground
+  `docs/reference/python-api.md`; new config keys in `KEY_DOCS` (`scripts/generate_docs.py`) and the playground
   and VS Code settings; generated docs current (`make generate-docs`).
 
 ## Do not report

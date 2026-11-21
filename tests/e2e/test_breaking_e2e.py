@@ -524,3 +524,62 @@ def test_query_files_are_compared_in_both_directions(cli: Cli, repo: Path) -> No
             "sql/users.sql:2: [unknown-column] column `handle` does not exist in `users`",
             "Found 2 breaking change(s)",
         ]
+
+
+@pytest.fixture
+def migrations(tmp_path: Path) -> Path:
+    """A repository whose schema is a directory of migrations, the second adding an index."""
+    repo = tmp_path / "repo"
+    (repo / "app").mkdir(parents=True)
+    (repo / "migrations").mkdir()
+    git(repo, "init", "-q")
+    git(repo, "config", "user.email", "test@example.com")
+    git(repo, "config", "user.name", "test")
+    (repo / "pyproject.toml").write_text('[tool.sqlty]\nschema = "migrations/"\n')
+    (repo / "migrations" / "0001_users.sql").write_text(OLD_SCHEMA)
+    (repo / "app" / "q.py").write_text(OLD_CODE)
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "users")
+    (repo / "migrations" / "0002_index.sql").write_text(
+        "SET lock_timeout = '2s';\nCREATE INDEX users_email ON users (email);\n"
+    )
+    return repo
+
+
+def test_new_migration_statements_are_judged(cli: Cli, migrations: Path) -> None:
+    result = cli(["breaking", "--against", "HEAD"], {"cwd": migrations})
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert lines(result) == [
+        "migrations/0002_index.sql:2: [missing-concurrently] `CREATE INDEX` blocks writes to"
+        " `users` until the index is built: create it `CONCURRENTLY` (migration: a statement"
+        " the working tree runs that HEAD does not have)",
+        "Found 1 breaking change(s)",
+    ]
+
+    found = cli(["breaking", "--against", "HEAD", "--output-format", "json"], {"cwd": migrations})
+    [row] = json.loads(found.stdout)
+    assert (row["file"], row["direction"], row["against"]) == (
+        "migrations/0002_index.sql",
+        "migration",
+        "HEAD",
+    )
+
+
+def test_migrations_are_judged_only_for_postgres(cli: Cli, migrations: Path) -> None:
+    (migrations / "pyproject.toml").write_text(
+        '[tool.sqlty]\nschema = "migrations/"\ndialect = "sqlite"\n'
+    )
+
+    result = cli(["breaking", "--against", "HEAD"], {"cwd": migrations})
+
+    assert "missing-concurrently" not in result.stdout, result.stdout + result.stderr
+
+
+def test_a_baseline_with_the_same_schema_has_no_new_statements(cli: Cli, migrations: Path) -> None:
+    git(migrations, "add", "-A")
+    git(migrations, "commit", "-q", "-m", "index")
+
+    result = cli(["breaking", "--against", "HEAD"], {"cwd": migrations})
+
+    assert result.returncode == 0, result.stdout + result.stderr

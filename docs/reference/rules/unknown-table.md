@@ -1,9 +1,9 @@
 ---
-order: 240
+order: 180
 group: "names"
 severity: "error"
 fixable: false
-summary: "Query reads a table that the schema does not define"
+summary: "Table the schema does not define"
 origin: "SQL"
 ---
 

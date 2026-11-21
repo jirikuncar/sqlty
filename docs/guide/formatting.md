@@ -1,4 +1,5 @@
 ---
+title: "Format SQL strings in Python"
 description: How to format SQL query strings inside Python files with sqlty format, using sqruff layout rules in your project's dialect, in place or as a diff.
 ---
 

@@ -26,7 +26,8 @@ QUERIES = {
 SOURCE = "\n".join(
     f'q_{name}_{n} = "--sql\\n{sql} -- {n}"' for n in range(5) for name, sql in QUERIES.items()
 )
-REWRITTEN = core.rewrite_source(SOURCE, schema_sql=SCHEMA)
+SETTINGS = core.Settings(schema_sql=SCHEMA)
+REWRITTEN = core.rewrite_source(SOURCE, SETTINGS)
 
 
 @pytest.mark.parametrize("sql", QUERIES.values(), ids=QUERIES.keys())
@@ -44,7 +45,7 @@ def test_load_schema(benchmark: BenchmarkFixture) -> None:
 
 
 def test_rewrite_source(benchmark: BenchmarkFixture) -> None:
-    assert benchmark(core.rewrite_source, SOURCE, schema_sql=SCHEMA) == REWRITTEN
+    assert benchmark(core.rewrite_source, SOURCE, SETTINGS) == REWRITTEN
 
 
 def test_strip_source(benchmark: BenchmarkFixture) -> None:
@@ -52,7 +53,7 @@ def test_strip_source(benchmark: BenchmarkFixture) -> None:
 
 
 def test_check_source(benchmark: BenchmarkFixture) -> None:
-    assert benchmark(core.check_source, REWRITTEN, schema_sql=SCHEMA) == []
+    assert benchmark(core.check_source, REWRITTEN, SETTINGS) == []
 
 
 BRANCHED = (
@@ -67,7 +68,10 @@ BRANCHED = (
 
 
 def test_check_source_query_variants(benchmark: BenchmarkFixture) -> None:
-    assert benchmark(core.check_source, BRANCHED, schema_sql=SCHEMA, query_variants=128) == []
+    assert (
+        benchmark(core.check_source, BRANCHED, core.Settings(schema_sql=SCHEMA, query_variants=128))
+        == []
+    )
 
 
 # Completion per keystroke must not grow with the schema: each operation is measured at
@@ -88,9 +92,8 @@ CURSORS = {"relation_prefix": "t004", "alias_columns": "a.", "columns_in_scope":
 def test_complete_source(benchmark: BenchmarkFixture, operation: str, tables: int) -> None:
     source = COMPLETIONS[operation]
     column = source.index(CURSORS[operation]) + len(CURSORS[operation]) + 1
-    found = benchmark(
-        core.complete_source, source, 1, column, schema_sql=COMPLETION_SCHEMAS[tables]
-    )
+    settings = core.Settings(schema_sql=COMPLETION_SCHEMAS[tables])
+    found = benchmark(core.complete_source, source, 1, column, settings)
     assert found is not None and found.items
 
 

@@ -105,6 +105,8 @@ class Unit:
     lang: Literal["python", "sql"]
     lines: list[tuple[int, str]]  # (md line, text), assertion comments removed
     assertions: list[Assertion]
+    # A ```` ```sql migration ```` block: a migration run on top of `against.sql`.
+    migration: bool = False
 
     @property
     def code(self) -> Code:
@@ -193,7 +195,7 @@ def parse(path: Path, text: str | None = None) -> list[Section]:
                 raise fail(lineno, "unclosed code block")
             body = lines[i + 1 : end]
             if not indent and "ignore" not in info.split():
-                _add_block(stack[-1], lang, label, body, lineno + 1, fail)
+                _add_block(stack[-1], lang, label, body, lineno + 1, fail, info.split())
             label = None
             i = end + 1
             continue
@@ -238,7 +240,13 @@ def _closing_fence(lines: list[str], start: int, indent: str, marker: str) -> in
 
 
 def _add_block(
-    section: Section, lang: str, label: str | None, body: list[str], start: int, fail: Fail
+    section: Section,
+    lang: str,
+    label: str | None,
+    body: list[str],
+    start: int,
+    fail: Fail,
+    tags: list[str],
 ) -> None:
     lang = {"py": "python"}.get(lang, lang)
     content = "\n".join(body)
@@ -249,7 +257,7 @@ def _add_block(
     elif lang == "python":
         _add_python(section, body, start, fail)
     elif lang == "sql":
-        _add_sql(section, body, start)
+        _add_sql(section, body, start, migration="migration" in tags)
 
 
 def _add_python(section: Section, body: list[str], start: int, fail: Fail) -> None:
@@ -297,7 +305,7 @@ def _add_python(section: Section, body: list[str], start: int, fail: Fail) -> No
     section.setup = []
 
 
-def _add_sql(section: Section, body: list[str], start: int) -> None:
+def _add_sql(section: Section, body: list[str], start: int, *, migration: bool = False) -> None:
     lines: list[tuple[int, str]] = []
     assertions: list[Assertion] = []
     pending: list[Assertion] = []
@@ -321,7 +329,7 @@ def _add_sql(section: Section, body: list[str], start: int) -> None:
                 pending.clear()
             lines.append((start + offset, text))
     if assertions:
-        section.units.append(Unit("sql", lines, assertions))
+        section.units.append(Unit("sql", lines, assertions, migration=migration))
 
 
 def _append(assertions: list[Assertion], new: Assertion) -> None:
@@ -340,7 +348,7 @@ def _append(assertions: list[Assertion], new: Assertion) -> None:
 
 
 def _parse_config(content: str, line: int, fail: Fail) -> dict[str, Any]:
-    from sqlty._config import ConfigError, validate_tool_table
+    from sqlty import _core
 
     try:
         config = tomllib.loads(content)
@@ -353,8 +361,8 @@ def _parse_config(content: str, line: int, fail: Fail) -> dict[str, Any]:
         raise fail(line, "[project] takes only requires-python")
     settings = tool["sqlty"]
     try:
-        validate_tool_table(settings, "config")
-    except ConfigError as e:
+        _core.validate_config(settings, "config")
+    except ValueError as e:
         raise fail(line, str(e).removeprefix("config: ")) from None
     return config
 

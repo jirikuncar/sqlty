@@ -32,7 +32,7 @@ use sqlty_sql::analyzer::Schema;
 
 use crate::{
     github_annotation, json_diagnostic, pretty, report_unreadable, sarif_log, warn_all, Breaking,
-    Host, OutputFormat, EXIT_FOUND,
+    Host, Lines, OutputFormat, EXIT_FOUND,
 };
 
 mod snapshot;
@@ -80,6 +80,9 @@ pub enum Direction {
     Forward,
     /// Both.
     Both,
+    /// The new statements of the migrations of the head, whatever the direction.
+    #[value(skip)]
+    Migration,
 }
 
 impl Direction {
@@ -92,10 +95,11 @@ impl Direction {
         }
     }
 
-    /// The name of a finding's direction: backward or forward, never both.
+    /// The name of a finding's direction: backward, forward or migration, never both.
     fn name(self) -> &'static str {
         match self {
             Self::Forward => "forward",
+            Self::Migration => "migration",
             _ => "backward",
         }
     }
@@ -111,7 +115,7 @@ impl Direction {
 
 /// What a schema change breaks in one file.
 pub struct Finding {
-    /// [`Direction::Backward`] or [`Direction::Forward`].
+    /// [`Direction::Backward`], [`Direction::Forward`] or [`Direction::Migration`].
     pub direction: Direction,
     /// The label of the baseline.
     pub against: String,
@@ -144,8 +148,8 @@ pub type Types = Vec<(String, String)>;
 type Key = (Option<Arc<str>>, &'static str, Types);
 
 fn key_of(settings: &FileSettings) -> Key {
-    let (sql, dialect, types) = settings.schema_key();
-    (sql.map(Arc::from), dialect, types.to_vec())
+    let (_, dialect, types) = settings.schema_key();
+    (settings.schema_sql.clone(), dialect, types.to_vec())
 }
 
 /// The schema another revision gives a file.
@@ -481,6 +485,65 @@ pub fn compare(
         .collect())
 }
 
+/// What the new statements of the PostgreSQL schema files of `head` lock, against the
+/// schema `schemas` gives each of its files and `paths`.
+fn migrations(
+    against: &str,
+    paths: &[PathBuf],
+    head: &mut Revision<Workspace>,
+    schemas: &mut dyn Schemas,
+) -> Result<Vec<Finding>, String> {
+    let mut checked: Vec<(PathBuf, Arc<FileSettings>)> = head
+        .files()?
+        .into_iter()
+        .map(|file| (file.relative, file.settings))
+        .collect();
+    for path in paths {
+        let relative = path.join("_");
+        let settings = head.workspace.settings(&head.root.join(&relative))?;
+        checked.push((relative, settings));
+    }
+    let disk = Shared(Arc::new(sqlty_project::Disk));
+    // Few configurations, and one shares its texts: equal `Arc`s compare by pointer.
+    let mut seen: Vec<(Arc<FileSettings>, Arc<str>)> = Vec::new();
+    let mut findings = Vec::new();
+    for (relative, own) in checked {
+        let baseline = schemas.against(&relative, &own)?.key.0;
+        let Some(baseline) = baseline.filter(|_| own.dialect == "postgres") else {
+            continue;
+        };
+        let judged = |(other, sql): &(Arc<FileSettings>, Arc<str>)| {
+            other.schema_files == own.schema_files && other.rules == own.rules && *sql == baseline
+        };
+        if seen.iter().any(judged) {
+            continue;
+        }
+        seen.push((Arc::clone(&own), Arc::clone(&baseline)));
+        if Some(&baseline) == own.schema_sql.as_ref() {
+            continue;
+        }
+        let texts: Vec<String> = own
+            .schema_files
+            .iter()
+            .map(|path| disk.text(path).unwrap_or_default())
+            .collect();
+        let sources: Vec<&str> = texts.iter().map(String::as_str).collect();
+        let rules = Checker::of(&own, None).rules;
+        let found = sqlty_python::migrations::check_migrations(&baseline, &sources, &rules);
+        for ((path, text), found) in own.schema_files.iter().zip(texts.iter()).zip(found) {
+            let text: Arc<str> = Arc::from(text.as_str());
+            findings.extend(found.into_iter().map(|diagnostic| Finding {
+                direction: Direction::Migration,
+                against: against.to_string(),
+                path: relative_to(path, &head.root),
+                diagnostic,
+                text: Arc::clone(&text),
+            }));
+        }
+    }
+    Ok(findings)
+}
+
 /// The helpers of `files`, with the `functions` of `settings` found among them.
 pub(crate) fn index_of(files: &[File], version: Version) -> Arc<HelperIndex> {
     let mut builder = Builder::new(version);
@@ -607,6 +670,7 @@ pub fn run(host: &mut dyn Host, args: &Args) -> Result<i32, String> {
                 version,
             )?);
         }
+        findings.extend(migrations(&label, &paths, &mut head, baseline.schemas())?);
     }
     warn_all(host, &head.workspace);
     for baseline in &baselines {
@@ -633,6 +697,10 @@ fn report(host: &mut dyn Host, findings: &[Finding], head: &str, format: OutputF
                 "the queries of {} against the schema of {head}",
                 finding.against
             ),
+            Direction::Migration => format!(
+                "a statement {head} runs that {} does not have",
+                finding.against
+            ),
             _ => format!(
                 "the queries of {head} against the schema of {}",
                 finding.against
@@ -646,11 +714,14 @@ fn report(host: &mut dyn Host, findings: &[Finding], head: &str, format: OutputF
     };
     match format {
         OutputFormat::Json | OutputFormat::Sarif => {
+            let mut lines = HashMap::new();
             let rows: Vec<_> = findings
                 .iter()
                 .map(|finding| {
-                    let mut row =
-                        json_diagnostic(&finding.path, &finding.diagnostic, &finding.text);
+                    let lines = lines
+                        .entry(finding.text.as_ptr())
+                        .or_insert_with(|| Lines::new(&finding.text));
+                    let mut row = json_diagnostic(&finding.path, &finding.diagnostic, lines);
                     if format == OutputFormat::Sarif {
                         row.message = message(finding);
                     }
@@ -980,6 +1051,18 @@ mod tests {
             sql: Arc::from(sql),
             loaded: HashMap::new(),
         }
+    }
+
+    #[test]
+    fn a_schema_key_shares_the_schema_text() {
+        let config = ("pyproject.toml", "[tool.sqlty]\nschema = \"schema.sql\"\n");
+        let root = project("shared", &[config, ("schema.sql", NEW_SCHEMA)]);
+        let settings = open(&root).workspace.settings(&root.join("q.py"));
+        let settings = settings.expect("reads");
+        let text = settings.schema_sql.as_ref().expect("a schema");
+        let key = key_of(&settings).0.expect("a schema");
+        assert!(Arc::ptr_eq(&key, text));
+        std::fs::remove_dir_all(&root).expect("removes");
     }
 
     #[test]
