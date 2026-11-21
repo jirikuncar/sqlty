@@ -91,6 +91,11 @@ New to the idea? Start with [Why SQLTy?](motivation.md). Contributing,
 testing and architecture are covered in
 [DEVELOPMENT.md](https://github.com/jirikuncar/sqlty/blob/main/DEVELOPMENT.md).
 
+## Training
+
+Team training on typed raw SQL, from the first `sqlty rewrite` to typed queries
+checked in CI: [sqlty@kuncar.dev](mailto:sqlty@kuncar.dev?subject=SQLTy%20training).
+
 ## Example projects
 
 Each directory in

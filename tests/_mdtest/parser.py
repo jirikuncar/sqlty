@@ -348,7 +348,7 @@ def _append(assertions: list[Assertion], new: Assertion) -> None:
 
 
 def _parse_config(content: str, line: int, fail: Fail) -> dict[str, Any]:
-    from sqlty._config import ConfigError, validate_tool_table
+    from sqlty import _core
 
     try:
         config = tomllib.loads(content)
@@ -361,8 +361,8 @@ def _parse_config(content: str, line: int, fail: Fail) -> dict[str, Any]:
         raise fail(line, "[project] takes only requires-python")
     settings = tool["sqlty"]
     try:
-        validate_tool_table(settings, "config")
-    except ConfigError as e:
+        _core.validate_config(settings, "config")
+    except ValueError as e:
         raise fail(line, str(e).removeprefix("config: ")) from None
     return config
 
