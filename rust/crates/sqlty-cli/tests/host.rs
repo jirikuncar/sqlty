@@ -1,5 +1,7 @@
 //! `sqlty_cli::run` on a host of its own: what a host that fails does to the command line.
 
+#![expect(clippy::panic, reason = "the host fails on purpose")]
+
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

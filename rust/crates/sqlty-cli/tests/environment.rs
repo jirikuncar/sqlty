@@ -1,7 +1,5 @@
 //! `sqlty_cli::native::Environment`: the Python environment sqlty is installed in or run from.
 
-#![expect(clippy::unwrap_used, reason = "a failed setup fails the test")]
-
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
