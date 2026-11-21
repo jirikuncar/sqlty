@@ -12,7 +12,8 @@
 
 use ruff_python_ast::{self as ast, BoolOp, Expr, Stmt, UnaryOp};
 use ruff_text_size::Ranged;
-use std::collections::{HashMap, HashSet};
+use rustc_hash::{FxHashMap, FxHashSet};
+use std::collections::HashMap;
 use std::rc::Rc;
 
 use crate::scopes::{Binding, Origin};
@@ -44,7 +45,7 @@ pub struct Flow<'a> {
 pub struct Shape<'a> {
     /// The first statement of a block that does not run on to the next, by the start of
     /// the block: where it starts.
-    stops: HashMap<u32, u32>,
+    stops: FxHashMap<u32, u32>,
     /// Where the statements nest too deep to follow.
     deep: Option<u32>,
     /// Where each name is the subject of an `isinstance` test, in order.
@@ -53,7 +54,7 @@ pub struct Shape<'a> {
     dead: Vec<(u32, u32)>,
     /// The loops a `break` leaves, by their start: their `else` is then not the only
     /// way to what follows them.
-    breaks: HashSet<u32>,
+    breaks: FxHashSet<u32>,
 }
 
 impl<'a> Shape<'a> {
@@ -83,8 +84,13 @@ impl<'a> Shape<'a> {
         shape
     }
 
+    /// Whether an `isinstance` test of the scope has `name` as its subject.
+    pub fn tests(&self, name: &str) -> bool {
+        self.tests.contains_key(name)
+    }
+
     /// Whether offset `at` is not reached, or nested too deep to follow.
-    fn unreached(&self, at: u32) -> bool {
+    pub fn unreached(&self, at: u32) -> bool {
         let after = self.dead.partition_point(|&(start, _)| start <= at);
         let dead = after.checked_sub(1).map(|last| self.dead[last]);
         dead.is_some_and(|(_, end)| at < end) || self.deep.is_some_and(|deep| at >= deep)
@@ -225,7 +231,7 @@ const MAX_LIVE: usize = 64;
 /// tested to be of.
 #[derive(Clone, Default)]
 struct State<'a> {
-    live: Vec<usize>,
+    live: Rc<[usize]>,
     narrowed: Option<&'a Expr>,
     /// The name was tested again after `narrowed`: it is of both classes, which is not
     /// followed.
@@ -247,32 +253,40 @@ impl<'a> State<'a> {
 
     /// Either state: the bindings of both, and the test both passed.
     fn merge(mut self, other: &State<'a>) -> Self {
-        work(self.live.len() + other.live.len());
-        let mut live = Vec::with_capacity(self.live.len() + other.live.len());
-        let (mut one, mut two) = (self.live.iter().peekable(), other.live.iter().peekable());
-        loop {
-            let next = match (one.peek(), two.peek()) {
-                (Some(&&a), Some(&&b)) if a == b => {
-                    two.next();
-                    one.next();
-                    a
+        let (one, two) = (&self.live[..], &other.live[..]);
+        // The same bindings, or those of one side all written before the other's: the
+        // usual ways branches end. Nothing is read of them then.
+        let live: Rc<[usize]> = if Rc::ptr_eq(&self.live, &other.live) || two.is_empty() {
+            Rc::clone(&self.live)
+        } else if one.is_empty() {
+            Rc::clone(&other.live)
+        } else {
+            work(one.len() + two.len());
+            if one[one.len() - 1] < two[0] {
+                one.iter().chain(two).copied().collect()
+            } else if two[two.len() - 1] < one[0] {
+                two.iter().chain(one).copied().collect()
+            } else {
+                let mut live = Vec::with_capacity(one.len() + two.len());
+                let (mut a, mut b) = (0, 0);
+                while a < one.len() && b < two.len() {
+                    let (x, y) = (one[a], two[b]);
+                    live.push(x.min(y));
+                    a += usize::from(x <= y);
+                    b += usize::from(y <= x);
                 }
-                (Some(&&a), Some(&&b)) if a < b => {
-                    one.next();
-                    a
-                }
-                (_, Some(&&b)) => {
-                    two.next();
-                    b
-                }
-                (Some(&&a), None) => {
-                    one.next();
-                    a
-                }
-                (None, None) => break,
-            };
-            live.push(next);
-        }
+                live.extend_from_slice(&one[a..]);
+                live.extend_from_slice(&two[b..]);
+                live.into()
+            }
+        };
+        let live = match live.len() > MAX_LIVE {
+            true => {
+                self.lost = true;
+                live[..MAX_LIVE].into()
+            }
+            false => live,
+        };
         // What only one side tested is not known of the other: the name is then what
         // its bindings give it.
         let same = match (self.narrowed, other.narrowed) {
@@ -283,8 +297,7 @@ impl<'a> State<'a> {
             self.narrowed = None;
             self.twice = false;
         }
-        self.lost |= other.lost || live.len() > MAX_LIVE;
-        live.truncate(MAX_LIVE);
+        self.lost |= other.lost;
         self.live = live;
         self
     }
@@ -316,18 +329,30 @@ enum Out<'a> {
     Stop,
 }
 
-/// The branches that run on, merged; `Stop` when none does.
-fn merged<'a>(outs: Vec<Out<'a>>) -> Out<'a> {
-    let mut found: Option<State<'a>> = None;
-    for out in outs {
+/// The branches of a statement that run on, merged as they end.
+#[derive(Default)]
+struct Outs<'a>(Option<State<'a>>);
+
+impl<'a> Outs<'a> {
+    fn of(out: Out<'a>) -> Self {
+        let mut outs = Outs(None);
+        outs.push(out);
+        outs
+    }
+
+    fn push(&mut self, out: Out<'a>) {
         if let Out::Next(state) = out {
-            found = Some(match found {
+            self.0 = Some(match self.0.take() {
                 Some(known) => known.merge(&state),
                 None => state,
             });
         }
     }
-    found.map_or(Out::Stop, Out::Next)
+
+    /// What they leave; `Stop` when none runs on.
+    fn merged(self) -> Out<'a> {
+        self.0.map_or(Out::Stop, Out::Next)
+    }
 }
 
 /// How deep statements nest before the walk gives up on what follows.
@@ -360,7 +385,7 @@ fn apply<'a>(
         work(1);
         if bindings[index].effect <= limit {
             return State {
-                live: vec![index],
+                live: Rc::from([index]),
                 ..State::default()
             };
         }
@@ -543,7 +568,8 @@ impl<'a> Walk<'_, 'a> {
             Stmt::If(node) => {
                 let state = self.header(state, start, &node.body);
                 let (yes, no) = self.tested(&node.test);
-                let mut outs = vec![self.block(&node.body, state.clone().narrow(yes), depth + 1)];
+                let mut outs =
+                    Outs::of(self.block(&node.body, state.clone().narrow(yes), depth + 1));
                 let mut rest = state.narrow(no);
                 let mut closed = false;
                 for clause in &node.elif_else_clauses {
@@ -564,7 +590,7 @@ impl<'a> Walk<'_, 'a> {
                 if !closed {
                     outs.push(Out::Next(rest));
                 }
-                merged(outs)
+                outs.merged()
             }
             Stmt::While(ast::StmtWhile { body, orelse, .. })
             | Stmt::For(ast::StmtFor { body, orelse, .. }) => {
@@ -598,7 +624,9 @@ impl<'a> Walk<'_, 'a> {
                     (false, false) => self.block(orelse, after, depth + 1),
                     (false, true) => {
                         let ended = self.block(orelse, after, depth + 1);
-                        merged(vec![ended, Out::Next(left)])
+                        let mut outs = Outs::of(ended);
+                        outs.push(Out::Next(left));
+                        outs.merged()
                     }
                 }
             }
@@ -611,7 +639,7 @@ impl<'a> Walk<'_, 'a> {
                 // An exception can leave the body after any of its bindings.
                 let raised = self.any(state.clone(), start, body_end);
                 let ran = self.block(&node.body, state, depth + 1);
-                let mut outs = Vec::new();
+                let mut outs = Outs::default();
                 for handler in &node.handlers {
                     let ast::ExceptHandler::ExceptHandler(handler) = handler;
                     let caught =
@@ -623,12 +651,12 @@ impl<'a> Walk<'_, 'a> {
                     Out::Stop => Out::Stop,
                 });
                 let Some(first) = node.finalbody.first() else {
-                    return merged(outs);
+                    return outs.merged();
                 };
                 // `finally` runs however the rest ended: a use in it reads any binding
                 // of the statement, what follows it reads what ran to its end.
                 let closing = self.any(raised, start, first.start().to_u32());
-                let Out::Next(ended) = merged(outs) else {
+                let Out::Next(ended) = outs.merged() else {
                     self.block(&node.finalbody, closing, depth + 1);
                     return Out::Stop;
                 };
@@ -655,12 +683,12 @@ impl<'a> Walk<'_, 'a> {
                 let first = node.cases.first().map_or(end, |case| case.start().to_u32());
                 self.place(start, first, &state, None);
                 let state = self.apply(state, start, first);
-                let mut outs = vec![Out::Next(state.clone())];
+                let mut outs = Outs::of(Out::Next(state.clone()));
                 for case in &node.cases {
                     let captured = self.header(state.clone(), case.start().to_u32(), &case.body);
                     outs.push(self.block(&case.body, captured, depth + 1));
                 }
-                merged(outs)
+                outs.merged()
             }
             _ => {
                 self.place(start, end, &state, None);

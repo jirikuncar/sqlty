@@ -263,6 +263,11 @@ impl<'a> Scan<'a> {
             .is_some_and(|ranges| around(ranges, at).is_some())
     }
 
+    /// Whether a comprehension or a lambda of `scope` binds `name` anywhere.
+    pub fn shadows(&self, scope: Scope, name: &str) -> bool {
+        self.shadows.contains_key(&(scope, name))
+    }
+
     /// Where the outermost lambda or generator expression of `scope` around `at` starts.
     /// It runs later: a binding the scope makes from there on may be in effect by then,
     /// as for a nested `def`.

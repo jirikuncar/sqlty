@@ -409,6 +409,50 @@ def nine(db: A1 | A2 | A3 | A4 | A5 | A6 | A7 | A8 | A9) -> None:
     db.one("SELECT name FROM users", int)
 ```
 
+## A name bound once
+
+A name its scope binds once, as a parameter or by a statement of its own, holds that
+binding at every use after it. A use before it holds nothing, code after a `return` is
+not reached, and a lambda written before it may run after it.
+
+```python
+from pkg.db import DB
+
+def after(flags) -> None:
+    db = DB()
+    # error: [column-type-mismatch]
+    db.one("SELECT name FROM users", int)
+    for _ in flags:
+        # error: [column-type-mismatch]
+        db.one("SELECT name FROM users", int)
+
+def later(flags) -> None:
+    # error: [column-type-mismatch]
+    early = lambda: db.one("SELECT name FROM users", int)
+    db = DB()
+    # error: [column-type-mismatch]
+    late = [db.one("SELECT name FROM users", int) for _ in flags]
+```
+
+```python
+from pkg.db import DB
+
+def before(flags) -> None:
+    db.one("SELECT name FROM users", int)
+    for _ in flags:
+        db.one("SELECT name FROM users", int)
+    db = DB()
+
+def dead(db: DB) -> None:
+    return
+    db.one("SELECT name FROM users", int)
+
+def shadowed(db: DB, others) -> None:
+    [db.one("SELECT name FROM users", int) for db in others]
+
+# error:
+```
+
 ## A name is what it was last bound to
 
 ty: `Cursor` inside the `with`, `DB` before; `DB | Cursor` after the `if`.
