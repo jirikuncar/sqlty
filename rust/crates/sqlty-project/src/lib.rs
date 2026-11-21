@@ -17,7 +17,7 @@ pub use module::{
     stripped, Checker,
 };
 pub use settings::{load_schema, FileSettings, Function, SchemaKey, Schemas};
-pub use workspace::{par_map, Completion, Options, Workspace};
+pub use workspace::{par_map, Completion, Options, SchemaSource, Workspace};
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

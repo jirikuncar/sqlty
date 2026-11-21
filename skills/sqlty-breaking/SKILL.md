@@ -71,6 +71,14 @@ migrations/0042_index.sql:2: [missing-concurrently] `CREATE INDEX` blocks writes
 | `unbatched-backfill` | update in batches: `WHERE id IN (SELECT id ... LIMIT 5000)` |
 | `drop-primary-key` | add the new key in the same transaction, or `REPLICA IDENTITY USING INDEX` first |
 
+Every `schema` of the configuration is judged, each `[tool.sqlty.databases]` entry
+included, with the severities of `rules` and of the `[[tool.sqlty.overrides]]` that
+match the migration's path (`include = ["migrations/**"]`, relative to the
+configuration's directory, so for migrations outside it set `rules` or use an override
+without `include`). A schema several configurations name is judged once, at the
+strictest severity, against the baseline schema of each file checked against it (or
+of the database of the same name), and each statement is reported once.
+
 ## A dropped column
 
 Below, the code was written for `schema.sql`, and `against.sql` is the schema

@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use sqlty_python::config;
-use sqlty_python::project::{self, Discovery, Files};
+use sqlty_python::project::{self, Discovery, Files, Route};
 use sqlty_python::queries;
 use sqlty_python::rewriter::ImportStyle;
 use sqlty_python::types::stdlib::Version;
@@ -293,9 +293,13 @@ impl Directory {
         })
     }
 
-    /// The settings of the project, then of each database.
-    pub(crate) fn all(&self) -> impl Iterator<Item = &Arc<FileSettings>> {
-        std::iter::once(&self.own).chain(self.databases.iter().map(|(_, settings)| settings))
+    /// The settings of the project under [`analyzer::DEFAULT`], then of each database.
+    pub(crate) fn named(&self) -> impl Iterator<Item = (&str, &Arc<FileSettings>)> {
+        std::iter::once((analyzer::DEFAULT, &self.own)).chain(
+            self.databases
+                .iter()
+                .map(|(name, settings)| (name.as_str(), settings)),
+        )
     }
 
     /// The settings of the file at `path`.
@@ -306,17 +310,35 @@ impl Directory {
         let route = discovery.route(table, base, path);
         let settings = route
             .database
-            .and_then(|name| {
-                self.databases
-                    .iter()
-                    .find(|(database, _)| *database == name)
-            })
+            .as_ref()
+            .and_then(|name| self.databases.iter().find(|(database, _)| database == name))
             .map_or(&self.own, |(_, settings)| settings);
-        if !table
-            .get("overrides")
-            .and_then(Value::as_array)
-            .is_some_and(|all| !all.is_empty())
-        {
+        self.overridden(settings, &route)
+    }
+
+    /// `settings` with the rules of the overrides that match the schema file at `path`,
+    /// in the database it is given: a database's `include` does not route a migration.
+    pub(crate) fn schema_file(
+        &self,
+        settings: &Arc<FileSettings>,
+        path: &Path,
+        discovery: &Discovery,
+    ) -> Arc<FileSettings> {
+        match &self.routing {
+            Some((table, base)) => self.overridden(settings, &discovery.route(table, base, path)),
+            None => Arc::clone(settings),
+        }
+    }
+
+    /// `settings` with the rules of the overrides `route` matched, the command line's on top.
+    fn overridden(&self, settings: &Arc<FileSettings>, route: &Route) -> Arc<FileSettings> {
+        let overrides = self.routing.as_ref().is_some_and(|(table, _)| {
+            table
+                .get("overrides")
+                .and_then(Value::as_array)
+                .is_some_and(|all| !all.is_empty())
+        });
+        if !overrides {
             return Arc::clone(settings);
         }
         let mut rules = settings.rules.clone();
