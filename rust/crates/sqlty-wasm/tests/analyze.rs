@@ -1,6 +1,11 @@
 //! The analysis of a module: its queries, diagnostics, highlights, fixes, formatting,
 //! and the breaking changes a schema change makes.
 
+#![expect(
+    clippy::unwrap_used,
+    reason = "a malformed answer fails the test"
+)]
+
 use serde_json::{json, Value};
 use sqlty_wasm::run;
 

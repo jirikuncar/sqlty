@@ -1,6 +1,11 @@
 //! The configuration a request carries: its dialect, `sqlty.toml` settings, the settings a host
 //! resolved, and the sqlty table of a file.
 
+#![expect(
+    clippy::unwrap_used,
+    reason = "a malformed answer fails the test"
+)]
+
 use serde_json::{json, Value};
 use sqlty_wasm::run;
 

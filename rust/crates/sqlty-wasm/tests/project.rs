@@ -1,5 +1,10 @@
 //! The `project` operation: the configuration of a directory, asking for each file it reads.
 
+#![expect(
+    clippy::unwrap_used,
+    reason = "a malformed answer fails the test"
+)]
+
 use serde_json::{json, Value};
 use sqlty_wasm::run;
 
