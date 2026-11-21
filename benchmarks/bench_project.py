@@ -27,6 +27,7 @@ import argparse
 import json
 import os
 import platform
+import re
 import shutil
 import statistics
 import subprocess
@@ -54,6 +55,15 @@ SCENARIO_REPEATS = 3
 # Times of 5 ms or less are noise on a shared runner: they are reported, not budgeted.
 MIN_BUDGETED_S = 0.005
 ATTEMPTS = 3
+# A check must beat the database round trip that types the same query: PostgreSQL Parse and
+# Describe over a Unix socket, about 100 us on a machine whose calibration loop takes 20 ms
+# (AGENTS.md "Check budget"). A slower runner gets a proportionally larger budget.
+ROUND_TRIP_US = 100
+ROUND_TRIP_CALIBRATION_S = 0.02
+# The string literals synth.py writes queries as, and a module holding one of them.
+QUERY = re.compile(r'"((?:--sql\\n)?(?:SELECT|WITH) (?:[^"\\]|\\.)*)"')
+MARKER = "--sql\\n"
+MODULE = "from typing import Any\nfrom sqlty import SQL\n{query}\n"
 
 
 def calibrate() -> float:
@@ -132,6 +142,56 @@ def micro(tables: int, rounds: int = 200) -> dict[str, float]:
     return out
 
 
+def best_s(fn, rounds: int = 3) -> float:
+    """Best of ``rounds`` wall times of ``fn()``, in seconds."""
+    best = float("inf")
+    for _ in range(rounds):
+        t = time.perf_counter()
+        fn()
+        best = min(best, time.perf_counter() - t)
+    return best
+
+
+def python_us(root: Path, schema: str) -> list[float]:
+    """Microseconds of Python type inference per file: ``check_source`` of the file minus
+    the SQL inference of its queries, each timed as ``check_source`` of a module that holds
+    only that query, minus one without any. Schema cached."""
+    from sqlty import core
+
+    settings = core.Settings(schema_sql=schema)
+    empty = best_s(lambda: core.check_source(MODULE.format(query=""), settings), 20)
+    sql: dict[str, float] = {}
+
+    def sql_s(query: str) -> float:
+        if query not in sql:
+            module = MODULE.format(query=f'q = SQL[Any]("{query}")')
+            check = best_s(lambda module=module: core.check_source(module, settings), 5)
+            sql[query] = max(0.0, check - empty)
+        return sql[query]
+
+    out = []
+    for path in sorted(root.rglob("*.py")):
+        source = path.read_text()
+        whole = best_s(lambda source=source: core.check_source(source, settings))
+        queries = sum(
+            sql_s(MARKER + m.group(1).removeprefix(MARKER)) for m in QUERY.finditer(source)
+        )
+        out.append(max(0.0, whole - queries) * 1e6)
+    return out
+
+
+def ruff_us(root: Path) -> float:
+    """Microseconds per file of ``ruff check`` on one thread, startup subtracted: the
+    budget of Python type inference (AGENTS.md "Check budget")."""
+    ruff = shutil.which("ruff") or str(Path(sys.executable).parent / "ruff")
+    env = {**os.environ, "RAYON_NUM_THREADS": "1"}
+    args = [ruff, "check", "--no-cache", "--isolated", "--exit-zero", "--silent"]
+    with tempfile.TemporaryDirectory() as nothing:
+        startup = best_s(lambda: subprocess.run([*args, nothing], env=env, check=True), 5)
+    whole = best_s(lambda: subprocess.run([*args, str(root)], env=env, check=True))
+    return (whole - startup) * 1e6 / sum(1 for _ in root.rglob("*.py"))
+
+
 def commit_then_migrate(root: Path) -> str:
     """Commit the project, then add a migration to its schema; the project's path."""
     git = ["git", "-c", "user.name=bench", "-c", "user.email=bench@example.com"]
@@ -154,6 +214,12 @@ def run(size: str, repeats: int, keep: str | None, exe: str) -> dict:
         proj = str(root)
         metrics["check"] = measure([exe, "check", "-q", proj], proj, repeats)
         metrics["rewrite_check"] = measure([exe, "rewrite", "--check", "-q", proj], proj, repeats)
+        empty = root / "empty"
+        empty.mkdir()
+        for name in ("pyproject.toml", "schema.sql"):
+            shutil.copy(root / name, empty / name)
+        metrics["check_empty"] = measure([exe, "check", "-q", str(empty)], str(empty), repeats)
+        schema = (root / "schema.sql").read_text()
         metrics.update(scenarios(exe, root, spec))
         for name, text in (
             ("schema_load", (root / "schema.sql").read_text()),
@@ -168,6 +234,14 @@ def run(size: str, repeats: int, keep: str | None, exe: str) -> dict:
         metrics["breaking"] = measure(
             [exe, "breaking", "-q", "--against", "HEAD"], commit_then_migrate(root), min(repeats, 3)
         )
+        # In a child, so its schema cache and heap neither slow the timings below nor
+        # count in the RSS of the children measured above.
+        (root / "schema.sql").write_text(schema)
+        worker = [sys.executable, __file__, "--worker-python", str(root)]
+        per_file = sorted(
+            json.loads(subprocess.run(worker, check=True, capture_output=True).stdout)
+        )
+        ruff = ruff_us(root)
         return {
             "meta": {
                 "size": size,
@@ -181,6 +255,14 @@ def run(size: str, repeats: int, keep: str | None, exe: str) -> dict:
             "metrics": metrics,
             "one_query_us": one_query(spec["tables"]),
             "micro_us": micro(spec["tables"]),
+            "python_us_per_file": {
+                "mean": round(statistics.mean(per_file), 1),
+                "median": round(statistics.median(per_file), 1),
+                "p99": round(per_file[int(len(per_file) * 0.99)], 1),
+                "max": round(per_file[-1], 1),
+                "ruff_mean": round(ruff, 1),
+                "files": len(per_file),
+            },
         }
     finally:
         if not keep:
@@ -224,10 +306,6 @@ def scenarios(exe: str, root: Path, spec: dict[str, int]) -> dict:
     return out
 
 
-# A check must beat a database round trip: about 100 us on a machine whose calibration loop
-# takes 20 ms (AGENTS.md "Check budget"); a slower runner gets a proportionally larger budget.
-ROUND_TRIP_US = 100
-ROUND_TRIP_CALIBRATION_S = 0.02
 # Turns on once a one-query check fits the budget: until then `one_query_us` is reported only.
 ENFORCE_ONE_QUERY = False
 ONE_QUERY_SQL = Path(__file__).parent / "one_query.sql"
@@ -317,6 +395,24 @@ def compare(result: dict, baseline: dict, time_tol: float, rss_tol: float) -> li
     return failures
 
 
+def over_budget(result: dict) -> list[str]:
+    """Lines for the inference slower than its budget (AGENTS.md "Check budget"): SQL of
+    a query than a database round trip, Python of a file than ``ruff check`` of it."""
+    limit = ROUND_TRIP_US * result["calibration_s"] / ROUND_TRIP_CALIBRATION_S
+    micro_us = result["micro_us"]
+    failures = [
+        f"sql.{kind}: {us:.0f} us > round trip {limit:.0f} us"
+        for kind in sorted(n.split(".", 1)[1] for n in micro_us if n.startswith("analyze_select."))
+        if (us := micro_us[f"analyze_select.{kind}"] + micro_us[f"analyze_params.{kind}"]) > limit
+    ]
+    python = result["python_us_per_file"]
+    if python["mean"] > python["ruff_mean"]:
+        failures.append(
+            f"python.per_file: {python['mean']:.0f} us > ruff {python['ruff_mean']:.0f} us"
+        )
+    return failures
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -342,7 +438,12 @@ def main() -> int:
         help="the sqlty to run: the wheel's script (default) or a native binary",
     )
     ap.add_argument("--worker-schema", help=argparse.SUPPRESS)
+    ap.add_argument("--worker-python", help=argparse.SUPPRESS)
     args = ap.parse_args()
+    if args.worker_python:
+        root = Path(args.worker_python)
+        print(json.dumps(python_us(root, (root / "schema.sql").read_text())))
+        return 0
     if args.worker_schema:
         worker_schema_load(args.worker_schema)
         return 0
@@ -352,9 +453,16 @@ def main() -> int:
     key = f"{result['meta']['platform']}-{args.size}"
     path = Path(args.baseline)
     baselines = json.loads(path.read_text()) if path.exists() else {}
+
+    def over(result: dict) -> list[str]:
+        failures = over_budget(result)
+        if key in baselines:
+            failures += compare(result, baselines[key], args.time_tolerance, args.rss_tolerance)
+        return failures
+
     failures = []
-    if args.compare and key in baselines:
-        failures = compare(result, baselines[key], args.time_tolerance, args.rss_tolerance)
+    if args.compare:
+        failures = over(result)
         # Another job on a shared runner can slow one run: measure again before failing.
         for attempt in range(2, ATTEMPTS + 1):
             if not failures:
@@ -366,7 +474,7 @@ def main() -> int:
                 file=sys.stderr,
             )
             result = run(args.size, args.repeats, args.keep, args.exe)
-            failures = compare(result, baselines[key], args.time_tolerance, args.rss_tolerance)
+            failures = over(result)
     text = json.dumps(result, indent=2)
     print(text)
     if args.out:
@@ -379,17 +487,17 @@ def main() -> int:
         print(f"baseline {key} written to {path}", file=sys.stderr)
         return 0
     if args.compare:
-        if key not in baselines:
-            print(
-                f"no baseline for {key} in {path}: nothing to compare. "
-                "Commit this run's JSON (make bench-baseline) to enable the budget.",
-                file=sys.stderr,
-            )
-            return 0
         if failures:
             print("performance budget exceeded:", *failures, sep="\n  ", file=sys.stderr)
             return 1
-        print(f"within budget versus baseline {key}", file=sys.stderr)
+        if key not in baselines:
+            print(
+                f"no baseline for {key} in {path}: checked the inference budgets only. "
+                "Commit this run's JSON (make bench-baseline) to enable the rest.",
+                file=sys.stderr,
+            )
+        else:
+            print(f"within budget versus baseline {key}", file=sys.stderr)
     return 0
 
 

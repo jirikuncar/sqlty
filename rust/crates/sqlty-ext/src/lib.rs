@@ -1100,8 +1100,7 @@ fn check_source(
         let schema = schema_for(source, schema_sql, dialect);
         let options = Options::new(dialect, schema.as_deref(), import_style, untyped)?;
         let rules = RuleConfig::from_overrides(rules).map_err(ConfigError::from)?;
-        let mut diagnostics = checker::check_source(source, &options, &rules, &any_calls);
-        checker::add_fix_imports(source, &options, &mut diagnostics);
+        let diagnostics = checker::check_source_with_imports(source, &options, &rules, &any_calls);
         Ok(diagnostics
             .into_iter()
             .map(|diag| DiagnosticOut {

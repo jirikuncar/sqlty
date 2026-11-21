@@ -20,6 +20,7 @@ use crate::checker::{wrapped_queries, Diagnostic};
 use crate::frozen::Table;
 use crate::options::Options;
 use crate::rules::{Rule, RuleConfig};
+use crate::scan::Scan;
 use crate::scopes::{Key, Param};
 use crate::types::compat::{
     accepts, check_type_compatibility, column_literal_values, declared_literal_values, field_type,
@@ -197,7 +198,8 @@ pub fn check(source: &Arc<Source>, settings: &Settings<'_>) -> Found {
     if !crate::check::may_wrap(&source.text, &settings.options.style.import_line) {
         return Found::default();
     }
-    let queries = row_queries(source, settings);
+    let scan = Scan::new(&*source.text, &settings.options.style.wrapper_name);
+    let queries = row_queries(&scan);
     if queries.is_empty() {
         return Found::default();
     }
@@ -210,8 +212,8 @@ pub fn check(source: &Arc<Source>, settings: &Settings<'_>) -> Found {
 }
 
 /// The `SQL[Row](...)` calls of `source` whose row type is not spelled as a tuple.
-pub(crate) fn row_queries(source: &Source, settings: &Settings<'_>) -> Vec<RowQuery> {
-    wrapped_queries(&source.text, &settings.options.style)
+pub(crate) fn row_queries(scan: &Scan<'_>) -> Vec<RowQuery> {
+    wrapped_queries(scan)
         .into_iter()
         .filter(|(_, name, _, _)| !name.starts_with("tuple["))
         .collect()
