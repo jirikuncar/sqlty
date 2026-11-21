@@ -1,3 +1,5 @@
+//! The language server over in-memory connections: protocol in, protocol out, with a fake workspace.
+
 #![expect(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -29,7 +31,7 @@ fn uri(path: &Path) -> String {
 /// Users and orders, and 540 tables `t0`..`t539`.
 static SCHEMA: LazyLock<Schema> = LazyLock::new(|| {
     let mut sql = String::from(
-        "CREATE TABLE users (id INT NOT NULL, name TEXT);\nCREATE TABLE orders (id INT, user_id INT);\n",
+        "CREATE TABLE users (id INT NOT NULL, name TEXT);\nCREATE TABLE orders (id INT, user_id INT REFERENCES users (id));\nCREATE VIEW active AS SELECT id FROM users;\n",
     );
     for i in 0..540 {
         sql += &format!("CREATE TABLE t{i} (id INT);\n");
@@ -88,6 +90,16 @@ impl Workspace for Fake {
             Severity::Error
         };
         self.checked = text.to_string();
+        // Starts one byte before `mid`: inside a two-byte character when one precedes it.
+        let inside = text.match_indices("mid").map(|(at, _)| Diagnostic {
+            rule: "stale-type".to_string(),
+            message: "mid-character".to_string(),
+            severity,
+            start: at - 1,
+            end: at + 3,
+            fix: Vec::new(),
+            source: None,
+        });
         Ok(text
             .match_indices("bad")
             .map(|(at, _)| Diagnostic {
@@ -110,6 +122,7 @@ impl Workspace for Fake {
                 ],
                 source: None,
             })
+            .chain(inside)
             .collect())
     }
 
@@ -1304,4 +1317,132 @@ fn stdio_serves_standard_input_and_output() {
     let output = server.wait_with_output().unwrap();
     assert!(output.status.success());
     assert!(String::from_utf8_lossy(&output.stdout).contains(r#""id":2,"result":null"#));
+}
+
+#[test]
+fn views_ctes_and_joins_have_their_own_kinds_and_details() {
+    let mut client = Client::start(&json!({}));
+    let text = "q = \"--sql\\nSELECT * FROM active\"\n\
+                r = \"--sql\\nWITH c AS (SELECT 1 AS a) SELECT * FROM c\"\n\
+                s = \"--sql\\nSELECT * FROM orders o JOIN us\"\n";
+    client.open("file:///work/q.py", text);
+    client.notification("textDocument/publishDiagnostics");
+    let mut found = Vec::new();
+    for (line, character) in [(0, 29), (1, 53), (2, 40)] {
+        let list = client.complete("file:///work/q.py", line, character);
+        let item = list["items"][0].clone();
+        let resolved = client.request("completionItem/resolve", item.clone());
+        found.push((
+            item["label"].clone(),
+            item["kind"].clone(),
+            resolved["detail"].clone(),
+        ));
+    }
+    assert_eq!(
+        found,
+        [
+            (json!("active"), json!(22), json!("view in public")),
+            (json!("c"), json!(9), json!("CTE of the query")),
+            (
+                json!("users ON users.id = o.user_id"),
+                json!(22),
+                json!("join on a foreign key in public")
+            ),
+        ]
+    );
+    client.shutdown();
+}
+
+#[test]
+fn an_item_without_data_resolves_to_itself() {
+    let mut client = Client::start(&json!({}));
+    let item = json!({"label": "x", "detail": "y"});
+    assert_eq!(client.request("completionItem/resolve", item.clone()), item);
+    client.shutdown();
+}
+
+#[test]
+fn positions_count_units_of_the_agreed_encoding() {
+    let text = "\u{e9} = 1\nx = '\u{1d11e}' + bad\n";
+    // `bad` follows `x = '𝄞' + `: 11 UTF-16 units, 13 bytes.
+    for (capabilities, character) in [(json!({}), 11), (utf8(), 13)] {
+        let mut client = Client::start(&capabilities);
+        client.open("file:///work/q.py", text);
+        let published = client.notification("textDocument/publishDiagnostics");
+        assert_eq!(
+            published["diagnostics"][0]["range"]["start"],
+            json!({"line": 1, "character": character})
+        );
+        let range =
+            json!({"start": {"line": 9, "character": 0}, "end": {"line": 9, "character": 0}});
+        let params = json!({"textDocument": {"uri": "file:///work/q.py"}, "range": range, "context": {"diagnostics": [], "only": ["source.fixAll"]}});
+        let actions = client.request("textDocument/codeAction", params);
+        let edit = &actions[0]["edit"]["documentChanges"][0]["edits"][0];
+        assert_eq!(edit["range"]["start"]["character"], character);
+        client.shutdown();
+    }
+}
+
+#[test]
+fn a_path_with_spaces_round_trips_and_an_untitled_buffer_has_none() {
+    let mut client = Client::start(&json!({}));
+    let uri = "file:///work/a%20dir/%C3%BC.py";
+    client.open(uri, "ab bad\n");
+    let published = client.notification("textDocument/publishDiagnostics");
+    assert_eq!(published["uri"], uri);
+    client.open("untitled:Untitled-1", "bad\n");
+    let params = json!({"textDocument": {"uri": uri}, "range": {"start": {"line": 0, "character": 0}, "end": {"line": 0, "character": 0}}, "context": {"diagnostics": [], "only": ["source.fixAll"]}});
+    let actions = client.request("textDocument/codeAction", params);
+    assert_eq!(
+        actions[0]["edit"]["documentChanges"][0]["edits"][0]["newText"],
+        "goo"
+    );
+    client.shutdown();
+}
+
+#[test]
+fn helper_strings_follow_an_edit_and_are_dropped_with_it() {
+    let mut client = Client::start(&json!({}));
+    let text = "run(\"SELECT * FROM us\")\nrun(\"SELECT * FROM us\")\n";
+    let uri = "file:///work/q.py";
+    client.open(uri, text);
+    client.notification("textDocument/publishDiagnostics");
+    // An unchanged text keeps both; a comment before them moves both; rewriting the first
+    // string away drops only it.
+    client.change(uri, 2, text);
+    assert_eq!(labels(&client.complete(uri, 1, 21)), json!(["users"]));
+    client.change(uri, 3, &format!("# note\n{text}"));
+    assert_eq!(labels(&client.complete(uri, 2, 21)), json!(["users"]));
+    client.change(uri, 4, "run(1)\nrun(\"SELECT * FROM us\")\n");
+    assert_eq!(client.complete(uri, 0, 5), Value::Null);
+    client.shutdown();
+}
+
+#[test]
+fn a_span_inside_a_character_is_reported_at_the_character() {
+    let mut client = Client::start(&json!({}));
+    client.open("file:///work/q.py", "\u{e9}mid\n");
+    let published = client.notification("textDocument/publishDiagnostics");
+    assert_eq!(
+        published["diagnostics"][0]["range"],
+        json!({"start": {"line": 0, "character": 0}, "end": {"line": 0, "character": 4}})
+    );
+    client.shutdown();
+}
+
+#[test]
+fn a_cursor_past_the_last_line_or_after_wide_characters_is_located() {
+    let uri = "file:///work/q.py";
+    let text = "q = \"--sql\\nSELECT \u{e9}, u. FROM users u\"\n";
+    for (capabilities, character) in [(json!({}), 24), (utf8(), 25)] {
+        let mut client = Client::start(&capabilities);
+        client.open(uri, text);
+        client.notification("textDocument/publishDiagnostics");
+        assert_eq!(
+            labels(&client.complete(uri, 0, character)),
+            json!(["id", "name"])
+        );
+        assert_eq!(client.complete(uri, 99, 0), Value::Null);
+        client.shutdown();
+    }
 }

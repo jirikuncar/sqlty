@@ -14,21 +14,3 @@ pub(crate) fn to_path(uri: &Uri) -> Option<PathBuf> {
 pub(crate) fn from_path(path: &Path) -> Option<Uri> {
     Uri::from_str(url::Url::from_file_path(path).ok()?.as_str()).ok()
 }
-
-#[cfg(test)]
-#[cfg_attr(coverage_nightly, coverage(off))]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn paths_round_trip_through_uris() {
-        let path = std::env::temp_dir().join("a dir").join("ü.py");
-        let uri = from_path(&path).unwrap();
-        assert!(uri.as_str().starts_with("file://"), "{}", uri.as_str());
-        assert_eq!(to_path(&uri), Some(path));
-        assert_eq!(
-            to_path(&Uri::from_str("untitled:Untitled-1").unwrap()),
-            None
-        );
-    }
-}
