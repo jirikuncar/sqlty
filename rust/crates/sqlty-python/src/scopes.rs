@@ -280,6 +280,16 @@ impl<'a> Walker<'a> {
 /// The module that defines an imported `NAME` or `module.NAME`, and its value there.
 pub type Constant<'s> = &'s dyn Fn(&str) -> Option<(&'s Source, &'s Expr)>;
 
+/// The class each module-level name of `source` holds, from one walk of the module.
+fn module_classes(source: &Source) -> HashMap<String, Option<String>> {
+    Scan::new(source.body())
+        .types
+        .into_iter()
+        .filter(|((scope, _), _)| *scope == 0)
+        .map(|((_, name), class)| (name.to_string(), class_of(class, &source.imports)))
+        .collect()
+}
+
 /// Reads argument types in the scopes of a [`Scan`].
 pub struct Context<'a, 's> {
     /// `ParsedSource.imported_names`.
@@ -372,14 +382,13 @@ impl Context<'_, '_> {
             return None;
         }
         let (source, value) = constant(dotted)?;
-        let scan = Scan::new(if matches!(value, Expr::Name(_)) {
-            source.body()
-        } else {
-            &[]
-        });
+        if let Expr::Name(name) = value {
+            let classes = source.classes.get_or_init(|| module_classes(source));
+            return classes.get(name.id.as_str()).cloned().flatten();
+        }
         Context {
             imported: &source.imports,
-            scan: &scan,
+            scan: &Scan::new(&[]),
             constant: None,
         }
         .arg_type(value, &[])
