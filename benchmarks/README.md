@@ -79,7 +79,8 @@ calibration loop over its 20 ms), Python when the `python_us_per_file` mean is o
 `one_query_us` is microseconds for `check_source` of a module holding one typical
 query of `one_query.sql` (point select, 3-table join, insert with parameters,
 aggregate), as `sqlty rewrite` types it, schema cached: what `sqlty check` spends per
-query. `make bench-ci` prints each against a database round trip (AGENTS.md "Check
+query, SQL and Python inference together. `make bench-ci` prints each against a
+database round trip (AGENTS.md "Check
 budget": 100 µs times the calibration over 20 ms), marked `OVER` or `under`. It is
 reported, not budgeted, until a one-query check fits: `ENFORCE_ONE_QUERY = True` in
 `bench_project.py` then fails the job, after measuring again up to three runs in all.

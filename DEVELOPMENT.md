@@ -208,9 +208,10 @@ make bench-codspeed   # benchmarks/test_benchmarks.py, as CI's CodSpeed job meas
 ```
 
 - `bench-ci` (`benchmarks/bench_project.py`, with `tests/test_performance.py`)
-  measures CLI wall time and RSS on a synthetic project; the `Performance budget`
-  CI job runs it. [benchmarks/README.md](benchmarks/README.md) has the metrics and
-  the budget rules.
+  measures CLI wall time and RSS on a synthetic project, and SQL and Python inference
+  against their budgets (AGENTS.md "Check budget"); the `Performance budget` CI job
+  runs it. [benchmarks/README.md](benchmarks/README.md) has the metrics and the budget
+  rules.
 - `bench-rust` covers catalog load (50 to 5000 tables with functions), the
   analyzer per query kind, `check_source`/`rewrite_source` on 1k/4k queries,
   name-index prefix lookups and `complete` at 50, 540 and 5000 tables,
