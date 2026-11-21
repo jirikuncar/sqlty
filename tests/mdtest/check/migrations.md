@@ -42,6 +42,19 @@ COMMIT;
 ALTER TABLE users ADD COLUMN about TEXT;
 ```
 
+## Vacuuming in and out of a transaction
+
+```sql migration
+SET lock_timeout = '1s';
+-- error:
+VACUUM ANALYZE users;
+BEGIN;
+-- error: [concurrently-in-transaction] "PostgreSQL refuses `VACUUM` inside a transaction block"
+-- error: [table-rewrite] "`VACUUM FULL` rewrites the table"
+VACUUM (FULL, VERBOSE) users;
+COMMIT;
+```
+
 ## A pg_dump schema
 
 ```sql migration
@@ -115,6 +128,30 @@ ALTER TYPE mood ADD VALUE 'meh';
 -- error:
 UPDATE "users" SET email = 'meh' WHERE id = 1;
 COMMIT;
+```
+
+## A new enum value in a column of another table
+
+```sql migration
+BEGIN;
+SET LOCAL lock_timeout = '1s';
+CREATE TYPE feeling AS ENUM ('ok');
+CREATE TABLE feelings (feeling feeling);
+COMMIT;
+BEGIN;
+ALTER TYPE feeling ADD VALUE 'meh';
+-- error:
+UPDATE users feeling SET email = 'meh' WHERE feeling.id = 1;
+COMMIT;
+```
+
+## Reindexing a table the migration creates
+
+```sql migration
+SET lock_timeout = '1s';
+CREATE TABLE drafts (id BIGINT PRIMARY KEY);
+-- error:
+REINDEX TABLE drafts;
 ```
 
 ## A NOT NULL check alone does not bound a partition
@@ -193,5 +230,41 @@ BEGIN;
 SET LOCAL lock_timeout = '1s';
 -- error:
 LOCK TABLE users, events;
+COMMIT;
+```
+
+## Dropping a foreign key locks the table it references
+
+`against.sql`:
+
+```sql
+CREATE TABLE teams (id BIGINT PRIMARY KEY);
+CREATE TABLE users (id BIGINT PRIMARY KEY, team_id BIGINT REFERENCES teams (id));
+```
+
+```sql migration
+SET lock_timeout = '1s';
+BEGIN;
+ALTER TABLE teams ADD COLUMN name TEXT;
+-- error: [multi-table-lock] "locks `users` while this transaction still holds `teams`"
+ALTER TABLE users DROP COLUMN team_id;
+COMMIT;
+BEGIN;
+ALTER TABLE users ADD COLUMN team BIGINT;
+-- error:
+ALTER TABLE users DROP CONSTRAINT users_team_id_fkey;
+COMMIT;
+```
+
+### Not once the foreign key is gone
+
+```sql migration
+SET lock_timeout = '1s';
+ALTER TABLE users RENAME TO members;
+ALTER TABLE members DROP CONSTRAINT users_team_id_fkey;
+BEGIN;
+ALTER TABLE teams ADD COLUMN name TEXT;
+-- error: [truncate-cascade]
+TRUNCATE teams CASCADE;
 COMMIT;
 ```
