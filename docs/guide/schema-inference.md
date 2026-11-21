@@ -129,11 +129,21 @@ What makes a column nullable or not:
   with a value that is never NULL is not NULL, and so is one an `INSERT` leaves out for a
   `DEFAULT` that never is, unless a `BEFORE` row trigger can change the row.
 - **Parameters.** A placeholder echoed into a column (`SELECT %(key)s::text`) can be NULL,
-  since a caller may bind `None`. In a call to a [marked helper](helpers.md) whose argument
-  for it has a known type other than `None` (a literal, a name bound to one, an annotated
-  variable, a constant imported from a checked module), it is not:
-  the column, or the JSON member it fills, follows the argument. Where the argument is
-  `None`, optional or of unknown type, and in `SQL[T]` strings, it stays nullable.
+  since a caller may bind `None`. In a call to a [marked helper](helpers.md) or a driver
+  whose argument for it has a known type other than `None` (a literal, a name bound to
+  one, an annotated variable, a constant imported from a checked module), it is not: the
+  column, or the JSON member it fills, follows the argument. An annotation is read as row
+  types read one, so a type alias or `NewType` of a known type counts as that type, from
+  the module or a checked module, imported absolutely or relatively. Where the argument
+  is `None`, optional or of unknown type, and in `SQL[T]` strings, it stays nullable.
+
+  A name the module binds more than once, anywhere at module level, or binds in a class
+  or function around the argument, is of unknown type, and so is a `NewType` made with a
+  `NewType` the module binds again. Importing what a name already holds (in `try` and
+  `except`, or another submodule of a package) and the `else` of `if TYPE_CHECKING` do not
+  count. A function that rebinds the name through `global`, binds it locally other than by
+  an assignment, parameter or type parameter (an import, `for`, `def`), or a star import
+  that binds it, is not seen.
 
 [`nullable-mismatch`](../reference/rules/nullable-mismatch.md) reports a row type field
 that is not optional for a nullable column;
