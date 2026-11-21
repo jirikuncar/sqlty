@@ -1,5 +1,7 @@
 //! DML statements: whether they return rows and the scope of their target tables.
 
+use std::collections::HashSet;
+
 use sqlparser::ast::{
     AssignmentTarget, Expr, FromTable, Ident, MergeAction, MergeClauseKind, ObjectName, OnConflict,
     OnConflictAction, OnInsert, OutputClause, Query, SelectItem, SetExpr, Statement, TableObject,
@@ -556,8 +558,9 @@ impl Analyzer<'_> {
         let Some(known) = self.schema.table(&table_key(table, self.dialect)) else {
             return;
         };
+        let set: HashSet<&str> = set.iter().map(String::as_str).collect();
         for column in known {
-            if column.not_null && !column.has_default && !set.contains(&column.name) {
+            if column.not_null && !column.has_default && !set.contains(column.name.as_str()) {
                 self.diag.record_about(
                     Rule::InsertMissingColumn,
                     format!(
@@ -578,15 +581,16 @@ impl Analyzer<'_> {
         if !self.judges_names() {
             return;
         }
-        let Some(known) = self.schema.table(&table_key(table, self.dialect)) else {
+        let key = table_key(table, self.dialect);
+        if self.schema.table(&key).is_none() {
             return;
-        };
+        }
         let idents = columns
             .iter()
             .filter_map(|column| column.0.last().and_then(|part| part.as_ident()));
         for ident in idents {
             let name = fold(ident, self.dialect);
-            if !known.iter().any(|c| c.name == name) {
+            if self.schema.column(&key, &name).flatten().is_none() {
                 self.diag.record_about(
                     Rule::UnknownColumn,
                     format!(
