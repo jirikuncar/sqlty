@@ -27,6 +27,7 @@ pub fn check_migrations_with(
         .into_iter()
         .zip(files)
         .map(|(found, (sql, rules))| {
+            let newlines: Vec<usize> = sql.match_indices('\n').map(|(at, _)| at).collect();
             let found = found
                 .into_iter()
                 .filter(|finding| rules.is_enabled(finding.rule))
@@ -34,7 +35,7 @@ pub fn check_migrations_with(
                     rule: finding.rule,
                     message: finding.message,
                     severity: rules.severity(finding.rule),
-                    line: sql[..finding.span.start].matches('\n').count() + 1,
+                    line: newlines.partition_point(|&at| at < finding.span.start) + 1,
                     span: finding.span,
                     fix: Vec::new(),
                 })
@@ -88,7 +89,7 @@ mod tests {
     #[test]
     fn each_file_has_its_own_severities() {
         let first = "SET lock_timeout = '1s';\nCREATE INDEX a ON users (bio);";
-        let second = "CREATE INDEX b ON users (id);";
+        let second = "SET lock_timeout = '1s';\nCREATE INDEX b ON users (id);";
         let (warn, error) = (
             rules(&[("missing-concurrently", "warn")]),
             rules(&[("missing-concurrently", "error")]),
