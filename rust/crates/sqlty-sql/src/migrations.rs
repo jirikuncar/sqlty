@@ -21,10 +21,11 @@ use std::ops::{ControlFlow, Range};
 
 use rustc_hash::{FxHashMap, FxHashSet};
 use sqlparser::ast::{
-    AlterColumnOperation, AlterTableOperation, AlterType, AlterTypeOperation, CascadeOption,
-    CheckConstraint, ColumnDef, ColumnOption, CopySource, CreateTable, DataType,
-    DetachPartitionMode, Expr, ForValues, Insert, Merge, ObjectName, ObjectType, SetExpr,
-    Statement, TableConstraint, TableFactor, TableObject,
+    visit_expressions, AlterColumnOperation, AlterTableOperation, AlterType, AlterTypeOperation,
+    BinaryOperator, CascadeOption, CheckConstraint, ColumnDef, ColumnOption, CopySource,
+    CreateTable, DataType, Delete, DetachPartitionMode, Expr, ForValues, FromTable, InTarget,
+    Insert, LockTableMode, Merge, ObjectName, ObjectType, SetExpr, Statement, TableConstraint,
+    TableFactor, TableObject,
 };
 
 use crate::analyzer::{parse_ddl, SqlDialect};
@@ -77,7 +78,9 @@ pub fn check(baseline: &str, files: &[&str]) -> Vec<Vec<Finding>> {
     let mut model = Model::default();
     for stmt in ddl::statements(baseline, false) {
         *model.applied.entry(stmt.normalized()).or_default() += 1;
-        if let Some((parsed, likes)) = model.parse_if_shaping(&stmt) {
+        let parsed = model.parse_if_shaping(&stmt);
+        model.record_indexes(&stmt, parsed.as_ref().map(|(parsed, _)| parsed));
+        if let Some((parsed, likes)) = parsed {
             model.apply(&parsed, &likes);
         }
     }
@@ -90,7 +93,8 @@ struct Model {
     applied: FxHashMap<String, usize>,
     /// Tables, materialized views and indexes created by new statements: empty and unused.
     created: FxHashSet<String>,
-    /// The table of each index a new statement created, by its name in the schema of the table.
+    /// The table of each index the baseline or a new statement created, by its name in the
+    /// schema of the table.
     index_tables: FxHashMap<String, String>,
     /// The tables the baseline and earlier statements create.
     tables: FxHashSet<String>,
@@ -108,6 +112,10 @@ struct Model {
     partition_keys: FxHashMap<String, Vec<String>>,
     /// The default partition of each partitioned table.
     defaults: FxHashMap<String, String>,
+    /// The temporary tables new statements create: they stay exempt when rows are copied in.
+    temporary: FxHashSet<String>,
+    /// The columns that alone are a primary key or unique, by table.
+    keys: FxHashSet<(String, String)>,
     /// The partitioned tables whose partitions no `CHECK` can prove: hash partitioning or an
     /// expression in the key.
     unprovable: FxHashSet<String>,
@@ -133,6 +141,10 @@ struct Session {
     /// The enum values `ALTER TYPE ... ADD VALUE` added in the open transaction, as string
     /// literals, with their type.
     added_values: Vec<(String, ObjectName)>,
+    /// The tables with rows that the open transaction locks against writes, in order.
+    locked: Vec<String>,
+    reported_tables: bool,
+    reported_backfill: bool,
 }
 
 impl Model {
@@ -194,6 +206,54 @@ impl Model {
                         "takes a lock that blocks writes without `SET lock_timeout` first: while it waits for the lock, the queries it blocks wait behind it".to_string(),
                     );
                 }
+                if session.transaction {
+                    let held = session.locked.len();
+                    let locked = match &parsed {
+                        Some(parsed) => self.write_locked(parsed),
+                        None => self.write_locked_tokens(&stmt, &tokens),
+                    };
+                    for table in locked {
+                        if !session.locked.contains(&table) {
+                            session.locked.push(table);
+                        }
+                    }
+                    if let (held @ [_, ..], [last, ..]) = session.locked.split_at(held) {
+                        if !session.reported_tables {
+                            session.reported_tables = true;
+                            report(
+                                Rule::MultiTableLock,
+                                format!(
+                                    "locks `{last}` while this transaction still holds `{}`: queries of any of them now wait for all of them, until `COMMIT`; change one table per transaction",
+                                    held.join("`, `")
+                                ),
+                            );
+                        }
+                    }
+                }
+                if let Some((target, selection)) = parsed
+                    .as_ref()
+                    .and_then(backfilled)
+                    .filter(|(target, _)| !self.created.contains(&target.table))
+                {
+                    let table = target.table.clone();
+                    if !selection.is_some_and(|selection| self.batched(&target, selection)) {
+                        report(
+                            Rule::UnbatchedBackfill,
+                            format!(
+                                "changes every matching row of `{table}` in one statement: it holds their row locks and grows the WAL until it ends; change them in batches by key, `WHERE id IN (SELECT id ... LIMIT 5000)`"
+                            ),
+                        );
+                    }
+                    if session.locked.contains(&table) && !session.reported_backfill {
+                        session.reported_backfill = true;
+                        report(
+                            Rule::LockedBackfill,
+                            format!(
+                                "an earlier statement of this transaction locks `{table}` against writes, so they wait for the whole backfill: `COMMIT` the schema change first"
+                            ),
+                        );
+                    }
+                }
                 if let Some(Statement::AlterType(AlterType {
                     name,
                     operation: AlterTypeOperation::AddValue(add),
@@ -202,39 +262,22 @@ impl Model {
                     let value = format!("'{}'", add.value.value.replace('\'', "''"));
                     session.added_values.push((value, name.clone()));
                 }
-                let indexes = match &parsed {
-                    Some(Statement::CreateIndex(index)) => index
-                        .name
-                        .iter()
-                        .map(|name| (key(name), key(&index.table_name)))
-                        .collect(),
-                    Some(Statement::CreateTable(create)) => implicit_indexes(create)
-                        .into_iter()
-                        .map(|name| (name, key(&create.name)))
-                        .collect(),
-                    Some(_) => Vec::new(),
-                    None => create_index(&stmt.tokens())
-                        .and_then(|index| Some((index.name?, index.table)))
-                        .into_iter()
-                        .collect(),
-                };
-                for (name, table) in indexes {
-                    let index = match table.rsplit_once('.') {
-                        Some((schema, _)) => format!("{schema}.{name}"),
-                        None => name,
-                    };
-                    self.index_tables.insert(index, table);
-                }
+                self.record_indexes(&stmt, parsed.as_ref());
                 let created = match &parsed {
                     Some(parsed) => created(parsed),
                     None => created_by_tokens(&stmt.tokens()),
                 };
                 if let Some(created) = created.filter(|c| !self.tables.contains(c)) {
+                    if matches!(&parsed, Some(Statement::CreateTable(create)) if create.temporary) {
+                        self.temporary.insert(created.clone());
+                    }
                     self.created.insert(created);
                 }
             }
             if let Some(filled) = parsed.as_ref().and_then(filled) {
-                self.created.remove(&filled);
+                if !self.temporary.contains(&filled) {
+                    self.created.remove(&filled);
+                }
             }
             if let Some(parsed) = &parsed {
                 self.apply(parsed, &likes.unwrap_or_default());
@@ -282,6 +325,7 @@ impl Model {
                 }
                 for constraint in &create.constraints {
                     self.require_key(&table, constraint);
+                    self.record_key(&table, constraint);
                 }
                 if let Some(by) = &create.partition_by {
                     let by = by.to_string();
@@ -329,7 +373,16 @@ impl Model {
             Statement::AlterTable(alter) => {
                 let table = key(&alter.name);
                 for op in &alter.operations {
+                    if let AlterTableOperation::AddConstraint { constraint, .. } = op {
+                        self.record_key(&table, constraint);
+                    }
                     self.apply_op(&table, op);
+                }
+            }
+            Statement::CreateIndex(index) if index.unique && index.predicate.is_none() => {
+                if let [column] = index.columns.as_slice() {
+                    self.keys
+                        .insert((key(&index.table_name), column_name(&column.column.expr)));
                 }
             }
             Statement::Drop {
@@ -487,6 +540,151 @@ impl Model {
             self.required
                 .insert((table.to_string(), name(&column.name)));
         }
+        let unique = column.options.iter().any(|option| {
+            matches!(
+                option.option,
+                ColumnOption::Unique(_) | ColumnOption::PrimaryKey(_)
+            )
+        });
+        if unique {
+            self.keys.insert((table.to_string(), name(&column.name)));
+        }
+    }
+
+    fn record_key(&mut self, table: &str, constraint: &TableConstraint) {
+        let columns = match constraint {
+            TableConstraint::PrimaryKey(key) => &key.columns,
+            TableConstraint::Unique(key) => &key.columns,
+            _ => return,
+        };
+        if let [column] = columns.as_slice() {
+            self.keys
+                .insert((table.to_string(), column_name(&column.column.expr)));
+        }
+    }
+
+    /// Whether `selection` changes rows a few at a time: it pins a key column to listed values,
+    /// takes a range with `BETWEEN`, or picks the rows with a `LIMIT` subquery.
+    fn batched(&self, target: &Backfill, selection: &Expr) -> bool {
+        let table = target.table.as_str();
+        let short = table.rsplit('.').next().unwrap_or(table);
+        let keyed = |column: &Expr| match column {
+            Expr::Identifier(column) => self.keys.contains(&(table.to_string(), name(column))),
+            Expr::CompoundIdentifier(parts) => {
+                let mut parts = parts.iter().rev().map(name);
+                let (column, qualifier) = (parts.next(), parts.next());
+                qualifier.is_some_and(|qualifier| {
+                    qualifier == short || target.alias.as_ref() == Some(&qualifier)
+                }) && column.is_some_and(|column| self.keys.contains(&(table.to_string(), column)))
+            }
+            _ => false,
+        };
+        let literal = |value: &Expr| matches!(value, Expr::Value(_));
+        conjuncts(selection).any(|expr| match expr {
+            Expr::Between { negated: false, .. } => true,
+            Expr::BinaryOp {
+                left,
+                op: BinaryOperator::Eq,
+                right,
+            } => (keyed(left) && literal(right)) || (keyed(right) && literal(left)),
+            Expr::In {
+                expr,
+                target: InTarget::List(list),
+                negated: false,
+                ..
+            } => keyed(expr) && list.iter().all(literal),
+            Expr::In {
+                target: InTarget::Subquery(query),
+                negated: false,
+                ..
+            } => query.limit_clause.is_some(),
+            _ => false,
+        })
+    }
+
+    /// The tables with rows that `stmt` locks against writes: `SHARE` or a stronger lock.
+    fn write_locked(&self, stmt: &Statement) -> Vec<String> {
+        let mut tables = match stmt {
+            Statement::AlterTable(alter) => {
+                let table = key(&alter.name);
+                let mut tables = Vec::new();
+                for op in &alter.operations {
+                    match op {
+                        op if keeps_writes(op) => {}
+                        AlterTableOperation::AttachPartitionOf { partition, .. } => {
+                            tables.push(key(partition));
+                            tables.extend(self.defaults.get(&table).cloned());
+                        }
+                        _ => tables.push(table.clone()),
+                    }
+                }
+                tables.extend(referenced_tables(stmt));
+                tables
+            }
+            Statement::CreateTable(_) => referenced_tables(stmt),
+            Statement::Truncate(truncate) => truncate
+                .table_names
+                .iter()
+                .map(|target| key(&target.name))
+                .collect(),
+            Statement::Lock(lock) if blocks_writes(lock.lock_mode.as_ref()) => {
+                lock.tables.iter().map(|target| key(&target.name)).collect()
+            }
+            Statement::Drop {
+                object_type: ObjectType::Table,
+                names,
+                ..
+            } => names.iter().map(key).collect(),
+            Statement::CreateIndex(index) if !index.concurrently => vec![key(&index.table_name)],
+            Statement::RefreshMaterializedView(refresh) if !refresh.concurrently => {
+                vec![key(&refresh.name)]
+            }
+            Statement::Vacuum(vacuum) if vacuum.full => vacuum.table_name.iter().map(key).collect(),
+            _ => Vec::new(),
+        };
+        tables.retain(|table| !self.created.contains(table));
+        tables
+    }
+
+    /// The tables with rows that a statement sqlparser does not read locks against writes, as
+    /// `judge_tokens` judges it. `REINDEX INDEX` of an index of unknown table names the index.
+    fn write_locked_tokens(&self, stmt: &Raw, tokens: &[String]) -> Vec<String> {
+        let original = stmt.tokens();
+        let words: Vec<&str> = tokens.iter().map(String::as_str).collect();
+        let mut tables = match words.as_slice() {
+            ["create", "index" | "unique", ..] => create_index(&original)
+                .filter(|index| !index.concurrently)
+                .map(|index| index.table)
+                .into_iter()
+                .collect(),
+            ["reindex", ..] => {
+                let (options, rest) = split_options(&original[1..]);
+                let name = token_name(rest.get(1..).unwrap_or_default(), &["concurrently"], &[]);
+                match rest.first().map(|kind| kind.to_lowercase()).as_deref() {
+                    _ if reindexes_concurrently(options, rest) => Vec::new(),
+                    Some("table") => vec![name],
+                    Some("index") => vec![self.index_tables.get(&name).cloned().unwrap_or(name)],
+                    _ => Vec::new(),
+                }
+            }
+            ["cluster", ..] => vec![cluster_table(&original[1..])],
+            ["vacuum", ..] => {
+                let (options, rest) = split_options(&original[1..]);
+                match vacuum_full(options, rest) {
+                    (true, tables) => tables,
+                    (false, _) => Vec::new(),
+                }
+            }
+            ["alter", "table", rest @ ..]
+                if rest.windows(2).any(|pair| pair == ["set", "tablespace"])
+                    && !rest.starts_with(&["all", "in"]) =>
+            {
+                vec![set_tablespace_table(&original)]
+            }
+            _ => Vec::new(),
+        };
+        tables.retain(|table| !table.is_empty() && !self.created.contains(table));
+        tables
     }
 
     fn require_key(&mut self, table: &str, constraint: &TableConstraint) {
@@ -561,6 +759,33 @@ impl Model {
                     "a new partition of `{parent}` scans its default partition `{default}` for rows that belong to the new one, under an ACCESS EXCLUSIVE lock on it: move those rows out and add a validated `CHECK` to `{default}` that excludes the new bounds first"
                 ),
             );
+        }
+    }
+
+    /// Record the table of each index `stmt` creates, explicitly or for a key of a new table.
+    fn record_indexes(&mut self, stmt: &Raw, parsed: Option<&Statement>) {
+        let indexes = match parsed {
+            Some(Statement::CreateIndex(index)) => index
+                .name
+                .iter()
+                .map(|name| (key(name), key(&index.table_name)))
+                .collect(),
+            Some(Statement::CreateTable(create)) => implicit_indexes(create)
+                .into_iter()
+                .map(|name| (name, key(&create.name)))
+                .collect(),
+            Some(_) => Vec::new(),
+            None => create_index(&stmt.tokens())
+                .and_then(|index| Some((index.name?, index.table)))
+                .into_iter()
+                .collect(),
+        };
+        for (name, table) in indexes {
+            let index = match table.rsplit_once('.') {
+                Some((schema, _)) => format!("{schema}.{name}"),
+                None => name,
+            };
+            self.index_tables.insert(index, table);
         }
     }
 
@@ -663,7 +888,10 @@ impl Model {
                 }
                 Judged::strong_unless(!rewrites)
             }
-            Statement::Lock(_) => Judged::strong(),
+            Statement::Lock(lock) => Judged::strong_unless(
+                !blocks_writes(lock.lock_mode.as_ref())
+                    || lock.tables.iter().all(|target| self.is_new(&target.name)),
+            ),
             Statement::CreateTable(create) => {
                 if let (Some(parent), Some(bounds)) = (&create.partition_of, &create.for_values) {
                     if *bounds != ForValues::Default {
@@ -705,10 +933,7 @@ impl Model {
                 for op in &alter.operations {
                     self.judge_op(&table, &alter.name, op, report);
                 }
-                let validates = alter
-                    .operations
-                    .iter()
-                    .all(|op| matches!(op, AlterTableOperation::ValidateConstraint { .. }));
+                let validates = alter.operations.iter().all(keeps_writes);
                 let concurrently = alter.operations.iter().any(|op| {
                     matches!(
                         op,
@@ -863,8 +1088,7 @@ impl Model {
             ["reindex", ..] => {
                 let original = stmt.tokens();
                 let (options, rest) = split_options(&original[1..]);
-                let concurrently = rest.iter().any(|t| t.eq_ignore_ascii_case("concurrently"))
-                    || is_option_on(options, "concurrently");
+                let concurrently = reindexes_concurrently(options, rest);
                 let waits = !concurrently && !self.is_new_target(rest);
                 if waits {
                     report(
@@ -887,12 +1111,7 @@ impl Model {
             ["vacuum", ..] => {
                 let original = stmt.tokens();
                 let (options, rest) = split_options(&original[1..]);
-                let legacy = rest.iter().take_while(|t| is_vacuum_word(t)).count();
-                let full = rest[..legacy]
-                    .iter()
-                    .any(|t| t.eq_ignore_ascii_case("full"))
-                    || is_option_on(options, "full");
-                let tables = vacuum_tables(&rest[legacy..]);
+                let (full, tables) = vacuum_full(options, rest);
                 let rewrites = full
                     && !(!tables.is_empty() && tables.iter().all(|t| self.created.contains(t)));
                 if rewrites {
@@ -905,9 +1124,7 @@ impl Model {
                 if rest.windows(2).any(|pair| pair == ["set", "tablespace"])
                     && !rest.starts_with(&["all", "in"]) =>
             {
-                let skip = ["if", "exists", "only"];
-                let ends = ["set", "add", "alter", "drop", "rename", "owner", ","];
-                let table = token_name(&stmt.tokens()[2..], &skip, &ends);
+                let table = set_tablespace_table(&stmt.tokens());
                 let created = self.created.contains(&table);
                 if !created {
                     report(
@@ -938,6 +1155,8 @@ impl Session {
             ["commit" | "end" | "rollback" | "abort", ..] => {
                 (self.transaction, self.local_timeout) = (false, false);
                 self.added_values.clear();
+                self.locked.clear();
+                (self.reported_tables, self.reported_backfill) = (false, false);
             }
             ["reset", "lock_timeout" | "all"] => {
                 (self.lock_timeout, self.local_timeout) = (false, false);
@@ -966,10 +1185,6 @@ impl Judged {
             concurrently,
             strong_lock: false,
         }
-    }
-
-    fn strong() -> Self {
-        Judged::strong_unless(false)
     }
 
     fn strong_unless(exempt: bool) -> Self {
@@ -1042,7 +1257,7 @@ fn add_column(table: &ObjectName, column: &ColumnDef, report: &mut impl FnMut(Ru
 
 /// The first volatile function `expr` calls.
 fn volatile_call(expr: &Expr) -> Option<&'static str> {
-    let found = sqlparser::ast::visit_expressions(expr, |e| {
+    let found = visit_expressions(expr, |e| {
         if let Expr::Function(f) = e {
             let called = f.name.0.last().and_then(|p| p.as_ident()).map(name);
             if let Some(hit) = VOLATILE.iter().find(|v| called.as_deref() == Some(**v)) {
@@ -1211,6 +1426,99 @@ fn rewrite_command_message(command: &str) -> String {
     format!(
         "`{command}` rewrites the table under an ACCESS EXCLUSIVE lock, blocking reads and writes until it finishes: rebuild it online with pg_repack or pg_squeeze, outside migrations"
     )
+}
+
+/// Whether `op` takes a lock weaker than `SHARE`, which lets writes go on.
+fn keeps_writes(op: &AlterTableOperation) -> bool {
+    match op {
+        AlterTableOperation::SetOptionsParens { options } => options.iter().all(|option| {
+            let option = option.to_string().to_lowercase();
+            let parameter = option.split('=').next().unwrap_or_default().trim();
+            parameter == "fillfactor"
+                || parameter == "parallel_workers"
+                || parameter.starts_with("autovacuum_")
+                || parameter.starts_with("toast")
+        }),
+        _ => matches!(
+            op,
+            AlterTableOperation::ValidateConstraint { .. }
+                | AlterTableOperation::DetachPartitionOf {
+                    mode: Some(DetachPartitionMode::Concurrently),
+                    ..
+                }
+        ),
+    }
+}
+
+/// The column `expr` names, folded; any other expression as its lowercased text.
+fn column_name(expr: &Expr) -> String {
+    match expr {
+        Expr::Identifier(ident) => name(ident),
+        _ => expr.to_string().to_lowercase(),
+    }
+}
+
+/// Whether a `LOCK TABLE` in `mode` blocks writes; without a mode it takes `ACCESS EXCLUSIVE`.
+fn blocks_writes(mode: Option<&LockTableMode>) -> bool {
+    !matches!(
+        mode,
+        Some(
+            LockTableMode::AccessShare
+                | LockTableMode::RowShare
+                | LockTableMode::RowExclusive
+                | LockTableMode::ShareUpdateExclusive
+        )
+    )
+}
+
+/// The terms `expr` joins with `AND`.
+fn conjuncts(expr: &Expr) -> Box<dyn Iterator<Item = &Expr> + '_> {
+    match expr {
+        Expr::BinaryOp {
+            left,
+            op: BinaryOperator::And,
+            right,
+        } => Box::new(conjuncts(left).chain(conjuncts(right))),
+        Expr::Nested(inner) => conjuncts(inner),
+        _ => Box::new(std::iter::once(expr)),
+    }
+}
+
+/// The table an `UPDATE` or `DELETE` changes rows of, and its alias.
+struct Backfill {
+    table: String,
+    alias: Option<String>,
+}
+
+/// The table an `UPDATE` or `DELETE` changes rows of, with its `WHERE` clause.
+fn backfilled(stmt: &Statement) -> Option<(Backfill, Option<&Expr>)> {
+    let (relation, selection) = match stmt {
+        Statement::Query(query) => {
+            return match &*query.body {
+                SetExpr::Update(stmt) | SetExpr::Delete(stmt) => backfilled(stmt),
+                _ => None,
+            }
+        }
+        Statement::Update(update) => (&update.table.relation, &update.selection),
+        Statement::Delete(Delete {
+            from: FromTable::WithFromKeyword(from) | FromTable::WithoutKeyword(from),
+            selection,
+            ..
+        }) => (&from.first()?.relation, selection),
+        _ => return None,
+    };
+    match relation {
+        TableFactor::Table {
+            name: table, alias, ..
+        } => {
+            let target = Backfill {
+                table: key(table),
+                alias: alias.as_ref().map(|alias| name(&alias.name)),
+            };
+            Some((target, selection.as_ref()))
+        }
+        _ => None,
+    }
 }
 
 /// The tables on either side of the foreign keys `stmt` adds.
@@ -1399,6 +1707,29 @@ fn implicit_indexes(create: &CreateTable) -> Vec<String> {
         });
     }
     found
+}
+
+/// Whether a `REINDEX` with `options` and the `rest` of its tokens runs `CONCURRENTLY`.
+fn reindexes_concurrently(options: &[&str], rest: &[&str]) -> bool {
+    rest.iter().any(|t| t.eq_ignore_ascii_case("concurrently"))
+        || is_option_on(options, "concurrently")
+}
+
+/// Whether a `VACUUM` with `options` and the `rest` of its tokens is `FULL`, and its tables.
+fn vacuum_full(options: &[&str], rest: &[&str]) -> (bool, Vec<String>) {
+    let legacy = rest.iter().take_while(|t| is_vacuum_word(t)).count();
+    let full = rest[..legacy]
+        .iter()
+        .any(|t| t.eq_ignore_ascii_case("full"))
+        || is_option_on(options, "full");
+    (full, vacuum_tables(&rest[legacy..]))
+}
+
+/// The table of `ALTER TABLE [IF EXISTS] [ONLY] t ... SET TABLESPACE`.
+fn set_tablespace_table(tokens: &[&str]) -> String {
+    let skip = ["if", "exists", "only"];
+    let ends = ["set", "add", "alter", "drop", "rename", "owner", ","];
+    token_name(tokens.get(2..).unwrap_or_default(), &skip, &ends)
 }
 
 /// `tokens` after a leading parenthesised option list, and the options inside it.
@@ -1902,8 +2233,15 @@ mod tests {
             )
         };
         let used = "UPDATE orders SET state = 'It''s' WHERE id = 1";
+        let enum_findings = |migration: &str| -> Vec<Finding> {
+            check(&baseline, &[migration])
+                .remove(0)
+                .into_iter()
+                .filter(|finding| finding.rule == Rule::EnumValueInTransaction)
+                .collect()
+        };
         assert_eq!(
-            check(&baseline, &[&migration("", used)])[0],
+            enum_findings(&migration("", used)),
             [Finding {
                 rule: Rule::EnumValueInTransaction,
                 message: "'It''s' was added to `status` in this transaction: PostgreSQL refuses a new enum value until the transaction that added it commits, so `COMMIT` after `ADD VALUE`".to_string(),
@@ -1911,7 +2249,7 @@ mod tests {
             }]
         );
         let reported =
-            |between: &str, using: &str| !rules(&baseline, &migration(between, using)).is_empty();
+            |between: &str, using: &str| !enum_findings(&migration(between, using)).is_empty();
         assert!(reported("", "SELECT 'It''s'::status"));
         assert!(reported("", "SELECT CAST('It''s' AS status)"));
         assert!(reported("", "INSERT INTO orders VALUES (1, 'It''s', NULL)"));
@@ -1934,7 +2272,7 @@ mod tests {
             "ALTER TYPE status ADD VALUE 'y' AFTER 'It''s'"
         ));
         let outside = "ALTER TYPE status ADD VALUE 'x'; UPDATE orders SET state = 'x';";
-        assert_eq!(rules(&baseline, outside), []);
+        assert_eq!(enum_findings(outside), []);
     }
 
     #[test]
@@ -2083,6 +2421,217 @@ mod tests {
         ] {
             let migration = format!("SET lock_timeout = '1s'; {migration};");
             assert_eq!(rules(baseline, &migration), expected, "{migration}");
+        }
+    }
+
+    #[test]
+    fn a_transaction_holds_its_locks_until_it_ends() {
+        use Rule::*;
+        for (migration, expected) in [
+            (
+                "BEGIN; ALTER TABLE users ADD COLUMN a int; ALTER TABLE teams ADD COLUMN b int; ALTER TABLE users ADD COLUMN c int; COMMIT;",
+                &[MultiTableLock][..],
+            ),
+            (
+                "BEGIN; ALTER TABLE users ADD COLUMN a int; COMMIT; BEGIN; ALTER TABLE teams ADD COLUMN b int; COMMIT;",
+                &[],
+            ),
+            ("ALTER TABLE users ADD COLUMN a int; ALTER TABLE teams ADD COLUMN b int;", &[]),
+            (
+                "BEGIN; LOCK TABLE users, teams; COMMIT;",
+                &[],
+            ),
+            (
+                "BEGIN; LOCK TABLE users; LOCK TABLE teams; COMMIT;",
+                &[MultiTableLock],
+            ),
+            (
+                "BEGIN; TRUNCATE users; DROP TABLE teams; COMMIT;",
+                &[MultiTableLock],
+            ),
+            (
+                "BEGIN; CREATE TABLE t (id int); ALTER TABLE t ADD COLUMN a int; ALTER TABLE users ADD COLUMN a int; COMMIT;",
+                &[],
+            ),
+            (
+                "BEGIN; ALTER TABLE users ADD COLUMN a int; UPDATE users SET a = 1 WHERE id IN (SELECT id FROM users LIMIT 100); COMMIT;",
+                &[LockedBackfill],
+            ),
+            (
+                "BEGIN; ALTER TABLE users ADD COLUMN a int; DELETE FROM users WHERE id BETWEEN 1 AND 100; COMMIT;",
+                &[LockedBackfill],
+            ),
+            (
+                "BEGIN; ALTER TABLE teams ADD COLUMN a int; UPDATE users SET bio = '' WHERE id BETWEEN 1 AND 9; COMMIT;",
+                &[],
+            ),
+            ("UPDATE users SET bio = ''", &[UnbatchedBackfill]),
+            ("DELETE FROM users WHERE bio IS NULL", &[UnbatchedBackfill]),
+            ("UPDATE users SET bio = '' WHERE id BETWEEN 1 AND 9", &[]),
+            ("CREATE TABLE t (id int); UPDATE t SET id = 1; DELETE FROM t", &[]),
+            ("UPDATE users AS u SET bio = t.id::text FROM teams t", &[UnbatchedBackfill]),
+            ("UPDATE users SET bio = 'x' WHERE id = 1", &[]),
+            ("DELETE FROM users WHERE id IN (1, 2, 3)", &[]),
+            ("DELETE FROM users WHERE team_id IN (1, 2, 3)", &[UnbatchedBackfill]),
+            ("UPDATE users SET bio = (SELECT 'x' FROM teams LIMIT 1)", &[UnbatchedBackfill]),
+            ("WITH t AS (SELECT 1) UPDATE users SET bio = ''", &[UnbatchedBackfill]),
+            (
+                "CREATE TEMP TABLE tmp (id int); INSERT INTO tmp SELECT id FROM users; UPDATE tmp SET id = id + 1",
+                &[],
+            ),
+            (
+                "BEGIN; CREATE TABLE t (id int); LOCK TABLE t; ALTER TABLE users ADD COLUMN a int; COMMIT;",
+                &[],
+            ),
+            ("BEGIN; CREATE TABLE t (id int); DROP TABLE t, teams; COMMIT;", &[]),
+            (
+                "BEGIN; LOCK TABLE users IN ACCESS SHARE MODE; LOCK TABLE teams IN ROW EXCLUSIVE MODE; COMMIT;",
+                &[],
+            ),
+            (
+                "BEGIN; ALTER TABLE users SET (fillfactor = 70); ALTER TABLE teams SET (fillfactor = 70); COMMIT;",
+                &[],
+            ),
+            (
+                "BEGIN; ALTER TABLE users ADD FOREIGN KEY (team_id) REFERENCES teams (id) NOT VALID; COMMIT;",
+                &[],
+            ),
+            (
+                "BEGIN; ALTER TABLE users ADD COLUMN t2 BIGINT REFERENCES teams (id); UPDATE teams SET id = 1 WHERE id BETWEEN 1 AND 2; COMMIT;",
+                &[LockedBackfill],
+            ),
+            (
+                "BEGIN; CREATE TABLE child (id int, team_id BIGINT REFERENCES teams (id)); ALTER TABLE users ADD COLUMN z int; COMMIT;",
+                &[MultiTableLock],
+            ),
+            ("UPDATE users SET bio = '' WHERE id = 1 OR bio IS NULL", &[UnbatchedBackfill]),
+            ("DELETE FROM users WHERE NOT (id BETWEEN 1 AND 10)", &[UnbatchedBackfill]),
+            (
+                "DELETE FROM users WHERE EXISTS (SELECT 1 FROM teams WHERE teams.id = users.team_id LIMIT 1)",
+                &[UnbatchedBackfill],
+            ),
+            (
+                "UPDATE users u SET bio = '' FROM teams t WHERE t.id = 1 AND u.team_id = t.id",
+                &[UnbatchedBackfill],
+            ),
+            ("UPDATE users u SET bio = '' WHERE u.id = 1", &[]),
+            ("ALTER TABLE users SET (user_catalog_table = true)", &[]),
+            (
+                "BEGIN; ALTER TABLE users SET (user_catalog_table = true); ALTER TABLE teams ADD COLUMN q int; COMMIT;",
+                &[MultiTableLock],
+            ),
+            (
+                "BEGIN; CREATE INDEX i ON users (bio); UPDATE users SET bio = '' WHERE id BETWEEN 1 AND 9; COMMIT;",
+                &[MissingConcurrently, LockedBackfill],
+            ),
+            (
+                "BEGIN; ALTER TABLE users ADD COLUMN c int; WITH t AS (SELECT 1) UPDATE users SET c = 1 WHERE id BETWEEN 1 AND 5; COMMIT;",
+                &[LockedBackfill],
+            ),
+        ] {
+            let migration = format!("SET lock_timeout = '1s'; {migration}");
+            assert_eq!(rules(USERS, &migration), expected, "{migration}");
+        }
+    }
+
+    #[test]
+    fn builds_and_rewrites_hold_their_locks_until_the_transaction_ends() {
+        use Rule::*;
+        let baseline = format!("{USERS}\nCREATE MATERIALIZED VIEW mv AS SELECT 1 AS id;");
+        let then_teams = "ALTER TABLE teams ADD COLUMN q int; COMMIT;";
+        let then_backfill = "UPDATE users SET bio = '' WHERE id BETWEEN 1 AND 9; COMMIT;";
+        for (migration, expected) in [
+            (
+                format!("BEGIN; CREATE INDEX i ON users (bio) TABLESPACE x; {then_teams}"),
+                &[MissingConcurrently, MultiTableLock][..],
+            ),
+            (
+                format!("BEGIN; REINDEX TABLE users; {then_teams}"),
+                &[MissingConcurrently, MultiTableLock],
+            ),
+            (
+                format!("BEGIN; REINDEX (VERBOSE) INDEX users_email; {then_backfill}"),
+                &[MissingConcurrently, LockedBackfill],
+            ),
+            (
+                format!("BEGIN; REINDEX INDEX users_pkey; {then_backfill}"),
+                &[MissingConcurrently, LockedBackfill],
+            ),
+            (
+                format!("BEGIN; REINDEX INDEX teams_pkey; {then_backfill}"),
+                &[MissingConcurrently],
+            ),
+            (
+                format!("BEGIN; REINDEX INDEX elsewhere; {then_teams}"),
+                &[MissingConcurrently, MultiTableLock],
+            ),
+            (
+                format!("BEGIN; REFRESH MATERIALIZED VIEW mv; {then_teams}"),
+                &[MissingConcurrently, MultiTableLock],
+            ),
+            (
+                format!("BEGIN; CLUSTER users USING users_pkey; {then_teams}"),
+                &[TableRewrite, MultiTableLock],
+            ),
+            (
+                format!("BEGIN; ALTER TABLE users SET TABLESPACE x; {then_teams}"),
+                &[TableRewrite, MultiTableLock],
+            ),
+            (
+                format!("BEGIN; VACUUM (FULL, SKIP_LOCKED) users; {then_teams}"),
+                &[TableRewrite, MultiTableLock],
+            ),
+            (format!("BEGIN; VACUUM (FULL off) users; {then_teams}"), &[]),
+            (format!("BEGIN; VACUUM FULL; {then_teams}"), &[TableRewrite]),
+            (format!("BEGIN; CLUSTER; {then_teams}"), &[TableRewrite]),
+            (
+                format!("BEGIN; REINDEX SCHEMA public; {then_teams}"),
+                &[MissingConcurrently],
+            ),
+            (
+                format!("BEGIN; REINDEX TABLE CONCURRENTLY users; {then_teams}"),
+                &[ConcurrentlyInTransaction],
+            ),
+            (
+                format!(
+                    "BEGIN; CREATE INDEX CONCURRENTLY i ON users (bio) TABLESPACE x; {then_teams}"
+                ),
+                &[ConcurrentlyInTransaction],
+            ),
+            (
+                format!(
+                    "BEGIN; CREATE TABLE t (id int PRIMARY KEY); REINDEX INDEX t_pkey; CLUSTER t;
+                     VACUUM FULL t; CREATE INDEX ON t (id) TABLESPACE x; REINDEX TABLE t;
+                     CREATE MATERIALIZED VIEW m2 AS SELECT 1 AS x WITH NO DATA;
+                     REFRESH MATERIALIZED VIEW m2; {then_teams}"
+                ),
+                &[],
+            ),
+        ] {
+            let migration = format!("SET lock_timeout = '1s'; {migration}");
+            assert_eq!(rules(&baseline, &migration), expected, "{migration}");
+        }
+    }
+
+    #[test]
+    fn only_single_column_keys_bound_a_backfill() {
+        use Rule::*;
+        let baseline = format!("{USERS} CREATE TABLE pairs (a int, b int, PRIMARY KEY (a, b));");
+        let indexes = "CREATE UNIQUE INDEX CONCURRENTLY users_team_email ON users (team_id, email);
+            CREATE UNIQUE INDEX CONCURRENTLY users_lower_email ON users (lower(email));";
+        for (migration, expected) in [
+            (
+                "BEGIN; ALTER TABLE users ADD COLUMN a int; ALTER TABLE teams ADD COLUMN b int; ALTER TABLE pairs ADD COLUMN c int; COMMIT;",
+                &[MultiTableLock][..],
+            ),
+            ("UPDATE pairs SET b = 1 WHERE a = 1", &[UnbatchedBackfill]),
+            (&format!("{indexes} UPDATE users SET bio = '' WHERE team_id = 1"), &[UnbatchedBackfill]),
+            (&format!("{indexes} UPDATE users SET bio = '' WHERE lower(email) = 'x'"), &[UnbatchedBackfill]),
+            ("UPDATE users SET bio = '' WHERE (id BETWEEN 1 AND 9)", &[]),
+            ("UPDATE (SELECT * FROM users) AS u SET bio = ''", &[]),
+        ] {
+            let migration = format!("SET lock_timeout = '1s'; {migration}");
+            assert_eq!(rules(&baseline, &migration), expected, "{migration}");
         }
     }
 
