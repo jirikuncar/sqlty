@@ -686,16 +686,27 @@ impl Tree {
     }
 
     fn constant(&self, module: &str, name: &str, depth: usize) -> Option<(&Source, &Expr)> {
+        self.value(module, name, crate::compose::constant, depth)
+    }
+
+    /// What `read` finds for `name` in `module`, following the names it re-exports.
+    fn value<'s>(
+        &'s self,
+        module: &str,
+        name: &str,
+        read: for<'a> fn(&'a Source, &str) -> Option<&'a Expr>,
+        depth: usize,
+    ) -> Option<(&'s Source, &'s Expr)> {
         if depth > 8 {
             return None;
         }
         let source = self.sources.get(module)?.source()?;
-        if let Some(value) = crate::compose::constant(source, name) {
+        if let Some(value) = read(source, name) {
             return Some((source, value));
         }
         let exports = self.reexports(module, source);
         let (target, original) = exports.get(name)?;
-        self.constant(target, original, depth + 1)
+        self.value(target, original, read, depth + 1)
     }
 
     fn definitions(&self, module: &str, source: &Arc<Source>) -> Defs {
@@ -755,6 +766,11 @@ impl Index for Tree {
     fn row_type(&self, source: &Source, dotted: &str) -> Option<RowType> {
         let (module, name) = target(source, dotted)?;
         self.row_type_at(&module, &name, 0)
+    }
+
+    fn type_alias(&self, source: &Source, dotted: &str) -> Option<(&Source, &Expr)> {
+        let (module, name) = target(source, dotted)?;
+        self.value(&module, &name, Source::type_alias, 0)
     }
 }
 

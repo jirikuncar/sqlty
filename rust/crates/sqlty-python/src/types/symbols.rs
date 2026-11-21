@@ -200,6 +200,15 @@ impl Source {
         aliases
     }
 
+    /// The type the module-level alias `name` declares: `name = T`, `name: TypeAlias = T` or
+    /// `type name = T`, where nothing else binds `name`.
+    pub fn type_alias(&self, name: &str) -> Option<&Expr> {
+        let Local::Alias(at) = *self.local().get(name)? else {
+            return None;
+        };
+        type_alias(self.body().get(at)?, &self.aliases).map(|(_, value)| value)
+    }
+
     /// The `typing` member `expr` names, if any.
     pub fn typing_name<'e>(&'e self, expr: &'e Expr) -> Option<&'e str> {
         match expr {
@@ -278,6 +287,9 @@ pub trait Index: Send + Sync {
     fn type_of(&self, source: &Source, dotted: &str) -> Option<Ty>;
     /// The row type `NAME` or `module.NAME` that `source` imports from a checked module.
     fn row_type(&self, source: &Source, dotted: &str) -> Option<RowType>;
+    /// The type the alias `NAME` or `module.NAME` that `source` imports from a checked
+    /// module declares, with the source it is an expression of.
+    fn type_alias(&self, source: &Source, dotted: &str) -> Option<(&Source, &Expr)>;
 }
 
 /// A row type of another module, with the row types of that module, which its nested types
@@ -403,7 +415,7 @@ impl<'a> Visitor<'a> for Bound<'a> {
 
 /// How often each name is bound at module level, nested blocks included; `*` counts star
 /// imports.
-fn bound_names(body: &[Stmt]) -> HashMap<&str, usize> {
+pub(crate) fn bound_names(body: &[Stmt]) -> HashMap<&str, usize> {
     let mut bound = Bound {
         counts: HashMap::new(),
         imported: HashMap::new(),
