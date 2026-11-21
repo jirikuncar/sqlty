@@ -90,11 +90,7 @@ pub enum Direction {
 impl Direction {
     /// `sqlty.breaking.direction`; anything else is both.
     pub fn parse(name: &str) -> Self {
-        match name {
-            "backward" => Self::Backward,
-            "forward" => Self::Forward,
-            _ => Self::Both,
-        }
+        Self::from_str(name, false).unwrap_or(Self::Both)
     }
 
     /// The name of a finding's direction: backward, forward or migration, never both.
