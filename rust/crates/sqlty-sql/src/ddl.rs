@@ -175,6 +175,10 @@ pub struct RowEvents {
     pub update: bool,
 }
 
+/// Name prefix of the placeholder column that stands for a `LIKE` item, see
+/// [`Statement::without_like`].
+pub(crate) const LIKE_COLUMN: &str = "sqlty_like_";
+
 impl Statement<'_> {
     pub(crate) fn sql(&self) -> String {
         render(&self.0).trim().to_string()
@@ -601,8 +605,9 @@ impl Statement<'_> {
         .to_string()
     }
 
-    /// The statement without its `LIKE source [INCLUDING ...]` items, and the sources'
-    /// name parts; `None` when it has none. sqlparser cannot read the `INCLUDING` options.
+    /// The statement with each `LIKE source [INCLUDING ...]` item replaced by a column
+    /// `sqlty_like_N int` (N indexes the sources), and the sources' name parts; `None` when
+    /// it has none. sqlparser cannot read the `INCLUDING` options.
     pub(crate) fn without_like(&self) -> Option<(String, Vec<Vec<String>>)> {
         let pieces = &self.0;
         let open = pieces.iter().position(|p| is_punct(p, "("))?;
@@ -612,6 +617,8 @@ impl Statement<'_> {
         for item in split_top_level(&pieces[open + 1..close], ",") {
             let sig: Vec<&Piece> = item.iter().filter(|p| significant(p)).collect();
             if sig.first().is_some_and(|p| is_word(p, "like")) {
+                // A placeholder column keeps where the copied columns go.
+                kept.push(format!("{LIKE_COLUMN}{} int", sources.len()));
                 sources.push(name_parts(&sig[1..]).0);
             } else {
                 kept.push(render(item));

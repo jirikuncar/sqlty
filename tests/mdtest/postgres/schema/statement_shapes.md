@@ -118,6 +118,11 @@ SELECT * FROM b.four
 
 ## LIKE copies columns
 
+The copied columns go where `LIKE` stands in the column list, as PostgreSQL builds the
+table from the list's items in order
+([CREATE TABLE](https://www.postgresql.org/docs/17/sql-createtable.html), `LIKE
+source_table`).
+
 `schema.sql`:
 
 ```sql
@@ -131,8 +136,8 @@ CREATE TABLE q (id int) PARTITION BY LIST (id);
 ```sql
 SELECT * FROM copy
 -- columns: k: int (INT)
--- columns: y: str | None (TEXT)
 -- columns: x: int | None (INT)
+-- columns: y: str | None (TEXT)
 ```
 
 ```sql
