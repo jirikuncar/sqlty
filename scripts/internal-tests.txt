@@ -1,7 +1,7 @@
 # Tests that reach past a package's public API: `#[test]` functions in a crate's `src/`,
 # and pytest files importing a private `sqlty._*` module (`sqlty._core` is sqlty-ext's API).
 # Lower a count whenever a test moves to the public API, until the line can go.
-sqlty-bench 3
+sqlty-bench 0
 sqlty-cli 31
 sqlty-ext 10
 sqlty-format 0
