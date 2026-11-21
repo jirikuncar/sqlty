@@ -145,15 +145,13 @@ pub fn breaking(
 /// its `-- sqlty: ignore` comments drop.
 pub fn check_queries(text: &str, name: &str, settings: &FileSettings) -> Vec<Diagnostic> {
     let checker = Checker::of(settings, None);
-    let found = queries::check_queries(
+    queries::check_queries(
         text,
         settings.query_format,
         name,
         &checker.options,
         &checker.rules,
-    );
-    let ignores = suppress::sql_ignores(text);
-    suppress::apply_sql(&ignores, found, &checker.rules)
+    )
 }
 
 /// What `against` breaks in the `.sql` file of named queries `text`, as [`breaking`].

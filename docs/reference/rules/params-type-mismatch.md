@@ -23,6 +23,9 @@ call passes:
 - An item or key whose type can't be the type of its parameter is reported. So
   is one that allows `None` for a parameter stored in a `NOT NULL` column.
 
+A type alias (`X = T`, `X: TypeAlias = T` or `type X = T`, in the module or
+imported) is checked as the type `T` it names.
+
 A `str` and a cast parameter take anything, and `typing.Any`, an unknown type or
 an annotation `P` can't be read from are never reported. With
 `dialect = "sqlite"` only `None` is checked. A `P` that

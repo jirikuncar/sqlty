@@ -30,12 +30,21 @@ fn locks_of_each_statement() {
         ("DROP INDEX CONCURRENTLY IF EXISTS public.users_email", &[]),
         ("REINDEX INDEX users_email", &[MissingConcurrently]),
         ("REINDEX (VERBOSE) TABLE CONCURRENTLY users", &[]),
+        ("CREATE TABLE t (id int); CREATE INDEX t_id ON t (id); REINDEX TABLE t; REINDEX INDEX \"t_id\"", &[]),
+        ("REINDEX SCHEMA public", &[MissingConcurrently]),
         ("CLUSTER users USING users_email", &[TableRewrite]),
         ("CLUSTER VERBOSE public.users", &[TableRewrite]),
         ("CLUSTER", &[TableRewrite]),
         ("VACUUM FULL users", &[TableRewrite]),
         ("VACUUM FULL", &[TableRewrite]),
         ("VACUUM users", &[]),
+        ("VACUUM (FULL, ANALYZE) users", &[TableRewrite]),
+        ("VACUUM (FULL false) users", &[]),
+        ("VACUUM (VERBOSE", &[]),
+        ("VACUUM FULL ANALYZE public.users (bio), events", &[TableRewrite]),
+        ("VACUUM VERBOSE users)", &[]),
+        ("CREATE TABLE t (id int); VACUUM (FULL) t (id), \"t\"", &[]),
+        ("CREATE TABLE t (id int); VACUUM FULL VERBOSE t, users", &[TableRewrite]),
         ("REFRESH MATERIALIZED VIEW mv", &[MissingConcurrently]),
         ("REFRESH MATERIALIZED VIEW CONCURRENTLY mv", &[]),
         ("ALTER TABLE users ADD COLUMN x uuid DEFAULT gen_random_uuid()", &[TableRewrite]),
@@ -435,6 +444,10 @@ fn an_enum_value_is_used_only_after_its_transaction_commits() {
         "INSERT INTO orders (id, note) VALUES (1, 'It''s')"
     ));
     assert!(reported("", "UPDATE elsewhere SET state = 'It''s'"));
+    assert!(!reported(
+        "",
+        "UPDATE users SET bio = 'It''s' WHERE state IS NULL"
+    ));
     assert!(reported(
         "SAVEPOINT s; ROLLBACK TO SAVEPOINT s; RELEASE s;",
         used
@@ -763,10 +776,16 @@ fn builds_and_rewrites_hold_their_locks_until_the_transaction_ends() {
         ),
         (
             format!("BEGIN; VACUUM (FULL, SKIP_LOCKED) users; {then_teams}"),
-            &[TableRewrite, MultiTableLock],
+            &[TableRewrite, ConcurrentlyInTransaction, MultiTableLock],
         ),
-        (format!("BEGIN; VACUUM (FULL off) users; {then_teams}"), &[]),
-        (format!("BEGIN; VACUUM FULL; {then_teams}"), &[TableRewrite]),
+        (
+            format!("BEGIN; VACUUM (FULL off) users; {then_teams}"),
+            &[ConcurrentlyInTransaction],
+        ),
+        (
+            format!("BEGIN; VACUUM FULL; {then_teams}"),
+            &[TableRewrite, ConcurrentlyInTransaction],
+        ),
         (format!("BEGIN; CLUSTER; {then_teams}"), &[TableRewrite]),
         (
             format!("BEGIN; REINDEX SCHEMA public; {then_teams}"),
@@ -787,7 +806,7 @@ fn builds_and_rewrites_hold_their_locks_until_the_transaction_ends() {
                      CREATE MATERIALIZED VIEW m2 AS SELECT 1 AS x WITH NO DATA;
                      REFRESH MATERIALIZED VIEW m2; {then_teams}"
             ),
-            &[],
+            &[ConcurrentlyInTransaction],
         ),
     ] {
         let migration = format!("SET lock_timeout = '1s'; {migration}");
@@ -871,6 +890,14 @@ fn a_table_keeps_a_replica_identity() {
         ),
         ("BEGIN; ALTER TABLE a DROP CONSTRAINT a_pkey;", &[DropPrimaryKey]),
         ("CREATE TABLE e (id int PRIMARY KEY); ALTER TABLE e DROP CONSTRAINT e_pkey", &[]),
+        (
+            "ALTER TABLE n RENAME CONSTRAINT n_named TO a_pkey; ALTER TABLE a RENAME TO z; ALTER TABLE n DROP CONSTRAINT a_pkey",
+            &[DropPrimaryKey],
+        ),
+        (
+            "ALTER TABLE a REPLICA IDENTITY USING INDEX a_u; ALTER TABLE b REPLICA IDENTITY USING INDEX a_u; ALTER TABLE a RENAME TO z; DROP INDEX a_u",
+            &[DropPrimaryKey],
+        ),
         ("BEGIN; ALTER TABLE a DROP CONSTRAINT a_pkey; ALTER TABLE b RENAME TO bb; COMMIT;", &[DropPrimaryKey]),
         ("CREATE UNIQUE INDEX ON a (id); ALTER TABLE a DROP CONSTRAINT a_pkey", &[DropPrimaryKey]),
         ("ALTER TABLE a REPLICA IDENTITY USING INDEX a_u; ALTER TABLE a DROP COLUMN id", &[]),
@@ -892,6 +919,58 @@ fn a_table_keeps_a_replica_identity() {
         let found: Vec<_> = found.into_iter().filter(|rule| *rule == DropPrimaryKey).collect();
         assert_eq!(found, expected, "{migration}");
     }
+}
+
+#[test]
+fn implicit_locks_count_toward_multi_table_lock() {
+    let baseline = format!(
+        "{USERS} CREATE TABLE members (id BIGINT PRIMARY KEY, team_id BIGINT REFERENCES teams (id),
+            user_id BIGINT, CONSTRAINT members_user FOREIGN KEY (user_id) REFERENCES users (id));
+        CREATE TABLE ev (at date) PARTITION BY RANGE (at);
+        CREATE TABLE ev_d PARTITION OF ev DEFAULT;"
+    );
+    for (statements, reported) in [
+        ("TRUNCATE teams CASCADE; ALTER TABLE members ADD COLUMN x int", false),
+        ("TRUNCATE teams; ALTER TABLE members ADD COLUMN x int", true),
+        ("ALTER TABLE members DROP COLUMN team_id; ALTER TABLE teams ADD COLUMN x int", false),
+        ("ALTER TABLE members DROP COLUMN id; ALTER TABLE teams ADD COLUMN x int", true),
+        ("ALTER TABLE members DROP CONSTRAINT members_user; ALTER TABLE users ADD COLUMN x int", false),
+        ("ALTER TABLE members DROP CONSTRAINT members_team_id_fkey; ALTER TABLE teams ADD COLUMN x int", false),
+        ("ALTER TABLE members DROP COLUMN user_id; COMMIT; BEGIN; ALTER TABLE members DROP CONSTRAINT members_user; ALTER TABLE users ADD COLUMN x int", true),
+        ("ALTER TABLE members DROP CONSTRAINT members_team_id_fkey; COMMIT; BEGIN; ALTER TABLE members DROP COLUMN team_id; ALTER TABLE teams ADD COLUMN x int", true),
+        ("DROP TABLE members; COMMIT; BEGIN; ALTER TABLE users ADD COLUMN a int; DROP TABLE members; ALTER TABLE teams ADD COLUMN x int", true),
+        ("DROP TABLE members; ALTER TABLE teams ADD COLUMN x int", false),
+        ("DROP TABLE teams CASCADE; ALTER TABLE members ADD COLUMN x int", false),
+        ("DROP TABLE teams; ALTER TABLE members ADD COLUMN x int", true),
+        ("CREATE TABLE ev_1 PARTITION OF ev FOR VALUES FROM ('2020-01-01') TO ('2021-01-01'); ALTER TABLE ev_d ADD COLUMN x int", false),
+        ("ALTER TABLE users ADD COLUMN a int; REINDEX TABLE teams", true),
+        ("ALTER TABLE users ADD COLUMN a int; CLUSTER teams USING teams_pkey", true),
+        ("ALTER TABLE users ADD COLUMN a int; REINDEX INDEX users_email; CLUSTER", false),
+        ("CREATE TABLE t (id int); ALTER TABLE users ADD COLUMN a int; REINDEX TABLE t", false),
+        ("ALTER TABLE members DROP CONSTRAINT members_team_id_fkey; COMMIT; BEGIN; ALTER TABLE teams ADD COLUMN q int; TRUNCATE teams CASCADE", false),
+        ("DROP TABLE members; COMMIT; BEGIN; ALTER TABLE teams ADD COLUMN q int; TRUNCATE teams CASCADE", false),
+        ("ALTER TABLE members DROP COLUMN team_id; COMMIT; BEGIN; ALTER TABLE teams ADD COLUMN q int; DROP TABLE teams CASCADE", false),
+        ("DROP TABLE teams CASCADE; COMMIT; BEGIN; ALTER TABLE members ADD COLUMN q int; ALTER TABLE members DROP COLUMN team_id", false),
+        ("ALTER TABLE members RENAME TO m2; COMMIT; BEGIN; ALTER TABLE m2 ADD COLUMN q int; ALTER TABLE m2 DROP CONSTRAINT members_team_id_fkey", true),
+        ("ALTER TABLE teams RENAME TO squads; COMMIT; BEGIN; ALTER TABLE squads ADD COLUMN q int; TRUNCATE squads CASCADE", true),
+        ("ALTER TABLE teams RENAME TO squads; COMMIT; BEGIN; ALTER TABLE members DROP COLUMN team_id; ALTER TABLE squads ADD COLUMN q int", false),
+    ] {
+        let migration = format!("SET lock_timeout = '1s'; BEGIN; {statements}; COMMIT;");
+        let found = rules(&baseline, &migration);
+        assert_eq!(found.contains(&Rule::MultiTableLock), reported, "{migration}: {found:?}");
+    }
+}
+
+#[test]
+fn a_second_foreign_key_to_a_table_keeps_referencing_it() {
+    let baseline = "CREATE TABLE teams (id BIGINT PRIMARY KEY);
+        CREATE TABLE pairs (a BIGINT REFERENCES teams (id), b BIGINT REFERENCES teams (id));";
+    let migration = "SET lock_timeout = '1s'; ALTER TABLE pairs DROP COLUMN a;
+        BEGIN; ALTER TABLE teams ADD COLUMN q int; TRUNCATE teams CASCADE; COMMIT;";
+    assert_eq!(
+        rules(baseline, migration),
+        [Rule::TruncateCascade, Rule::MultiTableLock]
+    );
 }
 
 #[test]
@@ -1048,10 +1127,15 @@ fn concurrently_fails_in_a_transaction() {
             ALTER TABLE events DETACH PARTITION p CONCURRENTLY;
             REINDEX INDEX CONCURRENTLY a;
             REINDEX (CONCURRENTLY) INDEX a;
-            ROLLBACK;";
+            ROLLBACK;
+            BEGIN;
+            VACUUM users;
+            VACUUM ANALYZE users;
+            COMMIT;
+            VACUUM (ANALYZE) users;";
     assert_eq!(
         rules(USERS, migration),
-        [Rule::ConcurrentlyInTransaction; 5]
+        [Rule::ConcurrentlyInTransaction; 7]
     );
     let off = "SET lock_timeout = '1s'; BEGIN; REINDEX (CONCURRENTLY 'off') INDEX a; COMMIT;";
     assert_eq!(rules(USERS, off), [Rule::MissingConcurrently]);

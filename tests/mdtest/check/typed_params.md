@@ -243,6 +243,94 @@ class ByIdAndName(Base):
 q = SQL[tuple[str], ByIdAndName]("--sql\nSELECT name FROM users WHERE id = %(id)s AND name = %(name)s")
 ```
 
+### Through a type alias
+
+`P` named by an alias is compared as the type the alias declares: `X = T`,
+`X: TypeAlias = T` or `type X = T`, through other aliases and imports.
+
+`pkg/aliases.py`:
+
+```python
+from typing import TypedDict
+
+
+class ById(TypedDict):
+    id: str
+
+
+type Born = tuple[int]
+Keyed = ById
+```
+
+`pkg/reexported.py`:
+
+```python
+from pkg.aliases import ById
+
+Reexported = ById
+```
+
+```python
+import datetime
+from typing import TypeAlias
+
+from sqlty import SQL
+from pkg import aliases
+from pkg.aliases import Born, Keyed
+from pkg.reexported import Reexported
+
+T = tuple[str | None, datetime.date]
+Pair: TypeAlias = T
+type Single = tuple[int]
+
+# error: [params-type-mismatch] "T item 1 is str | None but query parameter 1 is not nullable"
+q = SQL[None, T]("--sql\nUPDATE users SET name = %s WHERE born = %s")
+# error: [params-type-mismatch] "Pair has 2 items but the query has 1 parameter"
+r = SQL[tuple[str], Pair]("--sql\nSELECT name FROM users WHERE id = %s")
+# error: [params-type-mismatch] "Single item 1 is int but query parameter 1 expects str"
+s = SQL[tuple[int], Single]("--sql\nSELECT id FROM users WHERE name = %s")
+# error: [params-type-mismatch] "Born item 1 is int but query parameter 1 expects datetime.date"
+t = SQL[tuple[int], Born]("--sql\nSELECT id FROM users WHERE born = %s")
+# error: [params-type-mismatch] "aliases.Born item 1 is int but query parameter 1 expects datetime.date"
+u = SQL[tuple[int], aliases.Born]("--sql\nSELECT id FROM users WHERE born = %s")
+# error: [params-type-mismatch] "Keyed is a TypedDict but the query takes positional parameters"
+v = SQL[tuple[str], Keyed]("--sql\nSELECT name FROM users WHERE id = %s")
+# error: [params-type-mismatch] "Reexported is a TypedDict but the query takes positional parameters"
+w = SQL[tuple[str], Reexported]("--sql\nSELECT name FROM users WHERE id = %s")
+```
+
+### A name bound twice is not an alias
+
+Nor is one a function or class binds where `P` is spelled.
+
+```python
+from sqlty import SQL
+
+T = tuple[int]
+T = tuple[int, int]
+
+Pair = tuple[int, int]
+if T:
+    Pair = tuple[int]
+
+Wide = tuple[int, int]
+
+
+def run() -> None:
+    Wide = tuple[int]
+    w = SQL[tuple[str], Wide]("--sql\nSELECT name FROM users WHERE id = %s")
+
+
+class Queries:
+    Wide = tuple[int]
+    w = SQL[tuple[str], Wide]("--sql\nSELECT name FROM users WHERE id = %s")
+
+
+q = SQL[tuple[str], T]("--sql\nSELECT name FROM users WHERE id = %s")
+p = SQL[tuple[str], Pair]("--sql\nSELECT name FROM users WHERE id = %s")
+# error:
+```
+
 ## Passed to a helper
 
 A `SQL[R, P]` stored in a name and passed to a [registered helper](../../../docs/guide/helpers.md)
@@ -368,6 +456,24 @@ from pkg.db import fetch_one
 async def run(conn: Any) -> None:
     # error: [param-type-mismatch] "parameter 'name' expects str, got int"
     await fetch_one(conn, BY_NAME, tuple[int], name=1)
+```
+
+### `P` through an alias
+
+A cast parameter takes any value, so only `P` says what it is.
+
+```python
+from sqlty import SQL
+from pkg.db import execute
+
+Rename = tuple[str, int]
+RENAME = SQL[tuple[()], Rename]("--sql\nUPDATE users SET name = %s WHERE id = %s::INTEGER")
+
+
+def run() -> None:
+    execute(RENAME, ("ann", 1))
+    # error: [param-type-mismatch] "parameter 2 expects int, got str"
+    execute(RENAME, ("ann", "1"))
 ```
 
 ### `P` that is not compared

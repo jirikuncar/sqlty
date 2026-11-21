@@ -1,12 +1,13 @@
 //! The migration checks of `sqlty breaking`, with the user's severities and suppressions.
 
 use crate::checker::Diagnostic;
+use crate::rewriter::LineIndex;
 use crate::rules::{Rule, RuleConfig};
 use crate::suppress::{apply_sql, sql_ignores};
 
 /// The diagnostics of each of `files`, PostgreSQL migrations in the order they run, for the
-/// statements `baseline` does not have. `-- sqlty: ignore[rule]` on a statement's first line
-/// drops its diagnostic.
+/// statements `baseline` does not have. `-- sqlty: ignore[rule]` on a statement's first line,
+/// or alone on its line above the statement, drops its diagnostic.
 pub fn check_migrations(
     baseline: &str,
     files: &[&str],
@@ -27,20 +28,22 @@ pub fn check_migrations_with(
         .into_iter()
         .zip(files)
         .map(|(found, (sql, rules))| {
-            let newlines: Vec<usize> = sql.match_indices('\n').map(|(at, _)| at).collect();
-            let found = found
+            let lines = LineIndex::new(sql);
+            let found: Vec<Diagnostic> = found
                 .into_iter()
                 .filter(|finding| rules.is_enabled(finding.rule))
                 .map(|finding| Diagnostic {
                     rule: finding.rule,
                     message: finding.message,
                     severity: rules.severity(finding.rule),
-                    line: newlines.partition_point(|&at| at < finding.span.start) + 1,
+                    line: lines.line_at(finding.span.start),
                     span: finding.span,
                     fix: Vec::new(),
                 })
                 .collect();
-            apply_sql(&sql_ignores(sql), found, rules)
+            // Each finding spans its statement.
+            let statements: Vec<_> = found.iter().map(|found| found.span.clone()).collect();
+            apply_sql(&sql_ignores(sql, &statements), found, rules)
                 .into_iter()
                 .filter(|diagnostic| diagnostic.rule != Rule::UnusedIgnore)
                 .collect()

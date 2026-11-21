@@ -63,4 +63,18 @@ fn ignored_rules_and_comments_drop_diagnostics() {
         &rules(&[("unused-ignore", "error")]),
     );
     assert!(found.len() == 1 && found[0].is_empty(), "{found:?}");
+    let above = "SET lock_timeout = '1s';\n-- sqlty: ignore[missing-concurrently]\nCREATE INDEX i ON users (bio);";
+    let found = check_migrations(BASELINE, &[above], &rules(&[]));
+    assert!(found[0].is_empty(), "{found:?}");
+    let apart = above.replace("]\nCREATE", "]\n\nCREATE");
+    let found = check_migrations(BASELINE, &[&apart], &rules(&[]));
+    assert_eq!(found[0].len(), 1, "{found:?}");
+    // A lone `\r` ends no line: the comment shares the first line, and covers it alone.
+    let cr = "SET lock_timeout = '1s';\r-- sqlty: ignore[missing-concurrently]\nSELECT 1;\nCREATE INDEX i ON users (bio);";
+    let found = check_migrations(BASELINE, &[cr], &rules(&[]));
+    assert_eq!(found[0].len(), 1, "{found:?}");
+    assert_eq!(found[0][0].line, 3, "{found:?}");
+    let block = "SET lock_timeout = '1s';\n-- sqlty: ignore[missing-concurrently]\n/* why */\nCREATE INDEX i\nON users (bio);";
+    let found = check_migrations(BASELINE, &[block], &rules(&[("unused-ignore", "error")]));
+    assert!(found[0].is_empty(), "{found:?}");
 }

@@ -1,7 +1,8 @@
 //! `# sqlty: ignore` comments, and the diagnostics they suppress; `-- sqlty: ignore` in
 //! `.sql` files.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
+use std::ops::Range;
 use std::sync::LazyLock;
 
 use regex::Regex;
@@ -9,6 +10,7 @@ use ruff_python_ast::token::TokenKind;
 use ruff_python_parser::{lexer, Mode};
 
 use crate::checker::Diagnostic;
+use crate::rewriter::LineIndex;
 use crate::rows::Reported;
 use crate::rules::{Rule, RuleConfig};
 use crate::scopes::Lines;
@@ -18,8 +20,14 @@ use crate::types::symbols::Source;
 /// A `# sqlty: ignore` or `# sqlty: ignore[rule, ...]` comment.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Ignore {
-    /// The 1-based line it is on, whose diagnostics it suppresses.
+    /// The 1-based line it is on.
     pub line: usize,
+    /// The first line whose diagnostics it suppresses: `line`, or for a `--` comment alone on
+    /// its line the next one that is not a comment.
+    pub covers: usize,
+    /// The last line it suppresses: `covers`, or the last line of the statement that starts
+    /// on `covers` when the comment is alone on its line above it.
+    pub through: usize,
     /// The rules it names; `None` suppresses every rule.
     pub rules: Option<Vec<String>>,
     /// The byte offsets of the comment.
@@ -62,8 +70,11 @@ pub fn ignores(source: &Source) -> Vec<Ignore> {
         .comments
         .iter()
         .filter_map(|&range| {
+            let line = source.line(range.start());
             Some(Ignore {
-                line: source.line(range.start()),
+                line,
+                covers: line,
+                through: line,
                 rules: rules_of(&text[range])?,
                 span: (range.start().to_usize(), range.end().to_usize()),
             })
@@ -86,8 +97,11 @@ pub fn unparsed_ignores(text: &str) -> Vec<Ignore> {
             TokenKind::Comment => {
                 let range = tokens.current_range();
                 if let Some(rules) = rules_of(&text[range]) {
+                    let line = lines.line(range.start().to_usize());
                     found.push(Ignore {
-                        line: lines.line(range.start().to_usize()),
+                        line,
+                        covers: line,
+                        through: line,
                         rules,
                         span: (range.start().to_usize(), range.end().to_usize()),
                     });
@@ -98,8 +112,13 @@ pub fn unparsed_ignores(text: &str) -> Vec<Ignore> {
     }
 }
 
-/// The `-- sqlty: ignore` comments of a `.sql` file, the first of each line.
-pub fn sql_ignores(text: &str) -> Vec<Ignore> {
+/// The `-- sqlty: ignore` comments of a `.sql` file, the first of each line. One alone on its
+/// line covers the next line that is not a comment (`--`, or wholly `/* ... */`), through the
+/// last line of the one of `statements` (byte ranges) that starts there; a blank line or the
+/// end of the file first leaves it covering its own line, where it suppresses nothing. Lines
+/// end at `\n`, as the diagnostics of queries and migrations count them, so a lone `\r` ends
+/// none. Strings and dollar quotes are not lexed: a line in one that spells the comment counts.
+pub fn sql_ignores(text: &str, statements: &[Range<usize>]) -> Vec<Ignore> {
     #[expect(clippy::expect_used, reason = "the pattern is written here")]
     static IGNORE: LazyLock<regex::bytes::Regex> = LazyLock::new(|| {
         regex::bytes::Regex::new(r"(?-u)--\s*sqlty:\s*ignore\b(?:\[([^\]]*)\])?")
@@ -108,32 +127,76 @@ pub fn sql_ignores(text: &str) -> Vec<Ignore> {
     if !text.contains("sqlty:") {
         return Vec::new();
     }
-    let lines = Lines::new(text);
-    let mut found = Vec::new();
-    for line in 1.. {
-        let start = lines.start(line, text.len());
-        if start == text.len() {
-            break;
+    let mut found: Vec<Ignore> = Vec::new();
+    let mut waiting: Vec<usize> = Vec::new();
+    let mut last_lines = None;
+    let mut start = 0;
+    for (row, line) in text
+        .as_bytes()
+        .split_inclusive(|&byte| byte == b'\n')
+        .zip(1..)
+    {
+        let row_start = start;
+        start += row.len();
+        if let Some(matched) = IGNORE.captures(row) {
+            let whole = matched.get_match();
+            let alone = row[..whole.start()].iter().all(u8::is_ascii_whitespace);
+            found.push(Ignore {
+                line,
+                covers: line,
+                through: line,
+                rules: matched.get(1).map(|names| {
+                    String::from_utf8_lossy(names.as_bytes())
+                        .split(',')
+                        .map(|name| name.trim_matches(blank))
+                        .filter(|name| !name.is_empty())
+                        .map(str::to_string)
+                        .collect()
+                }),
+                span: (row_start + whole.start(), row_start + whole.end()),
+            });
+            if alone {
+                waiting.push(found.len() - 1);
+                continue;
+            }
         }
-        let end = lines.start(line + 1, text.len());
-        let Some(matched) = IGNORE.captures(&text.as_bytes()[start..end]) else {
-            continue;
-        };
-        let whole = matched.get_match();
-        found.push(Ignore {
-            line,
-            rules: matched.get(1).map(|names| {
-                String::from_utf8_lossy(names.as_bytes())
-                    .split(',')
-                    .map(|name| name.trim_matches(blank))
-                    .filter(|name| !name.is_empty())
-                    .map(str::to_string)
-                    .collect()
-            }),
-            span: (start + whole.start(), start + whole.end()),
-        });
+        let row = row.trim_ascii();
+        if row.is_empty() {
+            waiting.clear();
+        } else if !is_comment(row) && !waiting.is_empty() {
+            let through = last_lines
+                .get_or_insert_with(|| statement_ends(text, statements))
+                .get(&line)
+                .map_or(line, |&last| last.max(line));
+            for index in waiting.drain(..) {
+                found[index].covers = line;
+                found[index].through = through;
+            }
+        }
     }
     found
+}
+
+/// Whether a trimmed line is wholly a comment: `-- ...` or one `/* ... */`.
+fn is_comment(row: &[u8]) -> bool {
+    row.starts_with(b"--")
+        || row.strip_prefix(b"/*").is_some_and(|rest| {
+            rest.windows(2).position(|pair| pair == b"*/") == Some(rest.len().wrapping_sub(2))
+        })
+}
+
+/// The last line of the statements that start on each line, by their first line; built
+/// once per file, on the first comment that covers a line below it.
+fn statement_ends(text: &str, statements: &[Range<usize>]) -> HashMap<usize, usize> {
+    let lines = LineIndex::new(text);
+    let mut last: HashMap<usize, usize> = HashMap::new();
+    for statement in statements {
+        let first = lines.line_at(statement.start);
+        let end = lines.line_at(statement.end.saturating_sub(1).max(statement.start));
+        let entry = last.entry(first).or_insert(end);
+        *entry = (*entry).max(end);
+    }
+    last
 }
 
 /// What `fix_source` leaves alone, by line: the rules of each ignore comment (`None`: every
@@ -160,7 +223,7 @@ pub fn suppressed(
     found
 }
 
-/// `apply_suppressions`: `diagnostics` without those a comment on their line suppresses,
+/// `apply_suppressions`: `diagnostics` without those a comment covering their line suppresses,
 /// then an `unused-ignore` for each comment, or rule of one, that suppresses nothing.
 pub fn apply(ignores: &[Ignore], diagnostics: Vec<Reported>, rules: &RuleConfig) -> Vec<Reported> {
     apply_marked(ignores, diagnostics, rules, "#")
@@ -195,26 +258,44 @@ fn apply_marked(
     if ignores.is_empty() || diagnostics.iter().any(crashed) {
         return diagnostics;
     }
+    // The comments of each range of lines, and the ranges on each line: comments above one
+    // statement share a range, so each line is listed once per range that holds it.
+    let mut ranges: HashMap<(usize, usize), Vec<&Ignore>> = HashMap::new();
+    for ignore in ignores {
+        let range = (ignore.covers, ignore.through);
+        ranges.entry(range).or_default().push(ignore);
+    }
+    let mut covering: HashMap<usize, Vec<&[&Ignore]>> = HashMap::new();
+    for (&(first, last), group) in &ranges {
+        for line in first..=last {
+            covering.entry(line).or_default().push(group);
+        }
+    }
     let mut kept = Vec::new();
     let mut used: HashSet<(usize, Option<&str>)> = HashSet::new();
     for reported in diagnostics {
-        let diagnostic = &reported.diagnostic;
-        let rule = diagnostic.rule.name();
-        let ignore = ignores.iter().find(|ignore| ignore.line == diagnostic.line);
-        match ignore {
-            Some(Ignore {
-                line, rules: None, ..
-            }) => {
-                used.insert((*line, None));
+        let rule = reported.diagnostic.rule.name();
+        let first_naming = |group: &&[&Ignore]| {
+            group.iter().find_map(|ignore| match &ignore.rules {
+                None => Some((ignore.line, None)),
+                Some(names) => names
+                    .iter()
+                    .any(|name| name == rule)
+                    .then_some((ignore.line, Some(rule))),
+            })
+        };
+        // The first comment of the file that covers the line and names the rule.
+        let found = covering
+            .get(&reported.diagnostic.line)
+            .into_iter()
+            .flatten()
+            .filter_map(first_naming)
+            .min_by_key(|&(line, _)| line);
+        match found {
+            Some(key) => {
+                used.insert(key);
             }
-            Some(Ignore {
-                line,
-                rules: Some(names),
-                ..
-            }) if names.iter().any(|name| name == rule) => {
-                used.insert((*line, Some(rule)));
-            }
-            _ => kept.push(reported),
+            None => kept.push(reported),
         }
     }
     if rules.is_enabled(Rule::UnusedIgnore) {

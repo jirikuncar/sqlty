@@ -26,3 +26,10 @@ fn one_walk_collects_calls_templates_strings_and_stacks() {
     assert!(matches!(scan.strings[2].0, Expr::TString(_)));
     assert!(matches!(scan.strings[3].0, Expr::StringLiteral(_)));
 }
+
+#[test]
+fn lines_end_at_newline_carriage_return_or_both() {
+    let lines = Lines::new("a\nb\r\nc\rd");
+    let found: Vec<usize> = [0, 2, 5, 7].map(|offset| lines.line(offset)).into();
+    assert_eq!(found, [1, 2, 3, 4]);
+}
