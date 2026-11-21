@@ -1,11 +1,13 @@
 //! What `sqlty.core` answers, called without Python.
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use sqlty_project::{check_module, Checker};
+use sqlty_project::{check_module, Checker, Workspace};
 use sqlty_python::options::Options;
 use sqlty_python::params;
+use sqlty_python::project::{Files, Kind, Listing, Read};
 use sqlty_python::rewriter::{self, ImportStyle};
 use sqlty_python::rules::RuleConfig;
 use sqlty_python::types::symbols::Source;
@@ -80,4 +82,73 @@ pub fn strip(source: &str, style: Option<&str>) -> String {
         source,
         &ImportStyle::parse(style).expect("a known import style"),
     )
+}
+
+/// Files held in memory, by absolute path.
+struct Tree(BTreeMap<PathBuf, String>);
+
+impl Files for Tree {
+    fn read(&self, path: &Path) -> Read {
+        self.0
+            .get(path)
+            .map_or(Read::Missing, |text| Read::Text(text.clone().into_bytes()))
+    }
+
+    fn list(&self, path: &Path) -> Listing {
+        let mut entries: Vec<(String, Kind)> = Vec::new();
+        for file in self.0.keys() {
+            let Ok(rest) = file.strip_prefix(path) else {
+                continue;
+            };
+            let mut parts = rest.components();
+            let Some(name) = parts.next() else { continue };
+            let name = name.as_os_str().to_string_lossy().into_owned();
+            let kind = if parts.next().is_some() {
+                Kind::Dir
+            } else {
+                Kind::File
+            };
+            if !entries.iter().any(|(seen, _)| *seen == name) {
+                entries.push((name, kind));
+            }
+        }
+        if entries.is_empty() {
+            Listing::Missing
+        } else {
+            Listing::Entries(entries)
+        }
+    }
+
+    fn is_link(&self, _path: &Path) -> bool {
+        false
+    }
+}
+
+/// `(rule, message, line)` of each diagnostic `sqlty check` reports for each of `texts` as
+/// the module `path` of the project of `files` (paths relative to its root).
+pub fn check_project(
+    files: &[(&str, String)],
+    path: &str,
+    texts: &[String],
+) -> Vec<Vec<(&'static str, String, usize)>> {
+    let root = Path::new("/project");
+    let tree = Tree(
+        files
+            .iter()
+            .map(|(name, text)| (root.join(name), text.clone()))
+            .collect(),
+    );
+    let mut workspace =
+        Workspace::root(root, Arc::new(tree), VERSION, Vec::new()).expect("the project opens");
+    texts
+        .iter()
+        .map(|text| {
+            workspace
+                .check(&root.join(path), text)
+                .expect("the module is checked")
+                .into_iter()
+                .map(|found| (found.rule.name(), found.message, found.line))
+                .collect()
+        })
+        .collect()
 }
