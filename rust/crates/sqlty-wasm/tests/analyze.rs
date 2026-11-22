@@ -300,17 +300,25 @@ fn parameters_stored_in_a_column_know_if_they_take_none() {
 
 #[test]
 fn an_offset_past_the_end_is_the_end() {
-    // "é" is one UTF-16 unit but two bytes: an offset past the end clamps to the end, not a panic.
-    let source = "é = \"--sql\\nSELECT na FROM users\"";
-    let end = source.encode_utf16().count();
-    for op in ["complete", "hover"] {
+    // "é" is one UTF-16 unit but two bytes: an offset past the end clamps to the end, not a
+    // panic. The query is unterminated, so the end is inside it and the answer is not null.
+    for (op, source, expected) in [
+        ("complete", "é = \"--sql\\nSELECT * FROM us", "users"),
+        ("hover", "é = \"--sql\\nSELECT name", "name"),
+    ] {
+        let end = source.encode_utf16().count();
         let at = |offset: usize| {
             ask(&json!({
                 "op": op, "source": source, "schema": SCHEMA, "dialect": "postgres", "offset": offset,
             }))
         };
-        assert_eq!(at(end + 10_000), at(end));
-        assert_eq!(at(end + 10_000), Value::Null);
+        let answer = at(end);
+        assert_eq!(at(end + 10_000), answer);
+        let found = match op {
+            "complete" => answer["items"][0]["label"].to_string(),
+            _ => answer["contents"].to_string(),
+        };
+        assert!(found.contains(expected), "{op}: {answer}");
     }
 }
 
