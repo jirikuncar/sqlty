@@ -504,3 +504,39 @@ fn parsed_params_follow_the_database_a_query_names() {
         );
     }
 }
+
+#[test]
+fn question_marks_number_the_parameters_apart_from_jsonb_operators() {
+    // The `?` in strings, names and comments, and the `?|` and `?&` operators, are no
+    // parameters: the two that are, are numbered in order.
+    let schema = load_schema(
+        "CREATE TABLE t (x INT NOT NULL, y TEXT, b JSONB, c TEXT[], d JSONB, e TEXT[])",
+        "postgres",
+    );
+    let sql = "SELECT '?', \"a?\", b ?| c, d ?& e FROM t WHERE x = ? -- ?\nAND y = ?";
+    let found = analyze_params(sql, "postgres", Some(&schema)).unwrap();
+    let typed: Vec<_> = found
+        .iter()
+        .map(|p| (p.index, p.python_type.as_deref()))
+        .collect();
+    assert_eq!(typed, [(1, Some("int")), (2, Some("str"))]);
+}
+
+#[test]
+fn the_first_signature_of_a_function_name_wins() {
+    let python = |sql: &str, index: usize| {
+        let found = analyze_params(sql, "postgres", None).unwrap();
+        found[index].python_type.clone()
+    };
+    assert_eq!(
+        python("SELECT split_part($1, $2, $3)", 0).as_deref(),
+        Some("str")
+    );
+    assert_eq!(
+        python("SELECT split_part($1, $2, $3)", 2).as_deref(),
+        Some("int")
+    );
+    // The arguments of `COALESCE` share one type.
+    assert_eq!(python("SELECT COALESCE($1, 1)", 0).as_deref(), Some("int"));
+    assert_eq!(python("SELECT NOT_A_FUNCTION($1)", 0), None);
+}

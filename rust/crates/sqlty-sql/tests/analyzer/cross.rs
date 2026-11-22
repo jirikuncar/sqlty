@@ -46,7 +46,7 @@ fn unparsed_statements_that_set_keys_or_types_are_skipped() {
 }
 
 #[test]
-fn test_dml_returning() {
+fn returning_of_dml_types_its_columns() {
     assert_eq!(
         infer("DELETE FROM t RETURNING id::INTEGER").as_deref(),
         Some("tuple[int]")
@@ -66,7 +66,7 @@ fn test_dml_returning() {
 }
 
 #[test]
-fn test_empty_target_list() {
+fn an_empty_select_list_is_an_empty_tuple() {
     assert_eq!(
         infer("SELECT FROM t FOR UPDATE").as_deref(),
         Some("tuple[()]")
@@ -75,7 +75,7 @@ fn test_empty_target_list() {
 }
 
 #[test]
-fn test_schema_order_and_canonical_types() {
+fn star_expands_in_schema_order_with_canonical_types() {
     let schema = Some(load_schema(
         "CREATE TABLE users (id INTEGER NOT NULL, score NUMERIC(10,2) NOT NULL, tags TEXT[] NOT NULL)",
         "postgres",
@@ -95,7 +95,7 @@ fn names(sql: &str) -> Vec<String> {
 }
 
 #[test]
-fn test_unaliased_names() {
+fn unaliased_expressions_are_named_as_postgres_does() {
     assert_eq!(
         names("SELECT NOT active, -n, -1, n::INT, COUNT(*), lower(x), f(x) FROM t"),
         ["?column?", "?column?", "?column?", "n", "count", "lower", "f"]
@@ -103,7 +103,7 @@ fn test_unaliased_names() {
 }
 
 #[test]
-fn test_mysql_column_types() {
+fn mysql_column_modifiers_keep_the_integer_type() {
     let schema = Some(load_schema(
         "CREATE TABLE t (a INT3 ZEROFILL, b INT ZEROFILL UNSIGNED, \
          c INT SIGNED ZEROFILL, d MIDDLEINT(8) UNSIGNED)",
@@ -136,7 +136,7 @@ fn names_in(sql: &str, dialect: &str) -> Vec<String> {
 }
 
 #[test]
-fn test_question_mark_placeholders() {
+fn question_marks_are_parameters_unless_jsonb_operators() {
     assert_eq!(
         infer("SELECT a::INT FROM t WHERE id = ? AND b ?| array['x']").as_deref(),
         Some("tuple[int]")
@@ -149,7 +149,7 @@ fn test_question_mark_placeholders() {
 }
 
 #[test]
-fn test_dialect_type_aliases() {
+fn dialect_type_aliases_spell_one_sql_type() {
     let types = |columns: &str, dialect: &str| -> Vec<String> {
         let schema = Some(load_schema(&format!("CREATE TABLE t ({columns})"), dialect));
         analyze_select("SELECT * FROM t", dialect, schema.as_deref())
@@ -193,7 +193,7 @@ fn star_expansion_casts_only_where_the_dialect_has_a_cast_operator() {
 }
 
 #[test]
-fn test_sum_of_unknown_schema_column_is_untyped() {
+fn sum_of_an_unknown_column_is_untyped() {
     let schema = Some(load_schema("CREATE TABLE users (id INT)", "postgres"));
     assert_eq!(
         infer_type("SELECT SUM(nope) FROM users", "postgres", schema.as_deref()),
@@ -202,7 +202,7 @@ fn test_sum_of_unknown_schema_column_is_untyped() {
 }
 
 #[test]
-fn test_ctes_and_derived_tables() {
+fn ctes_and_derived_tables_type_their_columns() {
     let schema = Some(load_schema(
         "CREATE TABLE users (id INTEGER NOT NULL, name TEXT NOT NULL, born DATE NOT NULL)",
         "postgres",
@@ -283,7 +283,7 @@ fn subjects(sql: &str) -> Vec<(&'static str, Option<String>, Option<String>)> {
 }
 
 #[test]
-fn test_name_diagnostic_subjects() {
+fn name_diagnostics_name_their_table_and_column() {
     let some = |name: &str| Some(name.to_string());
     let cases = [
         (
@@ -321,7 +321,7 @@ fn test_name_diagnostic_subjects() {
 }
 
 #[test]
-fn test_name_diagnostics() {
+fn name_diagnostics_by_rule() {
     assert_eq!(rules("SELECT nope FROM a"), ["unknown-column"]);
     assert_eq!(rules("SELECT x.id FROM a"), ["unknown-table"]);
     assert_eq!(rules("SELECT id FROM a, b"), ["ambiguous-column"]);
@@ -333,7 +333,7 @@ fn test_name_diagnostics() {
 }
 
 #[test]
-fn test_name_diagnostics_stay_quiet() {
+fn name_diagnostics_stay_quiet_for_valid_names() {
     for sql in [
         "SELECT id FROM a JOIN b USING (id)",
         "SELECT id FROM a NATURAL JOIN b",
@@ -367,7 +367,7 @@ fn underlined(sql: &str) -> Vec<(&'static str, Option<&str>)> {
 }
 
 #[test]
-fn test_name_diagnostics_underline_the_name() {
+fn name_diagnostics_underline_the_name() {
     assert_eq!(
         underlined("--sql\nSELECT nope FROM a"),
         [("unknown-column", Some("nope"))]
@@ -414,7 +414,7 @@ fn test_name_diagnostics_underline_the_name() {
 }
 
 #[test]
-fn test_name_rules_need_a_schema() {
+fn name_rules_need_a_schema() {
     let found = analyze_with_diagnostics("SELECT nope, id FROM a, b", "postgres", None).1;
     assert!(found.is_empty(), "{found:?}");
 }
@@ -546,7 +546,7 @@ fn stars_over_wide_tables_stop_past_max_columns() {
 }
 
 #[test]
-fn test_set_operation_types() {
+fn set_operations_unify_column_types() {
     let schema = Some(load_schema(
         "CREATE TABLE a (n INTEGER, t TEXT, d DATE);\
          CREATE TABLE b (n BIGINT, t VARCHAR(5), d TIMESTAMP);\

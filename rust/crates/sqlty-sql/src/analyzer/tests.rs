@@ -1,7 +1,7 @@
 //! Analyzer unit tests that cross module boundaries.
 
 use super::input::parser_input;
-use super::preprocess::{numbered_placeholders, parse_query, PARSES};
+use super::preprocess::{parse_query, PARSES};
 use super::*;
 
 #[test]
@@ -73,16 +73,6 @@ fn test_a_query_is_parsed_once() {
         assert!(parse_query(sql, dialect).is_some(), "{sql}");
         assert_eq!(PARSES.with(std::cell::Cell::get), 1, "{sql}");
     }
-}
-
-#[test]
-fn test_numbered_placeholders() {
-    assert_eq!(
-        numbered_placeholders(
-            "SELECT '?', \"a?\", b ?| c, d ?& e FROM t WHERE x = ? -- ?\nAND y = ?"
-        ),
-        "SELECT '?', \"a?\", b ?| c, d ?& e FROM t WHERE x = $1 -- ?\nAND y = $2"
-    );
 }
 
 fn without_hints(sql: &str) -> Option<String> {

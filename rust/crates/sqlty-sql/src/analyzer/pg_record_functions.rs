@@ -819,8 +819,3 @@ pub(super) fn record_columns(name: &str) -> Option<Columns> {
         .ok()
         .map(|at| FUNCTIONS[at].1)
 }
-
-#[test]
-fn functions_are_sorted() {
-    assert!(FUNCTIONS.is_sorted_by_key(|(name, _)| *name));
-}

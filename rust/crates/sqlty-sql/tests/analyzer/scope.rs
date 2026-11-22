@@ -118,7 +118,7 @@ fn named_tables_are_read_by_alias_or_name() {
 }
 
 #[test]
-fn sources_that_cannot_be_read_are_opaque() {
+fn table_functions_and_subqueries_are_read_where_they_can_be() {
     let queries = [
         "SELECT g.x FROM generate_series(1, 3) AS g",
         "SELECT * FROM ST_Dump(NULL) AS g",
@@ -139,7 +139,7 @@ fn joins_list_every_relation_and_merge_using_columns() {
         "SELECT s.id, a.id FROM (SELECT 1 AS id) AS s, a",
         "SELECT * FROM a JOIN b USING (Id, kind)",
         "SELECT * FROM a NATURAL JOIN b",
-        "SELECT * FROM (a JOIN b USING (x)) JOIN c USING (y)",
+        "SELECT * FROM (a JOIN b USING (id, kind, x)) JOIN c USING (id)",
         "SELECT * FROM a JOIN b ON a.id = b.id",
         "SELECT * FROM a CROSS JOIN b",
         "SELECT * FROM c JOIN (a JOIN b USING (id)) ON true",
@@ -148,9 +148,18 @@ fn joins_list_every_relation_and_merge_using_columns() {
 }
 
 #[test]
+fn semi_and_anti_joins_keep_the_columns_of_one_side() {
+    let queries = [
+        "SELECT * FROM a SEMI JOIN b ON a.id = b.id",
+        "SELECT * FROM a ANTI JOIN b ON a.id = b.id",
+    ];
+    insta::assert_snapshot!(reports(&queries, "duckdb", Some(SOURCES)));
+}
+
+#[test]
 fn a_wide_relation_resolves_columns_as_a_narrow_one() {
-    // Past 64 columns a relation is indexed by name, which must not change what resolves.
-    const INDEXED_WIDTH: usize = 64;
+    // A wide relation may be indexed by name, which must not change what resolves.
+    const INDEXED_WIDTH: usize = 200;
     let ddl = |width: usize| {
         let columns: Vec<String> = (0..width).map(|i| format!("c{i} int")).collect();
         let constants: String = (0..width).map(|i| format!(", 1 AS c{i}")).collect();
@@ -186,4 +195,50 @@ fn a_wide_relation_resolves_columns_as_a_narrow_one() {
             );
         }
     }
+}
+
+/// The messages `sql` reports against `ddl`.
+fn messages(sql: &str, dialect: &str, ddl: &str) -> Vec<String> {
+    let schema = load_schema(ddl, dialect);
+    let (_, diagnostics) =
+        sqlty_sql::analyzer::analyze_with_diagnostics(sql, dialect, Some(&schema));
+    diagnostics.into_iter().map(|d| d.message).collect()
+}
+
+#[test]
+fn a_source_says_what_it_cannot_read() {
+    let ddl = "CREATE TABLE t (a INT, id INT); CREATE TABLE u (a INT, id INT, z INT)";
+    let may = |source: &str| {
+        format!("column `nope` may come from {source}, which sqlty does not read the columns of")
+    };
+    assert_eq!(
+        messages("SELECT nope FROM pg_trigger tg", "postgres", ddl),
+        [may("system catalog pg_trigger")]
+    );
+    assert_eq!(
+        messages(
+            "SELECT nope FROM json_to_recordset('[]') AS r",
+            "postgres",
+            ddl
+        ),
+        [may("table function json_to_recordset")]
+    );
+    // SQLite's RETURNING reads the target only, and hides what `FROM` and joins bring.
+    assert_eq!(
+        messages(
+            "UPDATE t SET a = u.a FROM u WHERE t.id = u.id RETURNING nope",
+            "sqlite",
+            ddl
+        ),
+        [may("tables joined to the target with FROM or USING")]
+    );
+    // A source it reads is named in the list of those that lack the column.
+    assert_eq!(
+        messages("UPDATE t SET a = 1 RETURNING nope", "sqlite", ddl),
+        ["column `nope` does not exist in `t`"]
+    );
+    assert_eq!(
+        messages("SELECT * FROM pg_trigger tg", "postgres", ddl),
+        ["`*` reads system catalog pg_trigger, which sqlty does not read the columns of"]
+    );
 }

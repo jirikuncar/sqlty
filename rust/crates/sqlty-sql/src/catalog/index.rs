@@ -1,4 +1,4 @@
-//! Prefix lookups: the relations, functions and types whose name starts with what was
+//! Prefix lookups: the relations and functions whose name starts with what was
 //! typed, for completion.
 //!
 //! A hash map answers "is there a `users`" but not "what starts with `us`" without
@@ -161,18 +161,6 @@ impl Catalog {
             .collect()
     }
 
-    /// Domains, enums and composite types whose name starts with `prefix`; see
-    /// [`Catalog::relations_with_prefix`].
-    pub fn types_with_prefix(
-        &self,
-        prefix: &str,
-        schema: Option<&str>,
-        limit: usize,
-    ) -> Vec<NameRef<'_>> {
-        self.with_prefix(&self.index.types, prefix, schema, limit)
-            .collect()
-    }
-
     /// The columns of the table or view `name` (a [`NameRef::key`], or a name as a query
     /// writes it); `None` for an unknown name or a relation of unknown shape. O(1).
     pub fn columns_of(&self, name: &str) -> Option<Columns<'_>> {
@@ -221,7 +209,6 @@ impl Catalog {
 pub(super) struct NameIndex {
     relations: Sorted,
     functions: Sorted,
-    types: Sorted,
     pub(super) referenced_by: ReferencedBy,
 }
 
@@ -236,7 +223,6 @@ impl NameIndex {
                     .keys()
                     .chain(catalog.unknown_functions.keys()),
             ),
-            types: Sorted::new(catalog.type_names.keys()),
             referenced_by: ReferencedBy::new(catalog),
         }
     }
@@ -324,122 +310,8 @@ mod tests {
     use super::super::load;
     use super::*;
 
-    fn names(found: &[RelationRef<'_>]) -> Vec<String> {
-        found
-            .iter()
-            .map(|r| match r.name.schema {
-                Some(schema) => format!("{schema}.{}:{:?}", r.name.name, r.kind),
-                None => format!("{}:{:?}", r.name.name, r.kind),
-            })
-            .collect()
-    }
-
     fn pg(sql: &str) -> Catalog {
         load(sql, "postgres").0
-    }
-
-    #[test]
-    fn visible_relations_list_the_path_first() {
-        let c = pg("CREATE SCHEMA app; SET search_path TO app, public;
-            CREATE TABLE users (id int); CREATE TABLE public.users (id text);
-            CREATE TABLE public.pg_users (id int); CREATE TABLE public.user_roles (id int);
-            CREATE TABLE public.pg_class (id int); CREATE TABLE other.user_secrets (id int);");
-        let found = c.visible_relations_with_prefix("", 4);
-        assert_eq!(
-            names(&found)[..3],
-            [
-                "app.users:Table",
-                "public.pg_users:Table",
-                "public.user_roles:Table"
-            ]
-        );
-        assert_eq!(names(&found)[3], "pg_catalog.pg_attrdef:Table");
-        let found = c.visible_relations_with_prefix("pg_cla", 10);
-        assert_eq!(names(&found), ["pg_catalog.pg_class:Table"]);
-        let found = c.visible_relations_with_prefix("USER", 10);
-        assert_eq!(
-            names(&found),
-            ["app.users:Table", "public.user_roles:Table"]
-        );
-    }
-
-    #[test]
-    fn schema_narrows_to_one_schema() {
-        let c = pg(
-            "CREATE TABLE users (id int); CREATE TABLE other.users (id int);
-            CREATE TABLE other.user_secrets (id int); CREATE TABLE \"Other\".users (id int);",
-        );
-        let found = c.relations_with_prefix("us", Some("other"), 10);
-        assert_eq!(
-            names(&found),
-            ["other.user_secrets:Table", "other.users:Table"]
-        );
-        let found = c.relations_with_prefix("", Some("OTHER"), 10);
-        assert_eq!(found.len(), 2);
-        let found = c.relations_with_prefix("", Some("\"Other\""), 10);
-        assert_eq!(names(&found), ["Other.users:Table"]);
-        let found = c.relations_with_prefix("col", Some("information_schema"), 10);
-        assert_eq!(names(&found), ["information_schema.columns:Table"]);
-        assert!(c.relations_with_prefix("col", None, 10).is_empty());
-    }
-
-    #[test]
-    fn views_and_unknown_shapes() {
-        let c = pg(
-            "CREATE TABLE ta (id int, name text); CREATE VIEW tv AS SELECT id FROM ta;
-            CREATE TABLE tu (LIKE missing);",
-        );
-        let found = c.relations_with_prefix("t", None, 10);
-        assert_eq!(
-            names(&found),
-            ["public.ta:Table", "public.tu:Unknown", "public.tv:View"]
-        );
-        assert!(
-            matches!(c.columns_of(found[0].name.key), Some(Columns::Table(cols)) if cols.len() == 2)
-        );
-        assert!(matches!(c.columns_of("tv"), Some(Columns::View(cols)) if cols.len() == 1));
-        assert!(c.columns_of(found[1].name.key).is_none());
-        assert!(c.columns_of("missing").is_none());
-    }
-
-    #[test]
-    fn other_dialects_have_no_schemas() {
-        for dialect in ["mysql", "sqlite"] {
-            let (c, _) = load(
-                "CREATE TABLE Users (id INT); CREATE TABLE db.usage (id INT);",
-                dialect,
-            );
-            let found = c.relations_with_prefix("`US", Some("db"), 10);
-            assert_eq!(names(&found), ["usage:Table", "users:Table"], "{dialect}");
-            assert_eq!(found[1].name.key, "public.users");
-            assert!(c.columns_of(found[1].name.key).is_some(), "{dialect}");
-        }
-    }
-
-    #[test]
-    fn functions_and_types() {
-        let c = pg(
-            "CREATE FUNCTION total() RETURNS int LANGUAGE sql AS 'select 1';
-            CREATE FUNCTION tally() LANGUAGE sql AS 'select 1';
-            CREATE TYPE tone AS ENUM ('a'); CREATE TYPE tpoint AS (x int);
-            CREATE DOMAIN tpct AS int;",
-        );
-        let functions: Vec<_> = c
-            .functions_with_prefix("t", Some("public"), 10)
-            .iter()
-            .map(|f| f.name)
-            .collect();
-        assert_eq!(functions, ["tally", "total"]);
-        assert_eq!(
-            c.functions_with_prefix("tot", None, 10)[0].key,
-            "public.total"
-        );
-        let types: Vec<_> = c
-            .types_with_prefix("t", None, 10)
-            .iter()
-            .map(|t| t.name)
-            .collect();
-        assert_eq!(types, ["tone", "tpct", "tpoint"]);
     }
 
     /// The index holds the catalog's keys, not copies: two pointers per name, and every

@@ -37,6 +37,11 @@ fn suggests_the_one_close_name() {
         Some("name")
     );
     assert_eq!(suggestion("NAM", &["name"], false).as_deref(), Some("name"));
+    // A quoted column keeps its case in the suggestion.
+    assert_eq!(
+        suggestion("NAM", &["\"Name\""], false).as_deref(),
+        Some("\"Name\"")
+    );
     assert_eq!(
         suggestion("abcdefgh", &["abcdefgx", "abcdefxx"], false).as_deref(),
         Some("abcdefgx")

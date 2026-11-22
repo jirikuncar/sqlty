@@ -107,6 +107,13 @@ fn arithmetic_promotes_numbers_and_types_date_math() {
 }
 
 #[test]
+fn mysql_tinyint_arithmetic_keeps_the_wider_integer() {
+    let schema = load_schema("CREATE TABLE t (a TINYINT, b SMALLINT)", "mysql");
+    let found = analyze_select("SELECT a + b AS x FROM t", "mysql", Some(&schema)).unwrap();
+    assert_eq!(found[0].sql_type.as_deref(), Some("SMALLINT"));
+}
+
+#[test]
 fn mysql_division_is_at_least_decimal() {
     assert_eq!(
         arithmetic_type("INT", "/", "INT", "mysql").as_deref(),

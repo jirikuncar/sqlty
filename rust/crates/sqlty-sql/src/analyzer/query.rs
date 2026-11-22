@@ -894,34 +894,3 @@ fn names_result_column(key: &Expr, select: &Select) -> bool {
         _ => false,
     }
 }
-
-#[cfg(test)]
-#[cfg_attr(coverage_nightly, coverage(off))]
-mod tests {
-    use sqlparser::ast::Statement;
-
-    use super::super::test_support::statement;
-    use super::*;
-
-    /// Kept in `src`: a parenthesized branch (`SetExpr::Query`) is reached from no public
-    /// call, which parses the query itself.
-    #[test]
-    fn leftmost_select_descends_into_set_operations() {
-        let name = |sql: &str| {
-            let Statement::Query(query) = statement(sql, SqlDialect::Postgres) else {
-                panic!("not a query");
-            };
-            leftmost_select(&query.body).map(|select| select.projection[0].to_string())
-        };
-        assert_eq!(name("SELECT 1 AS a").as_deref(), Some("1 AS a"));
-        assert_eq!(
-            name("SELECT 1 AS a UNION SELECT 2 AS b").as_deref(),
-            Some("1 AS a")
-        );
-        assert_eq!(
-            name("(SELECT 3 AS c) UNION SELECT 2 AS b").as_deref(),
-            Some("3 AS c")
-        );
-        assert_eq!(name("VALUES (1)"), None);
-    }
-}

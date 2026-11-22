@@ -181,13 +181,6 @@ impl Diagnostics {
         });
     }
 
-    /// Everything recorded so far, in order, without spans.
-    #[cfg(test)]
-    #[cfg_attr(coverage_nightly, coverage(off))]
-    pub(crate) fn items(&self) -> Vec<NameDiagnostic> {
-        self.located().into_iter().map(|(item, _)| item).collect()
-    }
-
     /// Everything recorded so far, in order, with where sqlparser read it.
     pub(crate) fn located(&self) -> Vec<(NameDiagnostic, Span)> {
         self.0.borrow().items.clone()
@@ -221,92 +214,20 @@ fn found(rule: Rule, message: String) -> NameDiagnostic {
 mod tests {
     use super::*;
 
-    // `Diagnostics` is a crate-internal sink: no public call builds one to record, mark and
-    // rewind it, or reads how many results it explained.
-    fn found(rule: Rule, message: &str) -> NameDiagnostic {
-        super::found(rule, message.to_string())
-    }
-
-    #[test]
-    fn identical_diagnostics_are_recorded_once() {
-        let diag = Diagnostics::collecting();
-        diag.record(Rule::UnknownTable, "unknown table t");
-        diag.record(Rule::UnknownTable, "unknown table t");
-        assert_eq!(diag.items(), [found(Rule::UnknownTable, "unknown table t")]);
-    }
-
-    #[test]
-    fn same_message_under_another_rule_or_another_message_is_kept() {
-        let diag = Diagnostics::collecting();
-        diag.record(Rule::UnknownTable, "x");
-        diag.record(Rule::UnknownColumn, "x");
-        diag.record(Rule::UnknownTable, "y");
-        assert_eq!(
-            diag.items(),
-            [
-                found(Rule::UnknownTable, "x"),
-                found(Rule::UnknownColumn, "x"),
-                found(Rule::UnknownTable, "y"),
-            ]
-        );
-    }
-
-    #[test]
-    fn items_keep_the_order_of_recording() {
-        let diag = Diagnostics::collecting();
-        diag.record(Rule::UnknownType, "b");
-        diag.record(Rule::UnknownFunction, "a");
-        let rules: Vec<_> = diag.items().into_iter().map(|d| d.rule).collect();
-        assert_eq!(rules, [Rule::UnknownType, Rule::UnknownFunction]);
-    }
-
+    // Whether a sink collects is no public result: `analyze_select` and
+    // `analyze_with_diagnostics` return the same columns, and only the second is told why.
     #[test]
     fn default_sink_is_disabled_and_collects_nothing() {
         let diag = Diagnostics::default();
         assert!(!diag.enabled());
         diag.record(Rule::UnknownTable, "t");
         diag.explain_silently();
-        assert!(diag.items().is_empty());
+        assert!(diag.located().is_empty());
         assert_eq!(diag.explained(), 0);
-    }
-
-    #[test]
-    fn rewind_drops_what_was_recorded_after_the_mark() {
-        let diag = Diagnostics::collecting();
-        diag.record(Rule::UnknownType, "kept");
-        let mark = diag.mark();
-        diag.record(Rule::UnknownType, "dropped");
-        diag.explain_silently();
-        diag.rewind(mark);
-        assert_eq!(diag.items(), [found(Rule::UnknownType, "kept")]);
-        assert_eq!(diag.explained(), 1);
     }
 
     #[test]
     fn collecting_sink_is_enabled() {
         assert!(Diagnostics::collecting().enabled());
-    }
-
-    #[test]
-    fn explained_counts_recorded_duplicates_and_silent_results() {
-        let diag = Diagnostics::collecting();
-        assert_eq!(diag.explained(), 0);
-        diag.record(Rule::UnknownColumn, "c");
-        assert_eq!(diag.explained(), 1);
-        diag.record(Rule::UnknownColumn, "c");
-        assert_eq!(diag.explained(), 2, "a duplicate still explains a result");
-        diag.explain_silently();
-        assert_eq!(diag.explained(), 3);
-        assert_eq!(diag.items().len(), 1);
-    }
-
-    #[test]
-    fn clones_record_into_the_same_list() {
-        let diag = Diagnostics::collecting();
-        let inner = diag.clone();
-        inner.record(Rule::AmbiguousColumn, "id");
-        inner.explain_silently();
-        assert_eq!(diag.items(), [found(Rule::AmbiguousColumn, "id")]);
-        assert_eq!(diag.explained(), 2);
     }
 }

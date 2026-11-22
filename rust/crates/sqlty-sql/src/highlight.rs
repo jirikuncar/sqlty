@@ -285,37 +285,3 @@ const KEYWORDS: &[&str] = &[
     "WINDOW",
     "WITH",
 ];
-
-#[cfg(test)]
-#[cfg_attr(coverage_nightly, coverage(off))]
-mod tests {
-    use super::*;
-
-    // `KEYWORDS` is private and binary-searched: no public call shows a misorder.
-    #[test]
-    fn keywords_are_sorted() {
-        assert!(KEYWORDS.windows(2).all(|pair| pair[0] < pair[1]));
-    }
-
-    // Compares the private list with the VS Code grammars, which no public call reads.
-    #[test]
-    #[expect(clippy::disallowed_methods, reason = "test reads files")]
-    fn the_vs_code_grammars_color_the_same_keywords() {
-        for name in ["sql-injection", "sql-injection-multi"] {
-            let path = format!(
-                "{}/../../../editors/vscode/syntaxes/{name}.tmLanguage.json",
-                env!("CARGO_MANIFEST_DIR")
-            );
-            let grammar = std::fs::read_to_string(&path).expect(&path);
-            let alternatives = grammar
-                .split_once("(?:ALL|")
-                .and_then(|(_, rest)| rest.split_once(')'))
-                .map(|(words, _)| {
-                    std::iter::once("ALL")
-                        .chain(words.split('|'))
-                        .collect::<Vec<_>>()
-                });
-            assert_eq!(alternatives.as_deref(), Some(KEYWORDS), "{path}");
-        }
-    }
-}

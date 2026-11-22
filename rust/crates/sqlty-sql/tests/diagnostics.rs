@@ -506,3 +506,69 @@ fn defined(dialect: &str, ddl: &str) -> Vec<String> {
 fn each_schema_defines_its_table() {
     check(SCHEMAS, defined);
 }
+
+/// The diagnostics of `sql` against `t (a, b, id)` as `[rule] message`.
+fn reported(sql: &str) -> Vec<String> {
+    let (schema, _) =
+        analyzer::load_schema_with_skipped("CREATE TABLE t (a int, b int, id int)", "postgres");
+    let (_, found) = analyzer::analyze_with_diagnostics(sql, "postgres", Some(&schema));
+    found
+        .into_iter()
+        .map(|d| format!("[{}] {}", d.rule.name(), d.message))
+        .collect()
+}
+
+const NO_NOPE: &str = "[unknown-column] column `nope` does not exist in `t`";
+const NO_NOFN: &str =
+    "[unknown-function] function `nofn` is not known to sqlty, so its result is untyped";
+
+#[test]
+fn identical_diagnostics_are_recorded_once() {
+    // The second `nope` is explained by the first's diagnostic: no "not typed" is added.
+    assert_eq!(reported("SELECT nope, nope FROM t"), [NO_NOPE]);
+}
+
+#[test]
+fn another_message_of_the_same_rule_is_kept() {
+    assert_eq!(
+        reported("SELECT a, b, nope1, nope2 FROM t"),
+        [
+            "[unknown-column] column `nope1` does not exist in `t`",
+            "[unknown-column] column `nope2` does not exist in `t`",
+        ]
+    );
+}
+
+#[test]
+fn diagnostics_keep_the_order_of_recording() {
+    assert_eq!(reported("SELECT nofn(1), nope FROM t"), [NO_NOFN, NO_NOPE]);
+    assert_eq!(reported("SELECT nope, nofn(1) FROM t"), [NO_NOPE, NO_NOFN]);
+}
+
+#[test]
+fn an_untyped_part_of_a_typed_expression_needs_no_explanation() {
+    // A cast types the whole: what it casts is not reported, as it is anywhere else.
+    assert!(reported("SELECT nofn(1)::int FROM t").is_empty());
+    assert_eq!(
+        reported("SELECT CAST(nofn(1) AS int), nofn(1) FROM t"),
+        [NO_NOFN]
+    );
+    assert_eq!(reported("SELECT COALESCE(nofn(1), 1) FROM t"), [NO_NOFN]);
+}
+
+#[test]
+fn a_silent_explanation_counts_as_one() {
+    // The unknown table is reported once; the columns it leaves untyped need nothing more.
+    let unknown = ["[unknown-table] table `nowhere` is not defined in the schema"];
+    assert_eq!(reported("SELECT x.nope, y FROM nowhere x"), unknown);
+    assert_eq!(reported("SELECT nope FROM nowhere"), unknown);
+}
+
+#[test]
+fn a_subquery_or_cte_records_into_the_list_of_its_query() {
+    assert_eq!(
+        reported("WITH c AS (SELECT nope FROM t) SELECT * FROM c"),
+        [NO_NOPE]
+    );
+    assert_eq!(reported("SELECT * FROM (SELECT nope FROM t) q"), [NO_NOPE]);
+}

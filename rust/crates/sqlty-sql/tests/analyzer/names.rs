@@ -141,8 +141,8 @@ fn a_table_is_found_by_at_most_its_schema_and_name() {
 }
 
 #[test]
-fn table_names_fold_by_dialect() {
-    for (dialect, quoted_users_is_found) in [("mysql", true), ("sqlite", true)] {
+fn unquoted_table_names_fold_outside_postgres() {
+    for dialect in ["mysql", "sqlite"] {
         let schema = load_schema("CREATE TABLE users (id INT NOT NULL)", dialect);
         let infer = |sql: &str| infer_type(sql, dialect, Some(&schema));
         assert_eq!(
@@ -150,11 +150,7 @@ fn table_names_fold_by_dialect() {
             Some("tuple[int]"),
             "{dialect}"
         );
-        assert_eq!(
-            infer("SELECT id FROM `Users`").is_some(),
-            quoted_users_is_found,
-            "{dialect}"
-        );
+        assert!(infer("SELECT id FROM `Users`").is_some(), "{dialect}");
     }
     let schema = load_schema("CREATE TABLE users (id INT NOT NULL)", "postgres");
     assert_eq!(
@@ -175,6 +171,10 @@ fn a_field_chain_splits_after_the_table_and_column() {
         Some("tuple[str | None]")
     );
     assert_eq!(
+        infer("SELECT t.col.b[1] FROM t").as_deref(),
+        Some("tuple[str | None]")
+    );
+    assert_eq!(
         infer("SELECT (arr)[1] FROM t").as_deref(),
         Some("tuple[int | None]")
     );
@@ -185,4 +185,66 @@ fn a_scalar_subquery_is_named_by_the_leftmost_select_of_its_query() {
     assert_eq!(name("(SELECT 1 AS y UNION SELECT 2 AS z)"), "y");
     assert_eq!(name("((SELECT 1 AS y))"), "y");
     assert_eq!(name("(VALUES (1))"), "values");
+}
+
+#[test]
+fn text_names_of_mysql_and_sqlite_items() {
+    let ddl = "CREATE TABLE t (id INT, a INT, b INT, c INT)";
+    // A column keeps the name the schema spells in SQLite, and as written in MySQL.
+    assert_eq!(name_in("(T.Id) FROM t", "sqlite", ddl), "id");
+    assert_eq!(name_in("(T.Id) FROM t", "mysql", ddl), "Id");
+    // A MySQL string literal is its value, with or without a character set.
+    assert_eq!(name_in("_utf8mb4'x'", "mysql", ddl), "x");
+    let names = |select: &str| -> Vec<String> {
+        let schema = load_schema(ddl, "mysql");
+        let columns = analyze_select(select, "mysql", Some(&schema)).unwrap();
+        columns.into_iter().map(|c| c.name).collect()
+    };
+    // The items are told apart by their text.
+    assert_eq!(
+        names("SELECT DISTINCT a IS DISTINCT FROM b, c FROM t"),
+        ["a IS DISTINCT FROM b", "c"]
+    );
+    assert_eq!(names("SELECT a; SELECT b FROM t"), ["a"]);
+}
+
+#[test]
+fn a_set_operation_is_named_by_its_leftmost_select() {
+    let ddl = "CREATE TABLE t (a INT, id INT)";
+    let names = |select: &str| -> Vec<String> {
+        let schema = load_schema(ddl, "postgres");
+        let columns = analyze_select(select, "postgres", Some(&schema)).unwrap();
+        columns.into_iter().map(|c| c.name).collect()
+    };
+    assert_eq!(names("SELECT 1 AS a"), ["a"]);
+    assert_eq!(names("SELECT 1 AS a UNION SELECT 2 AS b"), ["a"]);
+    // A parenthesized branch is the leftmost one too.
+    assert_eq!(names("(SELECT 3 AS c) UNION SELECT 2 AS b"), ["c"]);
+    assert_eq!(
+        names("((SELECT 3 AS c) UNION SELECT 2) UNION SELECT 4"),
+        ["c"]
+    );
+    // `VALUES` has no select to name its columns.
+    assert_eq!(names("VALUES (1)"), ["column1"]);
+    assert_eq!(names("(VALUES (1)) UNION SELECT 2"), ["column1"]);
+}
+
+#[test]
+fn a_star_over_joins_expands_by_the_name_of_each_table_without_quotes() {
+    let schema = load_schema(
+        "CREATE TABLE t (a INT NOT NULL, id INT); CREATE TABLE \"T2\" (a INT)",
+        "postgres",
+    );
+    let expand = |sql: &str| expand_star(sql, "postgres", Some(&schema));
+    // The alias, else the table without its schema.
+    assert_eq!(
+        expand("SELECT * FROM public.t JOIN t u ON true").as_deref(),
+        Some("SELECT t.a::INT, t.id::INT, u.a::INT, u.id::INT FROM public.t JOIN t u ON true")
+    );
+    // A subquery has no name to qualify by, and a quoted one is not written out.
+    assert_eq!(
+        expand("SELECT * FROM public.t JOIN (SELECT 1 AS x) s ON true"),
+        None
+    );
+    assert_eq!(expand("SELECT * FROM \"T2\" JOIN t ON true"), None);
 }

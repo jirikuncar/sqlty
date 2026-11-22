@@ -277,12 +277,8 @@ pub(crate) fn constant(expr: &Expr) -> Option<Value> {
 mod tests {
     use super::*;
 
-    // The set functions and the Literal spelling are crate-internal: no public call reaches
-    // them with sets this large, or with these spellings.
-    fn strs(items: &[&str]) -> Vec<Value> {
-        items.iter().map(|s| Value::Str((*s).to_string())).collect()
-    }
-
+    // `MAX_VALUES` keeps a set a public call reads to 32 values, so no public call reaches
+    // the set functions with a large one.
     #[test]
     fn set_operations_on_large_sets_take_linear_time() {
         let many: Vec<Value> = (0..100_000).map(Value::Int).collect();
@@ -290,40 +286,5 @@ mod tests {
         assert_eq!(intersect(many.clone(), &many), many);
         assert!(difference(&many, &many).is_empty());
         assert_eq!(difference(&many, &many[1..]), [Value::Int(0)]);
-    }
-
-    #[test]
-    fn render_and_parse_round_trip() {
-        let values = vec![
-            Value::Str("it's".into()),
-            Value::Str("a\\b".into()),
-            Value::Str("line\nbreak".into()),
-        ];
-        let text = render(&values).unwrap();
-        assert_eq!(parse(&text), Some(values));
-    }
-
-    #[test]
-    fn render_integers_and_mixed_sets() {
-        assert_eq!(
-            render(&[Value::Int(1), Value::Int(-2)]).as_deref(),
-            Some("typing.Literal[1, -2]")
-        );
-        assert_eq!(render(&[Value::Int(1), Value::Str("a".into())]), None);
-    }
-
-    #[test]
-    fn parse_ignores_other_types() {
-        assert_eq!(parse("str"), None);
-        assert_eq!(parse("list[typing.Literal['a']]"), None);
-        assert_eq!(base("typing.Literal[1]"), Some("int"));
-        assert_eq!(base("typing.Literal['1']"), Some("str"));
-    }
-
-    #[test]
-    fn rarer_values() {
-        let values = strs(&["a\rb", "c\td", "\u{1}"]);
-        assert_eq!(parse(&render(&values).unwrap()), Some(values));
-        assert_eq!(parse("typing.Literal['a' 'b']"), None);
     }
 }

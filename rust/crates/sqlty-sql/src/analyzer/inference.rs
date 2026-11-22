@@ -308,33 +308,8 @@ pub(super) mod tests {
 
     use super::*;
 
-    #[test]
-    fn for_dialect_keeps_the_dialects_reference() {
-        let rule = RuleRef {
-            id: "test",
-            reference: "PostgreSQL 17 documentation, 9.3; MySQL 8.4 Reference Manual, 14.6.1",
-            reasoning: "test",
-            references: References {
-                all: "PostgreSQL 17 documentation, 9.3; MySQL 8.4 Reference Manual, 14.6.1",
-                each: &[
-                    (SqlDialect::Postgres, "PostgreSQL 17 documentation, 9.3"),
-                    (SqlDialect::MySql, "MySQL 8.4 Reference Manual, 14.6.1"),
-                ],
-            },
-        };
-        let reference = |dialect| rule.for_dialect(dialect).reference;
-        assert_eq!(
-            reference(SqlDialect::Postgres),
-            "PostgreSQL 17 documentation, 9.3"
-        );
-        assert_eq!(
-            reference(SqlDialect::MySql),
-            "MySQL 8.4 Reference Manual, 14.6.1"
-        );
-        assert_eq!(reference(SqlDialect::Sqlite), rule.reference);
-        assert_eq!(reference(SqlDialect::Other("generic")), rule.reference);
-    }
-
+    // `EXTENDING_DIALECTS` is generated for this test alone (`tests/inference_compiler.rs` pins
+    // it); `tests/rules.rs` reads the same dialects from `rules/dialects.toml`.
     #[test]
     fn extending_dialects_are_sqlparser_dialects() {
         for &name in EXTENDING_DIALECTS {
@@ -342,24 +317,6 @@ pub(super) mod tests {
                 SqlDialect::from_name(name),
                 SqlDialect::Other(name),
                 "{name}"
-            );
-        }
-    }
-
-    #[test]
-    fn every_rule_is_documented() {
-        let binary = BINARY_RULES.iter().map(BinaryRule::explained);
-        let functions = FUNCTION_RULES.iter().map(FunctionRule::explained);
-        for rule in binary.chain(functions) {
-            assert!(
-                !rule.reference.trim().is_empty(),
-                "{} has no reference",
-                rule.id
-            );
-            assert!(
-                !rule.reasoning.trim().is_empty(),
-                "{} has no reasoning",
-                rule.id
             );
         }
     }
@@ -469,29 +426,5 @@ pub(super) mod tests {
         drop(std::hint::black_box(vec![matched]));
         COUNTING.with(|counting| counting.set(false));
         assert_eq!(ALLOCATIONS.with(Cell::get), 1);
-    }
-
-    #[test]
-    fn operand_predicates_are_masks() {
-        let jsonb = Some(type_bit("JSONB"));
-        let (typed, named) = (operand(Some("app.mood")), operand(Some("JSONB")));
-        assert!(admits(jsonb, named));
-        assert!(!admits(jsonb, typed));
-        assert!(!admits(jsonb, None));
-        assert!(admits(Some(KNOWN), typed));
-        assert!(!admits(Some(KNOWN), None));
-        assert!(admits(None, None));
-    }
-
-    #[test]
-    fn dialect_rules_come_first() {
-        let first = |dialect: SqlDialect| {
-            binary_rules(&BinaryOperator::LongArrow)
-                .iter()
-                .find(|rule| rule.applies(dialect, None, None))
-                .map(|rule| rule.id)
-        };
-        assert_eq!(first(SqlDialect::Sqlite), Some("sqlite.json.long-arrow"));
-        assert_eq!(first(SqlDialect::Postgres), Some("common.json.long-arrow"));
     }
 }

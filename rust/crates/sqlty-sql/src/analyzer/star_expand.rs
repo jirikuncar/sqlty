@@ -234,24 +234,3 @@ pub(super) fn split_top_level(text: &str) -> Vec<&str> {
     items.push(text[start..].trim());
     items
 }
-
-#[cfg(test)]
-mod tests {
-    use sqlparser::dialect::PostgreSqlDialect;
-    use sqlparser::parser::Parser;
-
-    use super::*;
-
-    #[test]
-    fn only_a_table_has_an_unquoted_reference() {
-        let reference = |sql: &str| {
-            let factor = Parser::new(&PostgreSqlDialect {})
-                .try_with_sql(sql)
-                .and_then(|mut parser| parser.parse_table_factor())
-                .unwrap();
-            unquoted_reference(&factor)
-        };
-        assert_eq!(reference("public.t").as_deref(), Some("t"));
-        assert_eq!(reference("(SELECT 1) s"), None);
-    }
-}

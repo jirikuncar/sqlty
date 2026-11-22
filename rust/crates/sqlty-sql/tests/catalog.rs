@@ -80,7 +80,8 @@ fn a_column_is_found_by_name_in_a_wide_table() {
     };
     assert!(unknown_column("SELECT c300 FROM t"));
     assert!(unknown_column("SELECT \"\" FROM t"));
-    assert!(analyze_select("SELECT x FROM v", "postgres", Some(&c)).is_some());
+    let found = analyze_select("SELECT x FROM v", "postgres", Some(&c)).unwrap();
+    assert_eq!(found[0].python_type.as_deref(), Some("int"));
     let (_, diagnostics) = analyze_with_diagnostics("SELECT c1 FROM nope", "postgres", Some(&c));
     assert!(diagnostics.iter().any(|d| d.rule == Rule::UnknownTable));
 }

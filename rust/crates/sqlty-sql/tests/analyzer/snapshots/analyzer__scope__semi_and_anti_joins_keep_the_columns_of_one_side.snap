@@ -1,0 +1,13 @@
+---
+source: crates/sqlty-sql/tests/analyzer/scope.rs
+expression: "reports(&queries, \"duckdb\", Some(SOURCES))"
+---
+SELECT * FROM a SEMI JOIN b ON a.id = b.id
+id: int | INT | NonNull
+kind: str | TEXT | Nullable
+x: int | INT | Nullable
+
+SELECT * FROM a ANTI JOIN b ON a.id = b.id
+id: int | INT | NonNull
+kind: str | TEXT | Nullable
+x: int | INT | Nullable

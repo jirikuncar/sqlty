@@ -137,3 +137,54 @@ fn extract_types_follow_the_dialect_and_field() {
         assert_eq!(found.as_deref(), expected, "{dialect} {field}");
     }
 }
+
+/// The Python type of the one column `sql` returns, without a schema.
+fn python_of(sql: &str) -> Option<String> {
+    analyze_select(sql, "postgres", None).unwrap()[0]
+        .python_type
+        .clone()
+}
+
+#[test]
+fn function_names_are_upper_case_without_the_schema() {
+    assert_eq!(python_of("SELECT lower('A')").as_deref(), Some("str"));
+    assert_eq!(
+        python_of("SELECT pg_catalog.Lower('A')").as_deref(),
+        Some("str")
+    );
+    // A quoted name is a name of its own, found by no rule, as an unknown one.
+    assert_eq!(python_of("SELECT \"MyFn\"(1)"), None);
+    assert_eq!(python_of("SELECT \"LOWER\"('a')"), None);
+}
+
+#[test]
+fn positional_args_stop_at_the_first_star_or_named_argument() {
+    // `COALESCE` types as its first arguments only.
+    assert_eq!(
+        python_of("SELECT GREATEST(1, 2.5)").as_deref(),
+        Some("decimal.Decimal")
+    );
+    assert_eq!(
+        python_of("SELECT GREATEST(1, 2.5, x => 'a')").as_deref(),
+        Some("decimal.Decimal")
+    );
+    assert_eq!(
+        python_of("SELECT GREATEST(1, x => 2.5)").as_deref(),
+        Some("typing.Literal[1]")
+    );
+    assert_eq!(
+        python_of("SELECT COALESCE(1, x => 'a', 'b')").as_deref(),
+        Some("typing.Literal[1]")
+    );
+    assert_eq!(python_of("SELECT COALESCE(*)"), None);
+    assert_eq!(python_of("SELECT COUNT(*)").as_deref(), Some("int"));
+    assert_eq!(
+        python_of("SELECT NOW()").as_deref(),
+        Some("datetime.datetime")
+    );
+    // A function written without a list of arguments.
+    assert_eq!(
+        python_of("SELECT CURRENT_TIMESTAMP").as_deref(),
+        Some("datetime.datetime")
+    );
+}

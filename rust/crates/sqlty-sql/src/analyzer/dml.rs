@@ -628,36 +628,3 @@ fn assigned_columns(assignments: &[Assignment]) -> Vec<ObjectName> {
         })
         .collect()
 }
-
-#[cfg(test)]
-#[cfg_attr(coverage_nightly, coverage(off))]
-mod tests {
-    use super::super::test_support::statement;
-    use super::*;
-
-    fn scope_of(sql: &str, dialect: SqlDialect) -> Vec<String> {
-        dml_scope(&statement(sql, dialect), dialect)
-            .iter()
-            .map(|source| format!("{}={:?}", source.reference, source.table))
-            .collect()
-    }
-
-    #[test]
-    fn scope_of_an_update_adds_extra_sources_for_from_and_joins() {
-        assert_eq!(
-            scope_of("UPDATE t SET a = 1", SqlDialect::Postgres),
-            ["t=Named(\"t\")"]
-        );
-        assert_eq!(
-            scope_of("UPDATE t SET a = u.a FROM u", SqlDialect::Postgres),
-            ["t=Named(\"t\")", "=ExtraSources"]
-        );
-        assert_eq!(
-            scope_of(
-                "UPDATE t JOIN u ON t.id = u.id SET t.a = 1",
-                SqlDialect::MySql
-            ),
-            ["t=Named(\"t\")", "=ExtraSources"]
-        );
-    }
-}

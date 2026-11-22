@@ -9,7 +9,7 @@ dialect = "postgres"
 schema = "schema.sql"
 ```
 
-## In list
+## IN limits the column to the listed strings
 
 `schema.sql`:
 
@@ -22,7 +22,7 @@ SELECT status FROM t
 -- columns: status: typing.Literal['a', 'b'] | None (TEXT)
 ```
 
-## Any array
+## = ANY of a cast array limits the column to its elements
 
 `schema.sql`:
 
@@ -35,7 +35,7 @@ SELECT status FROM t
 -- columns: status: typing.Literal['a', 'b'] | None (TEXT)
 ```
 
-## In list duplicates
+## Repeated values in an IN list count once
 
 `schema.sql`:
 
@@ -48,7 +48,7 @@ SELECT status FROM t
 -- columns: status: typing.Literal['a', 'b'] | None (TEXT)
 ```
 
-## Any array duplicates
+## Repeated values in an ANY array count once
 
 `schema.sql`:
 
@@ -113,7 +113,7 @@ SELECT status FROM t
 -- columns: status: typing.Literal['b'] | None (TEXT)
 ```
 
-## Not in
+## NOT IN leaves the column a plain str
 
 `schema.sql`:
 
@@ -126,7 +126,7 @@ SELECT status FROM t
 -- columns: status: str | None (TEXT)
 ```
 
-## Cast boolean
+## A CAST to boolean around a comparison still limits the column
 
 `schema.sql`:
 
@@ -139,7 +139,7 @@ SELECT status FROM t
 -- columns: status: typing.Literal['a'] | None (TEXT)
 ```
 
-## Qualified
+## A table-qualified column on the right of = limits the column
 
 `schema.sql`:
 
@@ -165,7 +165,7 @@ SELECT status FROM t
 -- columns: status: typing.Literal['a'] | None (TEXT)
 ```
 
-## Any placeholder
+## = ANY of a placeholder leaves the column a plain str
 
 `schema.sql`:
 
@@ -178,7 +178,7 @@ SELECT status FROM t
 -- columns: status: str | None (TEXT)
 ```
 
-## Negated literal
+## Comparing with a negated string leaves the column a plain str
 
 `schema.sql`:
 

@@ -132,8 +132,41 @@ fn the_scope_of_dml_is_its_target_plus_extra_sources() {
     ] {
         assert_eq!(rule_names(sql), [] as [&str; 0], "{sql}");
     }
+}
+
+#[test]
+fn the_scope_of_an_update_adds_the_tables_of_from_and_joins() {
+    let ddl = "CREATE TABLE t (a INT, id INT); CREATE TABLE u (a INT, id INT, z INT)";
+    let messages = |sql: &str, dialect: &str| {
+        let schema = load_schema(ddl, dialect);
+        let (found, diagnostics) = analyze_with_diagnostics(sql, dialect, Some(&schema));
+        let messages: Vec<_> = diagnostics.into_iter().map(|d| d.message).collect();
+        (found.map(|columns| columns.len()), messages)
+    };
+    let said = |count: Option<usize>, said: &[&str]| {
+        (
+            count,
+            said.iter().map(ToString::to_string).collect::<Vec<_>>(),
+        )
+    };
+    // The target alone.
     assert_eq!(
-        analyze_select("SELECT 1", "postgres", Some(&schema)).map(|c| c.len()),
-        Some(1)
+        messages("UPDATE t SET a = 1 RETURNING nope", "postgres"),
+        said(Some(1), &["column `nope` does not exist in `t`"])
+    );
+    // `FROM` adds its tables, which `RETURNING` reads in PostgreSQL.
+    let from = "UPDATE t SET a = u.a FROM u WHERE t.id = u.id";
+    assert_eq!(
+        messages(&format!("{from} RETURNING u.z"), "postgres"),
+        said(Some(1), &[])
+    );
+    assert_eq!(
+        messages(&format!("{from} RETURNING nope"), "postgres"),
+        said(Some(1), &["column `nope` does not exist in `t`, `u`"])
+    );
+    // MySQL joins them: the values may read each of them.
+    assert_eq!(
+        messages("UPDATE t JOIN u ON t.id = u.id SET t.a = u.nope", "mysql"),
+        said(None, &["column `nope` does not exist in `u`"])
     );
 }

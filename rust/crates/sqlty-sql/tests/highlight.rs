@@ -1,5 +1,10 @@
 //! `highlight`: the colored tokens of a query.
 
+#![expect(
+    clippy::expect_used,
+    reason = "a test fails on the query it cannot read"
+)]
+
 use sqlty_sql::highlight::{highlight, Highlight};
 
 fn colored<'a>(sql: &'a str, dialect: &str) -> Vec<(&'a str, Highlight)> {
@@ -91,4 +96,42 @@ fn an_unterminated_token_ends_the_colors() {
             ("=", Highlight::Operator),
         ]
     );
+}
+
+/// The words the VS Code grammar colors as keywords, `ALL` first.
+fn grammar_keywords(grammar: &str) -> Vec<&str> {
+    let (_, rest) = grammar
+        .split_once("(?:ALL|")
+        .expect("the grammar lists keywords");
+    let (words, _) = rest.split_once(')').expect("the list ends");
+    std::iter::once("ALL").chain(words.split('|')).collect()
+}
+
+#[test]
+fn the_vs_code_grammars_color_the_keywords_highlight_colors() {
+    let grammars = [
+        include_str!("../../../../editors/vscode/syntaxes/sql-injection.tmLanguage.json"),
+        include_str!("../../../../editors/vscode/syntaxes/sql-injection-multi.tmLanguage.json"),
+    ];
+    // Every word sqlparser knows, and the ones the grammar lists: a word is colored when it
+    // is listed, so each listed word is found (the list is sorted for a binary search) and
+    // no other is.
+    let colored: Vec<&str> = sqlparser::keywords::ALL_KEYWORDS
+        .iter()
+        .copied()
+        .chain(grammar_keywords(grammars[0]))
+        .filter(|word| {
+            colored(word, "postgres")
+                .iter()
+                .any(|(text, kind)| *kind == Highlight::Keyword && text == word)
+        })
+        .collect();
+    for grammar in grammars {
+        let mut listed = grammar_keywords(grammar);
+        let mut colored = colored.clone();
+        listed.sort_unstable();
+        colored.sort_unstable();
+        colored.dedup();
+        assert_eq!(colored, listed);
+    }
 }

@@ -324,18 +324,6 @@ impl Statement<'_> {
         checks
     }
 
-    /// The lowercase words that open the statement, up to `n` (`create`, `or`, `replace`, ...).
-    #[cfg(test)]
-    #[cfg_attr(coverage_nightly, coverage(off))]
-    pub(crate) fn lead_words(&self, n: usize) -> Vec<String> {
-        self.0
-            .iter()
-            .filter(|p| significant(p))
-            .map_while(|p| (p.0 == Kind::Word).then(|| p.1.to_lowercase()))
-            .take(n)
-            .collect()
-    }
-
     /// The statement without comments, its tokens joined by one space and its words in
     /// lowercase: two spellings of a statement that differ only in layout or in the case of
     /// keywords and unquoted names have the same text.
@@ -949,69 +937,5 @@ impl Cols<'_, '_> {
                 return n.min(self.sig.len());
             }
         }
-    }
-}
-
-#[cfg(test)]
-#[cfg_attr(coverage_nightly, coverage(off))]
-mod tests {
-    use super::*;
-
-    fn first(sql: &str) -> Statement<'_> {
-        split_statements(sql, false).remove(0)
-    }
-
-    #[test]
-    fn test_target_and_action() {
-        let target = |sql: &str, verb: &str| first(sql).target_and_action(verb);
-        assert_eq!(
-            target(
-                "ALTER TABLE IF EXISTS ONLY app.\"Users\" OWNER TO me",
-                "alter"
-            ),
-            Some((
-                "table".to_string(),
-                vec!["app".to_string(), "Users".to_string()],
-                vec!["owner".to_string(), "to".to_string()]
-            ))
-        );
-        assert_eq!(
-            target("DROP MATERIALIZED VIEW IF EXISTS v CASCADE", "drop").map(|t| (t.0, t.1)),
-            Some(("view".to_string(), vec!["v".to_string()]))
-        );
-        assert_eq!(target("CREATE TABLE t (a int)", "alter"), None);
-    }
-
-    #[test]
-    fn test_create_table_any_and_lead_words() {
-        assert!(first("CREATE TABLE p PARTITION OF q DEFAULT").is_create_table());
-        assert!(!first("CREATE VIEW v AS SELECT 1").is_create_table());
-        assert_eq!(
-            first("create or replace function f()").lead_words(3),
-            ["create", "or", "replace"]
-        );
-    }
-
-    #[test]
-    fn rarer_statements() {
-        fn one(sql: &str, mysql: bool) -> Statement<'_> {
-            split_statements(sql, mysql).remove(0)
-        }
-        assert!(!one("CREATE OR REPLACE", false).creates("table"));
-        let (name, module, args) = one("CREATE VIRTUAL TABLE v USING m(a(b), c)", false)
-            .virtual_table()
-            .unwrap();
-        assert_eq!((name.as_str(), module.as_str()), ("v", "m"));
-        assert_eq!(args, [vec!["a", "("], vec!["c"]]);
-        let trigger = "CREATE TRIGGER IF NOT EXISTS x BEFORE INSERT ON t FOR EACH ROW BEGIN END";
-        assert_eq!(
-            one(trigger, false).before_row_trigger().unwrap().table,
-            ["t"]
-        );
-        assert!(one("CREATE TYPE x", false)
-            .name_parts_after("function")
-            .is_empty());
-        let function = one("CREATE FUNCTION IF NOT EXISTS s.f()", false);
-        assert_eq!(function.name_parts_after("function"), ["s", "f"]);
     }
 }

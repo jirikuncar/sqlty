@@ -33,7 +33,7 @@ fn split_respects_quotes_and_bodies() {
 }
 
 #[test]
-fn rarer_splits() {
+fn unterminated_nested_and_dollar_text_splits_at_the_right_semicolons() {
     assert_eq!(sqls("SELECT 'x", "postgres"), ["SELECT 'x"]);
     assert_eq!(
         sqls("CREATE TABLE a$b (c INT); SELECT $1$", "postgres"),

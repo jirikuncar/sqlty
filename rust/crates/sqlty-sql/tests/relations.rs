@@ -116,6 +116,8 @@ fn views_are_offered_beside_tables() {
 fn the_limit_caps_the_result() {
     let c = pg("CREATE TABLE a1 (id int); CREATE TABLE a2 (id int); CREATE TABLE a3 (id int);");
     let found = |limit| complete("SELECT * FROM a", 15, "postgres", Some(&c), limit);
+    assert_eq!(found(0).candidates.len(), 0);
+    assert!(found(0).incomplete);
     assert_eq!(found(2).candidates.len(), 2);
     assert!(found(2).incomplete);
     assert_eq!(found(3).candidates.len(), 3);
@@ -130,10 +132,6 @@ fn other_dialects_have_no_schemas() {
             dialect,
         );
         let found = offered(&c, dialect, "SELECT * FROM db.`US", 10);
-        let names: Vec<&str> = found
-            .iter()
-            .map(|f| f.rsplit('.').next().unwrap())
-            .collect();
-        assert_eq!(names.len(), 2, "{dialect}: {found:?}");
+        assert_eq!(found, ["usage:Table", "users:Table"], "{dialect}");
     }
 }

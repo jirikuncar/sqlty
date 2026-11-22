@@ -870,21 +870,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn table_describes_what_it_cannot_read() {
-        assert_eq!(Table::Named("t".into()).named(), Some("t"));
-        assert_eq!(Table::Named("t".into()).opaque_description(), None);
-        assert_eq!(Table::Opaque("UNNEST".into()).named(), None);
-        assert_eq!(
-            Table::Opaque("UNNEST".into()).opaque_description(),
-            Some("UNNEST")
-        );
-        assert_eq!(
-            Table::ExtraSources.opaque_description(),
-            Some("tables joined to the target with FROM or USING")
-        );
-    }
-
-    #[test]
     fn virtuals_share_until_inserted_into() {
         let mut first = Virtuals::default();
         assert!(!first.contains_key("c"));

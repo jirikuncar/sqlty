@@ -23,7 +23,7 @@ create domain a.b as numeric(5, 2) not null default 0;
 CREATE DOMAIN choice text CHECK (VALUE IN ('a', 'b)')) CONSTRAINT c CHECK ((VALUE)::text <> 'x');
 CREATE DOMAIN plain text NOT NULL;
 CREATE DOMAIN nothing;
-CREATE TABLE t (p app."p", q d, r a.b, s choice, u plain);
+CREATE TABLE t (p app."p", q d, r a.b, s choice, u plain, v nothing);
 ```
 
 ```sql
@@ -33,6 +33,7 @@ SELECT * FROM t
 -- columns: r: decimal.Decimal | None (DECIMAL(5, 2))
 -- columns: s: typing.Literal['a', 'b)'] | None (TEXT)
 -- columns: u: str | None (TEXT)
+-- columns: v: None (NOTHING)
 ```
 
 ## Constraints are read without their text
@@ -45,9 +46,7 @@ without any is read as written.
 ```sql
 CREATE TABLE t (a INT CHECK (a > 0) NOT NULL, b INT REFERENCES u(id) ON DELETE SET NULL (b) NOT NULL, c TEXT, CONSTRAINT k CHECK (length(c) > 0), PRIMARY KEY (a));
 CREATE TABLE plain (a INT, b TEXT);
-CREATE TABLE u (a INT CONSTRAINT c REFERENCES public.t (a) MATCH FULL ON UPDATE CASCADE DEFERRABLE INITIALLY DEFERRED DEFAULT 1);
 CREATE TABLE odd (a INT, , CHECK (a > 0));
-CREATE TABLE odd2 (a INT REFERENCES u (a) NOT DEFERRABLE);
 ```
 
 ```sql
@@ -64,17 +63,7 @@ SELECT * FROM plain
 ```
 
 ```sql
-SELECT * FROM u
--- columns: a: int | None (INT)
-```
-
-```sql
 SELECT * FROM odd
--- columns: a: int | None (INT)
-```
-
-```sql
-SELECT * FROM odd2
 -- columns: a: int | None (INT)
 ```
 
@@ -92,8 +81,11 @@ CREATE TABLE three (id int);
 SELECT pg_catalog.set_config('search_path', 'b, c', false);
 CREATE TABLE four (id int);
 SELECT pg_catalog.set_config('search_path', '', false);
+CREATE TABLE five (id int);
 SET statement_timeout = 0;
+CREATE TABLE six (id int);
 SET search_path FROM CURRENT;
+CREATE TABLE seven (id int);
 ```
 
 ```sql
@@ -113,6 +105,21 @@ SELECT * FROM public.three
 
 ```sql
 SELECT * FROM b.four
+-- columns: id: int | None (INT)
+```
+
+```sql
+SELECT * FROM public.five
+-- columns: id: int | None (INT)
+```
+
+```sql
+SELECT * FROM public.six
+-- columns: id: int | None (INT)
+```
+
+```sql
+SELECT * FROM public.seven
 -- columns: id: int | None (INT)
 ```
 
@@ -178,6 +185,18 @@ CREATE TABLE s1 (
     g INT CONSTRAINT r REFERENCES u,
     CONSTRAINT bad NONSENSE GARBAGE (a)
 );
+CREATE TABLE s2 (a INT CONSTRAINT c REFERENCES public.t (a) MATCH FULL ON UPDATE CASCADE DEFERRABLE INITIALLY DEFERRED DEFAULT 1, CONSTRAINT bad NONSENSE GARBAGE (a));
+CREATE TABLE s3 (a INT REFERENCES u (a) NOT DEFERRABLE, CONSTRAINT bad NONSENSE GARBAGE (a));
+```
+
+```sql
+SELECT * FROM s2
+-- columns: a: int | None (INT)
+```
+
+```sql
+SELECT * FROM s3
+-- columns: a: int | None (INT)
 ```
 
 ```sql

@@ -92,3 +92,28 @@ fn reads_and_writes() {
         assert_eq!(tables(sql, dialect), *expected, "{sql}");
     }
 }
+
+/// The names of the built-in record functions, from the table sqlty ships.
+fn record_function_names() -> Vec<&'static str> {
+    let source = include_str!("../../src/analyzer/pg_record_functions.rs");
+    source
+        .lines()
+        .skip_while(|line| !line.starts_with("static FUNCTIONS"))
+        .collect::<Vec<_>>()
+        .windows(2)
+        .filter(|pair| pair[0] == "    (")
+        .filter_map(|pair| pair[1].trim().strip_prefix('"')?.strip_suffix("\","))
+        .collect()
+}
+
+#[test]
+fn every_built_in_record_function_has_its_columns() {
+    let names = record_function_names();
+    assert!(names.len() > 30, "{names:?}");
+    // The table is binary searched by name: a name out of order would not be found.
+    for name in names {
+        let columns = analyze_select(&format!("SELECT * FROM {name}()"), "postgres", None)
+            .unwrap_or_else(|| panic!("{name} returns no rows"));
+        assert!(columns.iter().all(|c| c.name != "*"), "{name}: {columns:?}");
+    }
+}

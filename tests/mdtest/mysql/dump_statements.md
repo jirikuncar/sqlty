@@ -47,6 +47,11 @@ SELECT * FROM t
 -- columns: id: int (INT)
 ```
 
+```sql
+SELECT * FROM plain
+-- columns: id: int | None (INT)
+```
+
 ## ALTER TABLE spellings
 
 `schema.sql`:
@@ -58,9 +63,10 @@ ALTER TABLE t RENAME INDEX a TO b, RENAME COLUMN x TO y, RENAME KEY c TO d;
 CREATE TABLE u (id INT);
 ALTER TABLE u ADD e INT;
 ALTER TABLE u ADD PRIMARY KEY (id);
-CREATE TABLE v (id INT);
-ALTER TABLE v ADD c INT, RENAME INDEX a TO;
-ALTER TABLE v ADD (a INT;
+CREATE TABLE v1 (id INT);
+ALTER TABLE v1 ADD c INT, RENAME INDEX a TO;
+CREATE TABLE v2 (id INT);
+ALTER TABLE v2 ADD (a INT;
 CREATE TABLE w (id INT);
 ALTER TABLE w RENAME INDEX a TO b, RENAME INDEX c TO d;
 ```
@@ -81,7 +87,12 @@ SELECT * FROM u
 ```
 
 ```sql
-SELECT * FROM v
+SELECT * FROM v1
+-- columns: *: None (None)
+```
+
+```sql
+SELECT * FROM v2
 -- columns: *: None (None)
 ```
 

@@ -31,9 +31,11 @@ id: int | INT | NonNull
 kind: str | TEXT | NonNull
 x: int | INT | NonNull
 
-SELECT * FROM (a JOIN b USING (x)) JOIN c USING (y)
-*: ? | ? | Unknown
-[unsupported-syntax] `*` could not be expanded into columns
+SELECT * FROM (a JOIN b USING (id, kind, x)) JOIN c USING (id)
+id: int | INT | NonNull
+kind: str | TEXT | NonNull
+x: int | INT | NonNull
+y: int | INT | Nullable
 
 SELECT * FROM a JOIN b ON a.id = b.id
 id: int | INT | NonNull

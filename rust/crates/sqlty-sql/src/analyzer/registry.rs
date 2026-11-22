@@ -252,14 +252,4 @@ mod tests {
             assert!(!NULL_ON_FEW_ROWS.contains(name), "{name} is in both lists");
         }
     }
-
-    #[test]
-    fn the_first_signature_of_a_name_wins() {
-        assert_eq!(
-            lookup("SPLIT_PART").and_then(|f| f.signature),
-            Some(&["TEXT", "TEXT", "INT"][..])
-        );
-        assert!(lookup("COALESCE").is_some_and(|f| f.same_type));
-        assert!(lookup("NOT_A_FUNCTION").is_none());
-    }
 }
