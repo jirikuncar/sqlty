@@ -242,6 +242,12 @@ impl<'a> Analyzer<'a> {
                         });
                     }
                 }
+                // A table is named only where the query lists no FROM item: PostgreSQL rejects
+                // `SELECT users.id FROM users AS u` ("invalid reference to FROM-clause entry
+                // for table \"users\"", https://www.postgresql.org/docs/17/queries-table-expressions.html#QUERIES-TABLE-ALIASES).
+                if !scope.is_empty() || !self.outer.is_empty() {
+                    return None;
+                }
                 let found = self.find_column(&qualifier, &column)?;
                 Some(Resolved {
                     reference: qualifier.clone(),

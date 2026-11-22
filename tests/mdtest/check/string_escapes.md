@@ -75,7 +75,7 @@ q = "--sql\nSELECT name FROM \"users\""
 ## Every escape is decoded before the query is read
 
 A query is typed only when its escapes decode to valid SQL: `\x31`, `\u0031`,
-`\U00000031` and the octal `\061` are all the digit `1`, and a backslash before a
+`\U00000031`, `\N{DIGIT ONE}` and the octal `\061` are all the digit `1`, and a backslash before a
 line break, in any of its spellings, joins the lines.
 
 ```python
@@ -87,6 +87,8 @@ e = "--sql\nSELECT\tid\r\n,\
  1::INTEGER FROM users"
 f = "--sql\nSELECT '\d'::TEXT"
 g = "--sql\nSELECT '\a\b\f\v\r\n'::TEXT"
+h = "--sql\nSELECT '\N{BULLET}'::TEXT, \N{DIGIT ONE}::INTEGER"
+i = "--sql\nSELECT '\N{NO SUCH NAME}'::TEXT"
 # rewritten: a = SQL[tuple[int]]("--sql\nSELECT \x31::INTEGER")
 # rewritten: b = SQL[tuple[int]]("--sql\nSELECT \u0031::INTEGER")
 # rewritten: c = SQL[tuple[int]]("--sql\nSELECT \U00000031::INTEGER")
@@ -95,6 +97,8 @@ g = "--sql\nSELECT '\a\b\f\v\r\n'::TEXT"
 # rewritten:  1::INTEGER FROM users")
 # rewritten: f = SQL[tuple[str]]("--sql\nSELECT '\d'::TEXT")
 # rewritten: g = SQL[tuple[str]]("--sql\nSELECT '\a\b\f\v\r\n'::TEXT")
+# rewritten: h = SQL[tuple[str, int]]("--sql\nSELECT '\N{BULLET}'::TEXT, \N{DIGIT ONE}::INTEGER")
+# rewritten: i = SQL[tuple[str]]("--sql\nSELECT '\N{NO SUCH NAME}'::TEXT")
 ```
 
 ## Columns count escapes as written
@@ -116,3 +120,5 @@ d = SQL[tuple[str]]("--sql\nSELECT na\x6de, nope" "\n FROM users")
 # error[48:64]: [unknown-column] "column `nope` does not exist in `users`"
 e = SQL[tuple[str]]("--sql\nSELECT 1::INTEGER, \x6e\x6f\x70\x65 FROM users")
 ```
+# error[46:50]: [unknown-column] "column `nope` does not exist in `users`"
+f = SQL[tuple[str]]("--sql\nSELECT '\N{BULLET}', nope FROM users")

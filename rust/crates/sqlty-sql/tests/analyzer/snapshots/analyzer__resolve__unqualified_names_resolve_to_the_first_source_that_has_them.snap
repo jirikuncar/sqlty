@@ -21,4 +21,5 @@ SELECT NAME FROM users
 name: str | TEXT | NonNull
 
 SELECT users.name FROM users AS u
-name: str | TEXT | NonNull
+name: ? | ? | Unknown
+[unknown-table] `users` is not a table or alias in the FROM clause

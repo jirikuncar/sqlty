@@ -12,7 +12,8 @@ SELECT users.id FROM public.users
 id: int | INT | NonNull
 
 SELECT users.id FROM users AS u
-id: int | INT | NonNull
+id: ? | ? | Unknown
+[unknown-table] `users` is not a table or alias in the FROM clause
 
 SELECT x.id FROM Public.T AS X
 id: int | INT | NonNull
