@@ -1095,6 +1095,7 @@ fn docstring_end(source: &str, pos: usize) -> Option<(usize, usize)> {
 mod tests {
     use super::*;
 
+    // Kept in `src/`: Arc identity of a cached regex, which no public output shows.
     #[test]
     fn a_word_regex_compiles_once() {
         assert!(Arc::ptr_eq(

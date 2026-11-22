@@ -2216,6 +2216,7 @@ mod tests {
         )
     }
 
+    // Kept in `src/`: Order of the schema cache, which no public output shows.
     #[test]
     fn cache_hit_moves_the_entry_to_the_front() {
         let mut cache = vec![
@@ -2236,21 +2237,7 @@ mod tests {
         );
     }
 
-    #[test]
-    fn cache_hit_needs_the_same_sql_and_dialect() {
-        let mut cache = vec![entry("CREATE TABLE a (x INT)", "postgres")];
-        assert!(cache_hit(&mut cache, "CREATE TABLE a (x INT)", "mysql").is_none());
-        assert!(cache_hit(&mut cache, "CREATE TABLE a (y INT)", "postgres").is_none());
-        assert!(cache_hit(&mut [], "CREATE TABLE a (x INT)", "postgres").is_none());
-    }
-
-    #[test]
-    fn cache_hit_finds_equal_text_at_another_address() {
-        let mut cache = vec![entry("CREATE TABLE a (x INT)", "postgres")];
-        let copy = String::from("CREATE TABLE a (x INT)");
-        assert!(cache_hit(&mut cache, &copy, "postgres").is_some());
-    }
-
+    // Kept in `src/`: Arc identity of a cached schema, which no public output shows.
     #[test]
     fn cache_hit_shares_the_parsed_schema() {
         let mut cache = vec![entry("CREATE TABLE a (x INT)", "postgres")];
@@ -2261,6 +2248,7 @@ mod tests {
 
     /// One test, because the cache is a process-wide static: a test filling it would evict
     /// the entries another test expects to find.
+    // Kept in `src/`: Arc identity and size of the cache, which no public output shows.
     #[test]
     fn cached_schema_parses_once_and_keeps_a_bounded_number() {
         let sql = "CREATE TABLE sqlty_ext_cache_once (x INT)";
@@ -2277,6 +2265,7 @@ mod tests {
         assert!(lock_schemas().len() <= SCHEMAS_KEPT);
     }
 
+    // Kept in `src/`: Skips a schema parse, which no public output shows.
     #[test]
     fn schema_for_skips_sources_that_cannot_hold_a_query() {
         let ddl = || Some(SchemaArg::Text("CREATE TABLE sqlty_ext_for (x INT)"));

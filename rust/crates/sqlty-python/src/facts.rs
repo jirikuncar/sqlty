@@ -64,19 +64,3 @@ impl<'a> ModuleFacts<'a> {
         self.scan().calls.iter().map(|&(call, _)| call)
     }
 }
-
-#[cfg(test)]
-#[cfg_attr(coverage_nightly, coverage(off))]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn literals_skip_operands_of_plus_and_read_f_and_t_strings() {
-        let text = "a = 'x' + 'y'\nb = 'z'\nc = f'p{b}q'\nd = t'r{b}s'\ne = ('u' + 'v') + 'w'\n";
-        let source = Source::new(text, (3, 14)).unwrap();
-        let facts = ModuleFacts::new(&source);
-        let expected: HashSet<String> = ["z", "p", "q", "r", "s"].map(String::from).into();
-        assert_eq!(facts.literals(), expected);
-        assert_eq!(facts.calls().count(), 0);
-    }
-}

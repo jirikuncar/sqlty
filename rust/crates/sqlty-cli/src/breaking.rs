@@ -1195,6 +1195,7 @@ mod tests {
         }
     }
 
+    // Kept in `src/`: Arc identity of the schema text, which no public output shows.
     #[test]
     fn a_schema_key_shares_the_schema_text() {
         let config = ("pyproject.toml", "[tool.sqlty]\nschema = \"schema.sql\"\n");
@@ -1207,6 +1208,7 @@ mod tests {
         std::fs::remove_dir_all(&root).expect("removes");
     }
 
+    // Kept in `src/`: Counts the queries a comparison re-checks, which no public output shows.
     #[test]
     fn an_unchanged_schema_checks_no_query() {
         let config = ("pyproject.toml", "[tool.sqlty]\nschema = \"schema.sql\"\n");
@@ -1247,6 +1249,7 @@ mod tests {
         findings.into_iter().map(rules).collect()
     }
 
+    // Kept in `src/`: Laziness of reading migrations, which no public output shows.
     #[test]
     fn migrations_are_read_when_a_baseline_first_differs_and_once() {
         let root = project(
@@ -1268,13 +1271,5 @@ mod tests {
         assert!(sets[0].texts.get().is_some());
         assert_eq!(found(&format!("{EVENTS}{USERS}")), expected);
         std::fs::remove_dir_all(&root).expect("removes");
-    }
-
-    #[test]
-    fn parses_the_direction_setting() {
-        assert_eq!(Direction::parse("forward"), Direction::Forward);
-        assert_eq!(Direction::parse("both"), Direction::Both);
-        assert_eq!(Direction::parse("nope"), Direction::Both);
-        assert_eq!(Direction::parse("backward").name(), "backward");
     }
 }

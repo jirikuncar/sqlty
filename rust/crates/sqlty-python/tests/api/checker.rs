@@ -486,3 +486,37 @@ fn rarer_untyped_causes_unwrapped_calls_and_unexpanded_stars() {
     assert_eq!(star[0].rule, Rule::SelectStar);
     assert!(star[0].fix.is_empty());
 }
+
+#[test]
+fn test_wrapper_calls_report_the_line_they_start_on() {
+    let source = r#"q = SQL[tuple[str]]("""--sql
+SELECT 1::INTEGER""")
+r = SQL[tuple[str]](
+    "-- sql\nSELECT 2::INTEGER",
+)
+s = SQL[tuple[str]]("plain")
+"#;
+    let lines: Vec<usize> = check_source(
+        source,
+        "postgres",
+        None,
+        &RuleConfig::default(),
+        None,
+        false,
+        &[],
+    )
+    .iter()
+    .filter(|d| d.rule == Rule::NarrowType)
+    .map(|d| d.line)
+    .collect();
+    assert_eq!(lines, [1, 3]);
+}
+
+#[test]
+fn test_select_star_finding_needs_a_parsable_query() {
+    use sqlty_python::checker::select_star_finding;
+    assert_eq!(
+        select_star_finding("SELECT * FROMM t", "postgres", true).map(|f| f.0),
+        Some(Rule::SelectStar)
+    );
+}

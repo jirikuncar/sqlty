@@ -23,3 +23,9 @@ fn a_long_cause_is_cut_on_a_character() {
 fn an_empty_cause_keeps_every_field() {
     assert!(issue_url("").contains("&title=Crash%3A%20&output=&version="));
 }
+
+#[test]
+fn a_panic_without_a_message_has_an_unknown_cause() {
+    assert_eq!(cause(&42), "unknown cause");
+    assert_eq!(cause(&"static"), "static");
+}

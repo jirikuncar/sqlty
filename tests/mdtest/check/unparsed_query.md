@@ -121,3 +121,22 @@ c = "-- sql\nINSERT INTO users (id) VALUES (1) ON DUPLICATE KEY UPDATE (id, name
 d = "-- sql\nWITH x AS (SELECT 1) UPDATE users SET (id, name) = (1, 'a')"
 e = "-- sql\nINSERT INTO users SET id = 1, name = 'a' ON DUPLICATE KEY UPDATE name = 'b'"
 ```
+
+## A helper call with a literal or built query
+
+A literal a helper receives is checked, the operands of `+` and the pieces of an f-string are not.
+
+```python
+from typing import Annotated
+from sqlty import SQL
+
+def run(sql: Annotated[str, SQL]): ...
+
+# error: [unparsed-query] "query does not parse: Expected: [NOT] NULL | TRUE | FALSE | DISTINCT | [NOT] JSON [VALUE | SCALAR | ARRAY | OBJECT] [WITH | WITHOUT UNIQUE [KEYS]] | [form] NORMALIZED FROM after IS, found: DOCUMENT at Line: 1, Column: 21"
+run("--sql\nSELECT NULL::xml IS DOCUMENT")
+run("--sql\n" + "SELECT NULL::xml IS DOCUMENT")
+# error: [fstring-skipped] "f-string with --sql prefix skipped (f-strings cannot be statically rewritten)"
+run(f"--sql\nSELECT NULL::xml IS DOCUMENT {run}")
+# error: [unparsed-query] "query does not parse: Expected: [NOT] NULL | TRUE | FALSE | DISTINCT | [NOT] JSON [VALUE | SCALAR | ARRAY | OBJECT] [WITH | WITHOUT UNIQUE [KEYS]] | [form] NORMALIZED FROM after IS, found: DOCUMENT at Line: 1, Column: 21"
+run("SELECT NULL::xml IS DOCUMENT")
+```

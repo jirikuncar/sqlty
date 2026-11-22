@@ -1556,6 +1556,7 @@ mod tests {
         )
     }
 
+    // Kept in `src/`: Counts parses and analyses, which no public output shows.
     #[test]
     fn a_driver_call_and_a_string_share_one_parse_and_one_analysis() {
         let text = concat!(
@@ -1568,6 +1569,7 @@ mod tests {
         assert_eq!(counted(text), (1, 1));
     }
 
+    // Kept in `src/`: Counts parses and analyses, which no public output shows.
     #[test]
     fn a_driver_call_alone_is_neither_analyzed_nor_parsed_as_written() {
         let text = concat!(
@@ -1606,6 +1608,7 @@ mod tests {
         crate::scopes::WALKS.with(std::cell::Cell::get)
     }
 
+    // Kept in `src/`: Counts walks of the module, which no public output shows.
     #[test]
     fn a_module_is_walked_once_for_every_check() {
         let text = "import psycopg\nfrom typing import Annotated, Any\n\
@@ -1620,11 +1623,13 @@ mod tests {
         assert_eq!(walks(text), 1);
     }
 
+    // Kept in `src/`: Counts walks of the module, which no public output shows.
     #[test]
     fn a_module_the_prefilters_reject_is_not_walked() {
         assert_eq!(walks("x = 1\nprint(x)\n"), 0);
     }
 
+    // Kept in `src/`: Counts walks of the module, which no public output shows.
     #[test]
     fn a_module_defining_imported_constants_is_walked_once_for_all_importers() {
         let consts = Source::new("X = Z\nY = Z\nZ = b'1'\n", (3, 14)).unwrap();
@@ -1666,6 +1671,7 @@ mod tests {
         assert_eq!(crate::scopes::WALKS.with(std::cell::Cell::get), 3);
     }
 
+    // Kept in `src/`: Counts analyses, which no public output shows.
     #[test]
     fn a_query_with_a_row_class_is_analyzed_once() {
         use crate::analyses::ANALYZED;
@@ -1704,24 +1710,7 @@ mod tests {
         assert_eq!(ANALYZED.with(std::cell::Cell::get), 1);
     }
 
-    #[test]
-    fn a_panic_without_a_message_has_an_unknown_cause() {
-        assert_eq!(crate::report::cause(&42), "unknown cause");
-        assert_eq!(crate::report::cause(&"static"), "static");
-    }
-
-    #[test]
-    fn a_dict_keeps_the_first_place_and_the_last_value_of_a_key() {
-        assert_eq!(dict([("a", 1), ("b", 2), ("a", 3)]), [("a", 3), ("b", 2)]);
-    }
-
-    #[test]
-    fn an_unknown_type_fits_and_a_bare_list_fits_only_a_list() {
-        assert!(fits(None, Some("int")));
-        assert!(fits(Some("list"), Some("list[int]")));
-        assert!(!fits(Some("list"), Some("int")));
-    }
-
+    // Kept in `src/`: The `Key::Index` spelling has no public path that reaches it.
     #[test]
     fn a_key_is_spelled_as_python_writes_it() {
         assert_eq!(key_text(&Key::Index(1)), "1");

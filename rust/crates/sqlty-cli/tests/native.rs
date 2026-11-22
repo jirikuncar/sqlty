@@ -621,3 +621,46 @@ fn reports_a_server_without_a_client() {
     assert!(err.starts_with("sqlty: error: "), "{err}");
     std::fs::remove_dir_all(&root).expect("removes");
 }
+
+#[test]
+fn the_server_reads_the_breaking_direction_setting() {
+    let config = ("pyproject.toml", "[tool.sqlty]\nschema = \"schema.sql\"\n");
+    let files = [config, ("schema.sql", NEW_SCHEMA), ("app/q.py", NEW_CODE)];
+    let root = project("direction", &files);
+    save_snapshot(&root);
+    write(&root, "schema.sql", OLD_SCHEMA);
+    let root = root.canonicalize().expect("exists");
+    let open = format!(
+        r#"{{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{{"textDocument":{{"uri":"file://{}/app/q.py","languageId":"python","version":1,"text":{:?}}}}}}}"#,
+        root.display(),
+        NEW_CODE
+    );
+    let initialized = r#"{"jsonrpc":"2.0","method":"initialized","params":{}}"#.to_string();
+    // Anything but `forward` and `backward` is both, so the snapshot's queries are checked.
+    for (direction, reported) in [
+        ("backward", true),
+        ("both", true),
+        ("nope", true),
+        ("forward", false),
+    ] {
+        let options =
+            format!(r#"{{"breaking":{{"against":"snapshot.json","direction":"{direction}"}}}}"#);
+        let (messages, code) = serve(
+            &root,
+            &[
+                initialize(&root, &options),
+                initialized.clone(),
+                open.clone(),
+            ],
+            "publishDiagnostics",
+        );
+        assert_eq!(code, 0);
+        let all = messages.join("\n");
+        assert_eq!(
+            all.contains("in the code of snapshot.json"),
+            reported,
+            "{direction}: {all}"
+        );
+    }
+    std::fs::remove_dir_all(&root).expect("removes");
+}

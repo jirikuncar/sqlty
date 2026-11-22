@@ -264,11 +264,13 @@ fn set(stuff: &[char]) -> String {
 mod tests {
     use super::*;
 
+    // Kept in `src/`: Arc identity of a cached glob, which no public output shows.
     #[test]
     fn a_path_prefix_compiles_once() {
         assert!(Arc::ptr_eq(&path_prefix("src/*"), &path_prefix("src/*")));
     }
 
+    // Kept in `src/`: Counts glob sets compiled, which no public output shows.
     #[test]
     fn a_set_of_globs_compiles_once() {
         let excludes = Excludes::default();

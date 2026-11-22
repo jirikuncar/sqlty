@@ -1819,6 +1819,7 @@ mod tests {
         )
     }
 
+    // Kept in `src/`: Merged condition sets are never printed; query_variant_paths.md checks the outcome.
     #[test]
     fn conditions_merge_only_when_exact() {
         let (a, not_a, b, not_b, c) = (

@@ -2,12 +2,12 @@
 # and pytest files importing a private `sqlty._*` module (`sqlty._core` is sqlty-ext's API).
 # Lower a count whenever a test moves to the public API, until the line can go.
 sqlty-bench 0
-sqlty-cli 4
-sqlty-ext 6
+sqlty-cli 3
+sqlty-ext 4
 sqlty-format 0
 sqlty-lsp 0
 sqlty-project 0
-sqlty-python 41
+sqlty-python 13
 sqlty-rules 0
 sqlty-sql 89
 sqlty-wasm 0

@@ -321,26 +321,3 @@ pub fn annotation_type(annotation: &str, version: Version) -> Option<Ty> {
     };
     resolver.resolve(&parsed.syntax().body, annotation, &NoNames)
 }
-
-#[cfg(test)]
-#[cfg_attr(coverage_nightly, coverage(off))]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn rarer_annotations() {
-        assert_eq!(
-            typing_generic("Set").map(|ty| ty.repr()).as_deref(),
-            Some("<class 'set'>")
-        );
-        assert_eq!(
-            typing_generic("FrozenSet").map(|ty| ty.repr()).as_deref(),
-            Some("<class 'frozenset'>")
-        );
-        let parsed = ruff_python_parser::parse_expression("a[0][int]").unwrap();
-        let annotation = &parsed.syntax().body;
-        let (unwrapped, required) = unwrap_qualifiers(annotation, &Table::default());
-        assert!(std::ptr::eq(unwrapped, annotation.as_ref()));
-        assert_eq!(required, None);
-    }
-}

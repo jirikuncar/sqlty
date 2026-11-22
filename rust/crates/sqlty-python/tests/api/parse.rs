@@ -57,3 +57,18 @@ fn deep_nesting_does_not_overflow() {
         assert!(module(&source).is_none());
     }
 }
+
+#[test]
+fn a_module_nests_blocks_to_a_limit() {
+    // `MAX_INDENT` (100) levels are refused: ruff's parser would recurse too deep.
+    let nested = |levels: usize| {
+        let mut source: String = (0..levels)
+            .map(|n| format!("{}if x:\n", " ".repeat(n)))
+            .collect();
+        source.push_str(&format!("{}pass\n", " ".repeat(levels)));
+        module(&source).is_some()
+    };
+    assert!(nested(99));
+    assert!(!nested(100));
+    assert!(module("x = 1 \\").is_none());
+}

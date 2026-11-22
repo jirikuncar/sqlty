@@ -160,3 +160,28 @@ def test_skipped_objects_are_what_the_schema_could_not_parse() -> None:
     skipped = _core.schema_skipped_objects(sql)
     assert all(name != "sqlty_ext_ok" for _, name in skipped), skipped
     assert all(kind == "table" for kind, _ in skipped), skipped
+
+
+def test_a_schema_text_is_read_by_its_value_and_dialect() -> None:
+    # `sqlty-ext` keeps parsed schemas by text and dialect: the same text at another
+    # address is the same schema, and a text or dialect that differs is another.
+    sql = "SELECT a FROM sqlty_ext_keys"
+    ddl = "CREATE TABLE sqlty_ext_keys (a INT NOT NULL);"
+    first = _core.analyze_select(sql, schema_sql=ddl)
+    assert first == [("a", "int", "INT")]
+    assert _core.analyze_select(sql, schema_sql="".join([ddl[:10], ddl[10:]])) == first
+    other_text = _core.analyze_select(sql, schema_sql=ddl.replace("INT NOT NULL", "TEXT"))
+    assert other_text == [("a", "str | None", "TEXT")]
+    mysql = _core.analyze_select(sql, dialect="mysql", schema_sql=ddl)
+    assert mysql is not None
+    assert mysql[0][:1] == ("a",)
+
+
+def test_many_schemas_leave_the_first_one_readable() -> None:
+    # More schemas than the cache keeps evict the first: it is parsed again, same answer.
+    sql = "SELECT a FROM sqlty_ext_bound"
+    ddl = "CREATE TABLE sqlty_ext_bound (a INT NOT NULL);"
+    first = _core.analyze_select(sql, schema_sql=ddl)
+    for n in range(100):
+        _core.analyze_select("SELECT 1", schema_sql=f"CREATE TABLE sqlty_ext_n{n} (a INT);")
+    assert _core.analyze_select(sql, schema_sql=ddl) == first

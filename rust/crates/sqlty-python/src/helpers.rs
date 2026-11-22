@@ -54,6 +54,7 @@ pub(crate) fn region(node: Node<'_>, lines: &Lines, len: usize) -> (usize, usize
 mod tests {
     use super::*;
 
+    // Kept in `src/`: Only the `Node::Module` arm: `calls.rs` never asks for it (dead code).
     #[test]
     fn the_module_region_is_the_whole_source() {
         let source = "x = 1\ny = 2\n";

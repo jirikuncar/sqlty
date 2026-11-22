@@ -309,23 +309,3 @@ impl<'a> Visitor<'a> for Depth {
         }
     }
 }
-
-#[cfg(test)]
-#[cfg_attr(coverage_nightly, coverage(off))]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn rarer_sources() {
-        assert!(!has_surrogate_escape("x = 1 \\"));
-        let nested = |levels: usize| {
-            let mut source: String = (0..levels)
-                .map(|n| format!("{}if x:\n", " ".repeat(n)))
-                .collect();
-            source.push_str(&format!("{}pass\n", " ".repeat(levels)));
-            module(&source).is_some()
-        };
-        assert!(nested(MAX_INDENT - 1));
-        assert!(!nested(MAX_INDENT));
-    }
-}

@@ -27,6 +27,22 @@ r = t"--sql\nSELECT id::INTEGER FROM users WHERE id = {user_id:{width}}"
 s = t"--sql\nSELECT id::INTEGER FROM users WHERE id = {user_id=}"
 ```
 
+## Comparisons and keyword arguments are not debug fields
+
+A `=` that is part of `==`, `<=`, `>=`, `!=` or a call's keyword argument does not make a debug field.
+
+```python
+a = 1
+b = 2
+f = lambda **kw: 1
+# error: [stale-rewrite] "Source has --sql strings that aren't wrapped in SQL[T]"
+q = t"--sql\nSELECT id::INTEGER FROM users WHERE id = {a == b} OR id = {a <= b} OR id = {f(a=1)}"
+# error: [tstring-skipped] "t-string with --sql prefix skipped (the field {a=} changes the SQL)"
+r = t"--sql\nSELECT id::INTEGER FROM users WHERE id = {a=}"
+# error: [tstring-skipped] "t-string with --sql prefix skipped (the field {a = } changes the SQL)"
+s = t"--sql\nSELECT id::INTEGER FROM users WHERE id = {a = }"
+```
+
 ## psycopg identifiers
 
 An identifier is read in a statement that returns no rows.
