@@ -84,7 +84,7 @@ db/schema.sql:11: [missing-concurrently] `CREATE INDEX` blocks writes to `users`
 
 Build the index in an `autocommit_block()`, outside the migration's transaction:
 
-```python ignore
+```python
 def upgrade() -> None:
     with op.get_context().autocommit_block():
         op.create_index("users_plan", "users", ["plan"], postgresql_concurrently=True)
@@ -120,7 +120,7 @@ lock that blocks writes taken before `SET lock_timeout`. Set it in `env.py`, in
 both `run_migrations_offline()` and `run_migrations_online()`, so the SQL you
 lint is the SQL you run:
 
-```python ignore
+```python
 with context.begin_transaction():
     context.execute("SET lock_timeout = '2s'")
     context.run_migrations()
