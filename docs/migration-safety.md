@@ -98,12 +98,26 @@ the schema each statement changes, from the baseline:
   reported again, and need no `ignore` comment.
 - A table the new statements create is empty: locking it is harmless until rows
   are copied into it with `INSERT ... SELECT`, `COPY ... FROM`, `MERGE` or
-  `CREATE TABLE ... AS`.
+  `CREATE TABLE ... AS` without `WITH NO DATA`.
 - A type change is judged by the column's current type: `varchar(50)` to `text`,
   or `numeric(5, 2)` to `numeric(9, 2)`, is metadata only; `integer` to `bigint`
   rewrites the table.
 - `SET NOT NULL` is not reported when a validated `CHECK (col IS NOT NULL)`
   already proves it.
+
+`add-required-column`, `concurrently-in-transaction` and
+`enum-value-in-transaction` are errors by default, so `sqlty breaking` fails on
+them; the others warn. To fail CI on every one, raise them for your migrations:
+
+```toml
+[[tool.sqlty.overrides]]
+include = ["migrations/**"]
+
+[tool.sqlty.overrides.rules]
+missing-concurrently = "error"
+table-rewrite = "error"
+constraint-scan = "error"
+```
 
 Severities, `-- sqlty: ignore[rule]` comments and `[tool.sqlty.overrides]` work as for
 every other rule. [Migrations that lock tables](guide/breaking-changes.md#migrations-that-lock-tables)
@@ -136,7 +150,7 @@ files you pass it. The two overlap on lock safety and differ on what they know:
 | Type changes | every `ALTER COLUMN ... TYPE` ([`changing-column-type`](https://squawkhq.com/docs/changing-column-type)) | only those that rewrite the table, from the column's current type |
 | Dropped columns | every drop ([`ban-drop-column`](https://squawkhq.com/docs/ban-drop-column)) | a drop a query of the other revision still reads |
 | Rules | over 70, including schema style (`prefer-text-field`, `prefer-bigint-over-int`, `prefer-timestamptz`) | 14 migration rules, plus the query and row type rules of `sqlty check` |
-| Transactions | `assume_in_transaction` setting, per file | follows `BEGIN` and `COMMIT` in the files |
+| Transactions | follows `BEGIN` and `COMMIT`; `assume_in_transaction` for files a tool wraps in one | follows `BEGIN` and `COMMIT` |
 | Suppression | `-- squawk-ignore rule` | `-- sqlty: ignore[rule]` on or above the statement |
 | PostgreSQL version | `--pg-version` | not configurable |
 | Python code | not read | queries in Python checked against both schemas |

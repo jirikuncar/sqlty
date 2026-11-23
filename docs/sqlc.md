@@ -22,8 +22,9 @@ in `sqlc.yaml`:
 SELECT id, name, email FROM users WHERE id = $1;
 ```
 
-`sqlc generate` writes a `models.py` with a `User` dataclass and a module with a
-`get_user` function that runs the query and builds a `User` from the row.
+`sqlc generate` writes a `models.py` with a `User` dataclass, and code that runs
+the query and builds a `User` from the row: a `Querier` class with a `get_user`
+method (sqlc-gen-python) or a `get_user` function (sqlc-gen-better-python).
 
 SQLTy, with `schema = "schema.sql"` under `[tool.sqlty]`:
 
@@ -57,14 +58,14 @@ GET_USER = SQL[User]("--sql\nSELECT id, name, email FROM users WHERE id = %s")
 
 | | sqlc 1.31 with a Python plugin | SQLTy |
 |-|--------------------------------|-------|
-| Written in | Go; plugins are WebAssembly modules | Rust, installed from PyPI |
+| Written in | Go; plugins are WebAssembly modules or processes | Rust, installed from PyPI |
 | Where queries live | Annotated `.sql` files (`-- name: GetUser :one`) | String literals in Python, or the same annotated `.sql` files |
 | Output | Generated Python modules, regenerated on every change | No generated code: `SQL[T]` annotations that `sqlty rewrite` writes into your source |
 | Row type | A generated dataclass, or a Pydantic, attrs or msgspec model per table or query | Your own tuple, `TypedDict`, `NamedTuple`, dataclass or Pydantic model, checked against the query |
-| Driver | sqlc-gen-python: SQLAlchemy `Connection`; sqlc-gen-better-python: asyncpg, psycopg, sqlite3, aiosqlite, asyncmy or PyMySQL | Any: `sqlite3`, psycopg, asyncpg, SQLAlchemy `text()`, Django; see [Drivers and ORMs](guide/drivers-and-orms.md) |
+| Driver | sqlc-gen-python: SQLAlchemy `Connection` or `AsyncConnection`; sqlc-gen-better-python: asyncpg, psycopg, sqlite3, aiosqlite, asyncmy or PyMySQL | Any: `sqlite3`, psycopg, asyncpg, SQLAlchemy `text()`, Django; see [Drivers and ORMs](guide/drivers-and-orms.md) |
 | Where types come from | `CREATE TABLE` statements; optionally a PostgreSQL database for harder queries | `CREATE TABLE` statements and casts; never a database |
 | Dynamic SQL | One query per annotation; [`sqlc.slice`](https://docs.sqlc.dev/en/latest/reference/macros.html) and `sqlc.narg` for variations | A string built in `if`/`else` branches, checked once per [variant](guide/query-variants.md) (preview) |
-| Lint | `sqlc vet`: rules you write in CEL | [Built-in rules](reference/rules.md) with fixes, such as fan-out aggregates and `SELECT *` |
+| Lint | `sqlc vet`: rules you write in CEL, plus `sqlc/db-prepare` | [Built-in rules](reference/rules.md) with fixes, such as fan-out aggregates and `SELECT *` |
 | Breaking changes | `sqlc verify`, against queries pushed to sqlc's hosted service | [`sqlty breaking`](guide/breaking-changes.md), against a git revision or a snapshot, locally |
 | Editor | Generated code is plain Python | Language server, VS Code extension, [playground](playground.md) |
 

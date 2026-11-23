@@ -79,7 +79,7 @@ COMMIT;
 ```
 
 ```text
-db/schema.sql:13: [missing-concurrently] `CREATE INDEX` blocks writes to `users` until the index is built: create it `CONCURRENTLY` (migration: a statement the working tree runs that origin/main does not have)
+db/schema.sql:11: [missing-concurrently] `CREATE INDEX` blocks writes to `users` until the index is built: create it `CONCURRENTLY` (migration: a statement the working tree runs that origin/main does not have)
 ```
 
 Build the index in an `autocommit_block()`, outside the migration's transaction:
