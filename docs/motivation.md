@@ -111,7 +111,7 @@ queries inline as string literals.
 | [Doobie](https://github.com/typelevel/doobie) | Scala | `check` validates queries against declared types in tests | Yes |
 | [SafeQL](https://github.com/ts-safeql/safeql) | TypeScript | ESLint rule checks inline `sql` tags and fixes their type annotations | Yes |
 | [sqlx-ts](https://github.com/JasonShin/sqlx-ts), [mfsqlchecker](https://github.com/MedFlyt/mfsqlchecker) | TypeScript | Check inline queries and their result types | Yes |
-| [sqlc](https://github.com/sqlc-dev/sqlc) | Go, Python and others | Generates typed code from schema and `.sql` files | No |
+| [sqlc](https://github.com/sqlc-dev/sqlc) | Go, Python and others | Generates typed code from schema and `.sql` files ([compared](sqlc.md)) | No |
 | [SQLDelight](https://github.com/sqldelight/sqldelight) | Kotlin | Generates typed APIs from `.sq` files | No |
 | [PgTyped](https://github.com/adelsz/pgtyped) | TypeScript | Generates types for `.sql` files and `sql` tags | Yes |
 | [Prisma TypedSQL](https://www.prisma.io/docs/orm/v7/prisma-client/using-raw-sql/typedsql) | TypeScript | Typed functions from `.sql` files | Yes |
@@ -127,7 +127,8 @@ DSL instead of SQL strings. [psycopg](https://www.psycopg.org/psycopg3/docs/adva
 types rows by row factory, which sqlty's [psycopg helpers](guide/psycopg.md)
 build on. Linters such as [SQLFluff](https://github.com/sqlfluff/sqlfluff)
 and [Squawk](https://github.com/sbdchd/squawk) check style and migrations,
-not result types.
+not result types; `sqlty breaking` lints
+[migrations](migration-safety.md#sqlty-vs-squawk) too.
 
 ### Further reading
 

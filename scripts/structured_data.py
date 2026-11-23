@@ -6,7 +6,8 @@
   ``FAQPage`` on the FAQ, whose ``h2``s are the questions and the text up to the next one
   their answers, so the markup always says what the page shows.
 - ``sitemap.xml``: ``lastmod`` of each URL.
-- ``llms.txt``: a note on each link, from the page's description.
+- ``llms.txt``: a note on each link, from the page's description, and the rule pages in a
+  section per rule group.
 
 A page was modified when the last commit changed its source file. A shallow clone doesn't
 know that, so its build gets no dates.
@@ -20,10 +21,17 @@ import re
 import subprocess
 import sys
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from html.parser import HTMLParser
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+RULES = ROOT / "docs" / "reference" / "rules"
+GROUPS = {
+    "names": "Name, join and schema rules",
+    "params": "Parameter rules",
+    "migration": "Zero-downtime PostgreSQL migration rules",
+}
 ARTICLES = ("guide/", "recipes/")
 AUTHOR = {"@type": "Person", "name": "Jiri Kuncar", "url": "https://github.com/jirikuncar"}
 
@@ -116,14 +124,15 @@ def git(*args: str) -> str:
 
 
 def modified() -> dict[str, str]:
-    """The ISO 8601 commit time of the last change to each file under ``docs/``."""
+    """The ISO 8601 commit time, in UTC, of the last change to each file under ``docs/``."""
     if git("rev-parse", "--is-shallow-repository").strip() != "false":
         print("shallow or no git history: pages get no dates", file=sys.stderr)
         return {}
     log = git("log", "--no-renames", "--format=%x00%cI", "--name-only", "--", "docs")
     dates: dict[str, str] = {}
     for commit in log.split("\0")[1:]:
-        date, *names = commit.split("\n")
+        stamp, *names = commit.split("\n")
+        date = datetime.fromisoformat(stamp).astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
         for name in filter(None, names):
             dates.setdefault(name, date)
     return dates
@@ -238,7 +247,34 @@ def llms(site: Path, pages: dict[str, Page]) -> None:
             return match[0]
         return f"{match[0]}: {page.description.removeprefix(match[1] + ': ')}"
 
-    path.write_text(re.sub(r"^- \[([^\]]+)\]\(<([^>]+)>\)$", note, path.read_text(), flags=re.M))
+    text = re.sub(r"^- \[([^\]]+)\]\(<([^>]+)>\)$", note, path.read_text(), flags=re.M)
+    path.write_text(group_rules(text, root))
+
+
+def group_rules(text: str, root: str) -> str:
+    """Move the rule links into a section per group, in the order of the rules."""
+    link = re.compile(
+        rf"^- \[[^\]]+\]\(<{re.escape(root)}reference/rules/([\w-]+)/index\.md>\).*\n", re.M
+    )
+    lines = {m[1]: m[0] for m in link.finditer(text)}
+    if not lines:
+        return text
+    groups: dict[str, list[tuple[int, str]]] = {}
+    for name, line in lines.items():
+        front = (RULES / f"{name}.md").read_text().split("---\n", 2)[1]
+        meta = dict(re.findall(r"^(\w+): (.+)$", front, re.M))
+        groups.setdefault(meta["group"].strip('"'), []).append((int(meta["order"]), line))
+    sections = "".join(
+        "\n## {}\n\n{}".format(
+            GROUPS.get(group) or group.replace("-", " ").capitalize() + " rules",
+            "".join(line for _, line in sorted(rules)),
+        )
+        for group, rules in sorted(groups.items(), key=lambda g: min(g[1]))
+    )
+    first = link.search(text)
+    assert first is not None
+    rest = link.sub("", text[first.start() :])
+    return text[: first.start()] + sections + rest
 
 
 def main() -> None:
