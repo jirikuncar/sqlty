@@ -145,3 +145,6 @@ sarif
 sqruff
 Pygments
 (?i)extra_items
+attrs
+msgspec
+asyncmy

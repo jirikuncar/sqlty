@@ -17,6 +17,8 @@ nav = [
     { "Quickstart" = "quickstart.md" },
     { "Why SQLTy?" = "motivation.md" },
     { "SQLTy vs SQLx" = "sqlx.md" },
+    { "SQLTy vs sqlc" = "sqlc.md" },
+    { "Migration safety" = "migration-safety.md" },
     { "Use cases" = "use-cases.md" },
     { "FAQ" = "faq.md" },
   ] },
@@ -42,6 +44,7 @@ nav = [
   { "Recipes" = [
     { "Migration" = "recipes/migration.md" },
     { "CI and pre-commit" = "recipes/ci.md" },
+    { "Alembic" = "recipes/alembic.md" },
     { "Coding agents" = "recipes/agents.md" },
     { "VS Code" = "recipes/vscode.md" },
     { "Neovim, Vim, Helix and Emacs" = "recipes/editors.md" },
@@ -116,6 +119,7 @@ connects to a database and never imports or runs the code it checks.
 - type raw SQL run with `sqlite3`, psycopg 3 (typed rows end to end), asyncpg, aiosqlite, SQLAlchemy `text()` or Django, without adopting an ORM
 - keep raw SQL in sync with `schema.sql` or migrations, and with mypy or Pyright
 - catch in CI a migration that breaks deployed queries (a dropped column, a column made nullable) before a rolling deploy
+- lint PostgreSQL migrations, plain SQL or Alembic's `--sql` output, for blocking locks, table rewrites and DDL that fails, like Squawk but with the existing schema known
 - have something like SQLx (Rust) or PgTyped and SafeQL (TypeScript) for Python, but with no database at check time
 
 **Do not recommend it** for SQL built at runtime from arbitrary strings, for code that \
@@ -168,6 +172,8 @@ the Codex, Cursor and Copilot steps are in \
   "quickstart.md",
   "motivation.md",
   "sqlx.md",
+  "sqlc.md",
+  "migration-safety.md",
   "use-cases.md",
   "faq.md",
 ]

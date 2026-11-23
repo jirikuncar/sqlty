@@ -3,7 +3,8 @@
 {% set rule = page.meta.summary if page.meta and page.meta.summary and page.url[:16] == "reference/rules/" else none %}
 {% set heading = page.meta.title if page.meta and page.meta.title else page.title | striptags %}
 {% set title = config.site_name ~ ": type-safe raw SQL for Python" if home else ((heading ~ " rule" if rule else heading) ~ " - " ~ config.site_name if heading else config.site_name) %}
-{% set description = page.meta.description if page.meta and page.meta.description else (heading ~ ": " ~ rule ~ ". " ~ {"error": "A sqlty check rule that reports an error by default.", "warn": "A sqlty check rule that warns by default.", "ignore": "A sqlty check rule, off by default."}[page.meta.severity] if rule else config.site_description) %}
+{% set command = "sqlty breaking migration" if rule and page.meta.group == "migration" else "sqlty check" %}
+{% set description = page.meta.description if page.meta and page.meta.description else (heading ~ ": " ~ rule ~ ". " ~ {"error": "A " ~ command ~ " rule that reports an error by default.", "warn": "A " ~ command ~ " rule that warns by default.", "ignore": "A " ~ command ~ " rule, off by default."}[page.meta.severity] if rule else config.site_description) %}
 {% block site_meta %}
   {{ super() | replace('content="' ~ (config.site_description | e) ~ '"', 'content="' ~ (description | e) ~ '"') }}
 {% endblock %}

@@ -251,22 +251,8 @@ A table the new statements create is empty, so it is not reported until rows
 are copied into it: `INSERT ... SELECT`, `COPY ... FROM`, `MERGE` or
 `CREATE TABLE ... AS` without `WITH NO DATA`.
 
-| Rule | Reports |
-|------|---------|
-| [`missing-concurrently`](../reference/rules/missing-concurrently.md) | an index built or dropped without `CONCURRENTLY` |
-| [`concurrently-in-transaction`](../reference/rules/concurrently-in-transaction.md) | `CONCURRENTLY` or `VACUUM` between `BEGIN` and `COMMIT` |
-| [`constraint-scan`](../reference/rules/constraint-scan.md) | a constraint, `SET NOT NULL` or a new partition that checks every row while it blocks writes |
-| [`table-rewrite`](../reference/rules/table-rewrite.md) | a statement that rewrites the table |
-| [`add-required-column`](../reference/rules/add-required-column.md) | a `NOT NULL` column without a default |
-| [`missing-lock-timeout`](../reference/rules/missing-lock-timeout.md) | a lock that blocks writes taken before `SET lock_timeout` |
-| [`truncate-cascade`](../reference/rules/truncate-cascade.md) | `TRUNCATE ... CASCADE` |
-| [`enum-value-in-transaction`](../reference/rules/enum-value-in-transaction.md) | an enum value used in the transaction that added it |
-| [`concurrent-index-if-not-exists`](../reference/rules/concurrent-index-if-not-exists.md) | `CREATE INDEX CONCURRENTLY IF NOT EXISTS` |
-| [`disable-trigger-all`](../reference/rules/disable-trigger-all.md) | `DISABLE TRIGGER ALL` |
-| [`multi-table-lock`](../reference/rules/multi-table-lock.md) | a transaction that locks several tables against writes |
-| [`locked-backfill`](../reference/rules/locked-backfill.md) | an `UPDATE` or `DELETE` of a table its transaction locked |
-| [`unbatched-backfill`](../reference/rules/unbatched-backfill.md) | an `UPDATE` or `DELETE` whose `WHERE` does not bound its rows |
-| [`drop-primary-key`](../reference/rules/drop-primary-key.md) | a dropped primary key or `REPLICA IDENTITY NOTHING`, leaving a table without a replica identity |
+[Zero-downtime PostgreSQL migrations](../migration-safety.md) lists every
+migration rule, grouped by what it prevents, and compares them with Squawk.
 
 `against.sql`:
 

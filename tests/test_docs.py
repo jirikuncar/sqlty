@@ -80,8 +80,44 @@ def _script(name: str) -> Any:
     spec = importlib.util.spec_from_file_location(name, ROOT / "scripts" / f"{name}.py")
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
     spec.loader.exec_module(module)
     return module
+
+
+def test_migration_safety_lists_every_migration_rule() -> None:
+    text = (ROOT / "docs" / "migration-safety.md").read_text()
+    listed = set(re.findall(r"^\| \[`([\w-]+)`\]\(reference/rules/\1\.md\) \|", text, re.M))
+    assert listed == {r.name for r in RULES.values() if r.group == "Migration"}
+
+
+def test_structured_data_dates_are_utc(monkeypatch: pytest.MonkeyPatch) -> None:
+    script = _script("structured_data")
+    log = "\0" + "2026-11-23T09:42:28+01:00\n\ndocs/faq.md\n"
+    monkeypatch.setattr(script, "git", lambda *args: "false" if "rev-parse" in args else log)
+    assert script.modified() == {"docs/faq.md": "2026-11-23T08:42:28Z"}
+
+
+def test_structured_data_groups_rules_in_llms_txt() -> None:
+    script = _script("structured_data")
+    root = "https://example.com/"
+    rule = "- [{0}](<https://example.com/reference/rules/{0}/index.md>): summary\n".format
+    text = (
+        "## Reference\n\n- [Rules](<https://example.com/reference/rules/index.md>)\n"
+        + rule("table-rewrite")
+        + rule("unknown-column")
+        + rule("missing-concurrently")
+        + "\n## Guide\n"
+    )
+    assert script.group_rules(text, root) == (
+        "## Reference\n\n- [Rules](<https://example.com/reference/rules/index.md>)\n"
+        "\n## Name, join and schema rules\n\n"
+        + rule("unknown-column")
+        + "\n## Zero-downtime PostgreSQL migration rules\n\n"
+        + rule("missing-concurrently")
+        + rule("table-rewrite")
+        + "\n## Guide\n"
+    )
 
 
 @pytest.mark.parametrize("page", sorted((ROOT / "docs").rglob("*.md")), ids=lambda p: p.stem)
