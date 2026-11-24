@@ -61,7 +61,7 @@ migrations/0042_index.sql:2: [missing-concurrently] `CREATE INDEX` blocks writes
 | `constraint-scan` | add the constraint `NOT VALID`, then `VALIDATE CONSTRAINT`; for `SET NOT NULL`, validate a `CHECK (col IS NOT NULL)` first; before `ATTACH PARTITION`, make the key `NOT NULL` and validate a `CHECK` matching the bounds |
 | `table-rewrite` | add the column without a volatile default and backfill; change a type through a new column |
 | `add-required-column` | add the column nullable or with a constant `DEFAULT` |
-| `missing-lock-timeout` | start the migration with `SET lock_timeout = '2s';` |
+| `missing-lock-timeout` | start the migration with `SET lock_timeout = '2s';`, under 1 s when it takes several locks (see below) |
 | `truncate-cascade` | name every table to empty: `TRUNCATE a, b;` |
 | `enum-value-in-transaction` | `COMMIT` after `ALTER TYPE ... ADD VALUE`, then use the value |
 | `concurrent-index-if-not-exists` | `DROP INDEX CONCURRENTLY IF EXISTS`, then `CREATE INDEX CONCURRENTLY` without `IF NOT EXISTS` |
@@ -150,7 +150,9 @@ rules:
 | Rerunnable | `ON CONFLICT ... DO UPDATE ... WHERE` the stored row is older; a rerun writes nothing | a retried batch must not fail or overwrite newer rows ([#1261](https://github.com/jirikuncar/sqlty/issues/1261)) |
 | Switch reads | Read the new source and fall back to the old one while the new one can lag | a missed write must not change an answer |
 
-A rerunnable batch passes the migration rules:
+One batch, starting after the last key of the batch before. The migration
+rules accept it, but they don't check yet that it can rerun
+([#1261](https://github.com/jirikuncar/sqlty/issues/1261)):
 
 `against.sql`:
 
@@ -161,11 +163,14 @@ CREATE TABLE user_names (user_id BIGINT PRIMARY KEY REFERENCES users (id), name 
 
 ```sql migration
 -- error:
-SET lock_timeout = '400ms';
-SET statement_timeout = '60s';
+BEGIN;
+SET LOCAL lock_timeout = '400ms';
+SET LOCAL statement_timeout = '60s';
 INSERT INTO user_names (user_id, name)
-SELECT id, name FROM users WHERE id > 0 ORDER BY id LIMIT 500
-ON CONFLICT (user_id) DO NOTHING;
+SELECT id, name FROM users WHERE id > 5000 ORDER BY id LIMIT 500
+ON CONFLICT (user_id) DO UPDATE SET name = excluded.name
+WHERE user_names.name IS DISTINCT FROM excluded.name;
+COMMIT;
 ```
 
 Before you drop anything:

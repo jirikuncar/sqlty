@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -17,14 +18,17 @@ FINDING = "migrations/002.sql:1: [missing-lock-timeout] takes a lock that blocks
 
 @pytest.fixture
 def project(tmp_path: Path) -> Path:
-    """A committed sqlty project, and a `sqlty` that records its arguments and prints a finding."""
+    """A committed sqlty project, and a `sqlty` that records its arguments and prints `out`
+    (a finding unless the test writes one) with the exit code in `rc`."""
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     fake = bin_dir / "sqlty"
     fake.write_text(
         f"#!{sys.executable}\nimport pathlib, sys\n"
-        f"pathlib.Path({str(tmp_path / 'args')!r}).write_text(' '.join(sys.argv[1:]))\n"
-        f"print({FINDING!r})\n"
+        f"here = pathlib.Path({str(tmp_path)!r})\n"
+        "(here / 'args').write_text(' '.join(sys.argv[1:]))\n"
+        f"out = here / 'out'\nprint(out.read_text() if out.exists() else {FINDING!r})\n"
+        "rc = here / 'rc'\nsys.exit(int(rc.read_text()) if rc.exists() else 1)\n"
     )
     fake.chmod(0o755)
     repo = tmp_path / "repo"
@@ -100,3 +104,44 @@ def test_the_manifest_names_the_hook() -> None:
     manifest = json.loads((ROOT / ".claude-plugin" / "plugin.json").read_text())
     hooks = json.loads((ROOT / manifest["hooks"]).read_text())["hooks"]["PostToolUse"]
     assert HOOK.name in hooks[0]["hooks"][0]["command"]
+
+
+def test_findings_of_the_edited_file_come_first(project: Path) -> None:
+    (project.parent / "out").write_text(f"app/q.py:2: [unknown-column] bio\n{FINDING}")
+    context = json.loads(hook(project, "migrations/002.sql"))["hookSpecificOutput"]
+    assert context["additionalContext"].index(FINDING) < context["additionalContext"].index(
+        "app/q.py"
+    )
+
+
+def test_long_output_is_cut(project: Path) -> None:
+    (project.parent / "out").write_text(f"{FINDING}\n" * 200)
+    context = json.loads(hook(project, "migrations/002.sql"))["hookSpecificOutput"]
+    assert "\n...\n" in context["additionalContext"]
+    assert len(context["additionalContext"]) < 4200
+
+
+def test_a_failed_run_says_nothing(project: Path) -> None:
+    """Exit code 2 is a usage error, such as a baseline that no longer exists: not a finding."""
+    (project.parent / "rc").write_text("2")
+    assert hook(project, "migrations/002.sql") == ""
+    assert (project.parent / "args").exists()
+
+
+def test_a_sqlty_toml_marks_the_project(project: Path) -> None:
+    (project / "pyproject.toml").unlink()
+    (project / "sqlty.toml").write_text('schema = "migrations/*.sql"\n')
+    assert FINDING in hook(project, "migrations/002.sql")
+
+
+def test_the_project_venv_wins_over_path(project: Path) -> None:
+    venv = project / ".venv" / "bin"
+    venv.mkdir(parents=True)
+    (project.parent / "bin" / "sqlty").rename(venv / "sqlty")
+    assert FINDING in hook(project, "migrations/002.sql")
+
+
+def test_a_directory_outside_git_runs_nothing(project: Path) -> None:
+    shutil.rmtree(project / ".git")
+    assert hook(project, "migrations/002.sql") == ""
+    assert not (project.parent / "args").exists()

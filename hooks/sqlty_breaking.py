@@ -24,9 +24,11 @@ def main() -> None:
     )
     if edited.suffix != ".sql" and "migrations" not in edited.parts:
         return
-    sqlty = shutil.which("sqlty")
     root = project_root(edited.parent)
-    if sqlty is None or root is None:
+    if root is None:
+        return
+    sqlty = installed(root)
+    if sqlty is None:
         return
     against = baseline(root)
     if against is None:
@@ -44,10 +46,12 @@ def main() -> None:
     findings = run.stdout.strip()
     if run.returncode not in (0, 1) or not findings:
         return
+    lines = findings.splitlines()
+    findings = "\n".join(sorted(lines, key=lambda line: edited.name not in line))
     if len(findings) > LIMIT:
         findings = findings[:LIMIT] + "\n..."
     context = (
-        f"`sqlty breaking --against {against}` after this edit:\n{findings}\n"
+        f"`sqlty breaking --against {against}` on this branch, the edited file first:\n{findings}\n"
         "Fix them, or plan the release order with the sqlty-breaking skill."
     )
     json.dump(
@@ -65,6 +69,15 @@ def project_root(directory: Path) -> Path | None:
         if pyproject.is_file() and "[tool.sqlty" in pyproject.read_text(errors="replace"):
             return parent
     return None
+
+
+def installed(root: Path) -> str | None:
+    """The project's own sqlty, as `uv add --dev sqlty` installs it, else the one on `PATH`."""
+    for venv in [root, *root.parents]:
+        for script in (venv / ".venv" / "bin" / "sqlty", venv / ".venv" / "Scripts" / "sqlty.exe"):
+            if script.is_file():
+                return str(script)
+    return shutil.which("sqlty")
 
 
 def baseline(root: Path) -> str | None:
