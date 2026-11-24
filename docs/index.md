@@ -1,5 +1,5 @@
 ---
-description: "SQLTy is a static type checker for raw SQL in Python 3.14+: it infers row and parameter types from your schema and checks them with mypy, Pyright or ty, without a database connection."
+description: "SQLTy is a static type checker for raw SQL in Python 3.14+: it infers row and parameter types from your schema for mypy, Pyright or ty, with no database."
 ---
 
 # ![SQLTy](assets/sqlty-wordmark-light.svg#only-light){ width="360" height="111" fetchpriority="high" } ![SQLTy](assets/sqlty-wordmark-dark.svg#only-dark){ width="360" height="111" fetchpriority="high" } { #sqlty }

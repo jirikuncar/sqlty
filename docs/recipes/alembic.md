@@ -1,6 +1,6 @@
 ---
 title: "Lint Alembic migrations for locks and rewrites"
-description: "How to check Alembic migrations for blocking locks, table rewrites and failing DDL with sqlty breaking, from the SQL that alembic upgrade --sql writes, without a database."
+description: "Check Alembic migrations for blocking locks, table rewrites and failing DDL with sqlty breaking, from the SQL of alembic upgrade --sql, without a database."
 ---
 
 # Alembic
