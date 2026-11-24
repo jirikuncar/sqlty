@@ -9,6 +9,5 @@
   "homepage": "https://sqlty.kuncar.dev/",
   "repository": "https://github.com/jirikuncar/sqlty",
   "license": "MIT",
-  "keywords": ["sql", "python", "type-hints", "static-analysis"],
-  "hooks": "./hooks/claude-code.json"
+  "keywords": ["sql", "python", "type-hints", "static-analysis"]
 }

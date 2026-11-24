@@ -42,13 +42,6 @@ claude plugin marketplace update sqlty
 claude plugin update sqlty@sqlty
 ```
 
-The plugin also adds a hook. After Claude edits a `.sql` file or a file under
-`migrations/` in a project that configures sqlty, the hook runs
-`sqlty breaking --against` the commit where the branch left `origin`'s default
-branch, or `HEAD`, and gives Claude the findings. It runs the project's `.venv` sqlty, or the one on
-`PATH`, needs `python3` and `git`, and does nothing without them. Turn it off with
-`/plugin disable sqlty@sqlty` or a `disableAllHooks` setting.
-
 ## Codex
 
 ```bash
