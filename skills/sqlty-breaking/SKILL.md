@@ -135,6 +135,71 @@ Split a breaking change into pull requests that each pass `sqlty check` and
 Adding a column that nothing reads yet needs only steps 2 and 3. Dropping one
 needs steps 5 and 6.
 
+## Move data between columns or tables
+
+`sqlty breaking` compares two revisions. It can't see the release order, the
+row counts, or which code is deployed, so a data migration also follows these
+rules:
+
+| Step | Rule | Why |
+|------|------|-----|
+| Readers first | Ship code that reads both the old and the new shape one release before code writes the new one | during a rollout, old code reads what new code writes |
+| Dual write | Write the new column or table in the same transaction as the old one, before any backfill | a row written after the backfill is never copied ([#1260](https://github.com/jirikuncar/sqlty/issues/1260)) |
+| Backfill last | Run the backfill once the dual-writing release is fully deployed, from a job the deploy doesn't wait for | every writer is live before it reads |
+| Small batches | Batch by key, one transaction per batch, `SET LOCAL lock_timeout` and `statement_timeout`, a short pause, `SKIP LOCKED` | `unbatched-backfill` and `locked-backfill` report the rest |
+| Rerunnable | `ON CONFLICT ... DO UPDATE ... WHERE` the stored row is older; a rerun writes nothing | a retried batch must not fail or overwrite newer rows ([#1261](https://github.com/jirikuncar/sqlty/issues/1261)) |
+| Switch reads | Read the new source and fall back to the old one while the new one can lag | a missed write must not change an answer |
+
+A rerunnable batch passes the migration rules:
+
+`against.sql`:
+
+```sql
+CREATE TABLE users (id BIGINT PRIMARY KEY, name TEXT NOT NULL);
+CREATE TABLE user_names (user_id BIGINT PRIMARY KEY REFERENCES users (id), name TEXT NOT NULL);
+```
+
+```sql migration
+-- error:
+SET lock_timeout = '400ms';
+SET statement_timeout = '60s';
+INSERT INTO user_names (user_id, name)
+SELECT id, name FROM users WHERE id > 0 ORDER BY id LIMIT 500
+ON CONFLICT (user_id) DO NOTHING;
+```
+
+Before you drop anything:
+
+- **Remove the last reader first.** Writes that keep the column consistent may
+  stay. Drop it once no deployed version reads it, self-hosted releases
+  included: check `--against` a directory with one snapshot per release.
+- **Replace a foreign key's `ON DELETE` action** before you drop the column or
+  constraint that carries it ([#1258](https://github.com/jirikuncar/sqlty/issues/1258)).
+- **Keep a SQL function that the previous release calls**, and drop it in the
+  next one. `sqlty breaking` reports a call to a dropped function only in the
+  select list ([#1255](https://github.com/jirikuncar/sqlty/issues/1255)), so search
+  `WHERE`, `JOIN` and `EXISTS` for it yourself.
+- **Prove a code path is dead before you delete it**, for example by finding no
+  calls in production telemetry over a full release cycle. Drop its table in a
+  later migration.
+- **Don't backfill rows you can't identify.** Repair such a row the next time the
+  code reads or writes it.
+- **Count the rows a new constraint or rule rejects** with a read-only query
+  before you deploy it.
+
+Locks across releases:
+
+- Keep `lock_timeout` below `deadlock_timeout` (1 s by default) when a migration
+  takes several locks, and retry on timeout. `missing-lock-timeout` checks that it
+  is set, not its value ([#1259](https://github.com/jirikuncar/sqlty/issues/1259)).
+- `ADD CONSTRAINT ... NOT VALID` and `VALIDATE CONSTRAINT` go in separate
+  transactions, best in separate releases. In one transaction the `ADD` lock is
+  held through the scan ([#1256](https://github.com/jirikuncar/sqlty/issues/1256)).
+- Until a migration ships, edit it, rather than add a second one that locks the
+  same busy table again.
+- An index build that can outlast the deploy runs after it, can be rerun (drop
+  an invalid leftover first), and nothing depends on it.
+
 ## In CI
 
 The base branch must be in the clone:
