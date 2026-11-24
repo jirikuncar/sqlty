@@ -1,6 +1,6 @@
 ---
-title: "Zero-downtime PostgreSQL migrations: lint locks and rewrites in CI"
-description: "How sqlty breaking lints new PostgreSQL migration statements for blocking locks, table rewrites and failing DDL, using the schema they change, and how it compares with Squawk."
+title: "Zero-downtime PostgreSQL migration linting"
+description: "How sqlty breaking lints new PostgreSQL migrations for blocking locks, table rewrites and failing DDL from your schema files, and how it compares with Squawk."
 ---
 
 # Zero-downtime PostgreSQL migrations

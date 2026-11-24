@@ -287,6 +287,35 @@ MARKDOWN = sorted(
 )
 
 
+SITE_PAGES = sorted(ROOT.glob("docs/**/*.md"))
+
+
+@pytest.mark.parametrize("page", SITE_PAGES, ids=[str(p.relative_to(ROOT)) for p in SITE_PAGES])
+def test_page_fits_search_results(page: Path) -> None:
+    """The <title> and meta description of overrides/main.html fit what search results show:
+    60 and 160 characters."""
+    import yaml
+
+    text = page.read_text()
+    meta = yaml.safe_load(text.split("---\n", 2)[1]) if text.startswith("---\n") else {}
+    heading = meta.get("title") or re.search(r"^# (.+)$", text, re.M)[1]
+    if page.parent == RULE_DOCS:
+        command = "sqlty breaking migration" if meta["group"] == "migration" else "sqlty check"
+        title = f"{heading} rule - SQLTy"
+        description = (
+            f"{heading}: {meta['summary']}. A {command} rule that reports an error by default."
+        )
+    else:
+        title = (
+            "SQLTy: type-safe raw SQL for Python"
+            if page.name == "index.md" and page.parent.name == "docs"
+            else f"{heading} - SQLTy"
+        )
+        description = meta["description"]
+    assert len(title) <= 60
+    assert 25 <= len(description) <= 160
+
+
 @pytest.mark.parametrize("page", MARKDOWN, ids=[str(p.relative_to(ROOT)) for p in MARKDOWN])
 def test_links(page: Path) -> None:
     prose = re.sub(r"^(`{3,}).*?^\1", "", page.read_text(), flags=re.M | re.S)

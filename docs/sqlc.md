@@ -1,5 +1,5 @@
 ---
-title: "SQLTy vs sqlc: typed SQL for Python without code generation"
+title: "SQLTy vs sqlc: typed SQL without code generation"
 description: "How SQLTy compares with sqlc and its Python plugins: generated query functions from .sql files, or SQL[T] checked inline against your schema files."
 ---
 
