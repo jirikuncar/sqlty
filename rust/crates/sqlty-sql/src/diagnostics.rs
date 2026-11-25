@@ -334,6 +334,7 @@ mod tests {
                 "unsupported-syntax",
                 "insert-missing-column",
                 "insert-value-count",
+                "literal-write",
                 "ungrouped-column",
                 "fanout-aggregate",
                 "chasm-join",

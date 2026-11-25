@@ -12,6 +12,7 @@ DEFAULTS = {
     "duplicate-alias": Severity.ERROR,
     "insert-missing-column": Severity.ERROR,
     "insert-value-count": Severity.ERROR,
+    "literal-write": Severity.ERROR,
     "ungrouped-column": Severity.ERROR,
     "unknown-function": Severity.WARN,
     "unknown-type": Severity.WARN,
