@@ -124,7 +124,9 @@ Each Rust crate under `rust/crates/` is a package, and so is the Python package
 [`scripts/ci_changes.py`](scripts/ci_changes.py) picks the packages the changed files
 belong to, with every package that depends on one of them, and the Tests workflow runs
 only those; a push to `main` runs all of them. A change to a file no package owns runs
-everything, unless the script ignores it, as it does `plans/`. A change to
+everything, unless the script ignores it, as it does `plans/`; `tests/test_ci_changes.py`
+fails on a tracked file that is neither owned nor ignored, so each new file gets a rule.
+A change to
 `rust/Cargo.lock` runs the crates whose locked dependencies it changes, read from the
 lock at the base and at the head; `uv.lock` runs the jobs that install it. The jobs that run the
 built extension (free-threaded Python, the database tests, the benchmarks and the
