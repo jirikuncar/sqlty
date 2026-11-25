@@ -2,6 +2,7 @@
 
 Each Rust crate is a package of its own; its workspace dependencies come from its
 Cargo.toml. A file no package owns runs every package, unless it is listed in IGNORED.
+A change to rust/Cargo.lock runs the crates whose dependencies it changes.
 
     python3 scripts/ci_changes.py [BASE]   # BASE omitted: every package
 
@@ -188,7 +189,6 @@ EVERYTHING = [
     "scripts/coverage.sh",
     "scripts/coverage-floors.txt",
     "rust/Cargo.toml",
-    "rust/Cargo.lock",
     "rust/clippy.toml",
     "rust-toolchain.toml",
 ]
@@ -252,7 +252,9 @@ def data(path: str) -> set[str]:
     return {name for name, paths in TEST_DATA.items() if matches(path, paths)}
 
 
-def affected(changed: list[str] | None) -> dict[str, bool]:
+def affected(changed: list[str] | None, locked: set[str] | None = None) -> dict[str, bool]:
+    """The packages `changed` reaches; `locked` are the crates a change to rust/Cargo.lock
+    reaches, as `locked_crates` gives them (None: every package)."""
     graph = {name: deps for name, (_, deps) in workspace().items()}
     graph.update({name: set(deps) for name, (_, deps) in PACKAGES.items()})
     everything = set(graph)
@@ -261,6 +263,9 @@ def affected(changed: list[str] | None) -> dict[str, bool]:
 
     hit: set[str] = set()
     for path in changed:
+        if path == LOCK and locked is not None:
+            hit |= locked
+            continue
         found = owners(path, everything - set(PACKAGES))
         if found is None:
             return dict.fromkeys(sorted(everything), True)
@@ -271,13 +276,56 @@ def affected(changed: list[str] | None) -> dict[str, bool]:
     return {name: name in hit for name in sorted(everything)}
 
 
+LOCK = "rust/Cargo.lock"
+
+
+def locked_crates(before: str, after: str) -> set[str]:
+    """The directories of the workspace crates whose locked dependencies differ between two
+    texts of Cargo.lock: a package added, removed or at another version or source."""
+    old, new = (
+        {p["name"]: p for p in tomllib.loads(text).get("package", [])} for text in (before, after)
+    )
+    # A lock entry names a dependency as `name` or, when two versions are locked, `name version`.
+    uses: dict[str, set[str]] = {}
+    for lock in (old, new):
+        for name, package in lock.items():
+            deps = {dep.split()[0] for dep in package.get("dependencies", [])}
+            uses.setdefault(name, set()).update(deps)
+
+    def pinned(package: dict[str, object]) -> dict[str, object]:
+        return {key: value for key, value in package.items() if key != "dependencies"}
+
+    changed = {
+        name
+        for name in old.keys() | new.keys()
+        if pinned(old.get(name, {})) != pinned(new.get(name, {}))
+    }
+    found = set()
+    for name, (package, _) in workspace().items():
+        seen, todo = set(), [package]
+        while todo:
+            for dep in uses.get(todo.pop(), set()) - seen:
+                seen.add(dep)
+                todo.append(dep)
+        if seen & changed:
+            found.add(name)
+    return found
+
+
 def changed_files(base: str) -> list[str]:
     diff = ["git", "diff", "--name-only", "--no-renames", f"{base}...HEAD"]
     return subprocess.run(diff, cwd=ROOT, check=True, capture_output=True, text=True).stdout.split()
 
 
 def main(argv: list[str]) -> None:
-    result = affected(changed_files(argv[0]) if argv else None)
+    changed = changed_files(argv[0]) if argv else None
+    locked = None
+    if changed and LOCK in changed:
+        show = ["git", "show", f"{argv[0]}:{LOCK}"]
+        before = subprocess.run(show, cwd=ROOT, capture_output=True, text=True)
+        if before.returncode == 0:
+            locked = locked_crates(before.stdout, (ROOT / LOCK).read_text())
+    result = affected(changed, locked)
     crates = [
         {"dir": name, "package": package}
         for name, (package, _) in sorted(workspace().items())
