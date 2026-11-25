@@ -18,6 +18,7 @@
   <style>:root{--md-text-font:"Inter Variable";--md-code-font:"JetBrains Mono Variable"}</style>
 {% endblock %}
 {% block extrahead %}
+  <link rel="ard" href="{{ config.site_url }}ard.json">
   {% set image = config.site_url ~ "assets/social.png" %}
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="{{ config.site_name }}">
