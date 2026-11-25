@@ -421,6 +421,46 @@ ALTER TABLE accounts VALIDATE CONSTRAINT accounts_id;
 COMMIT;
 ```
 
+## Dropping a foreign key that acts on delete
+
+`against.sql`:
+
+```sql
+CREATE TABLE users (id BIGINT PRIMARY KEY);
+CREATE TABLE teams (id BIGINT PRIMARY KEY);
+CREATE TABLE orders (id BIGINT PRIMARY KEY, user_id BIGINT REFERENCES users (id) ON DELETE CASCADE, team_id BIGINT, CONSTRAINT orders_team FOREIGN KEY (team_id) REFERENCES teams (id) ON DELETE SET NULL ON UPDATE CASCADE);
+CREATE TABLE notes (id BIGINT PRIMARY KEY, user_id BIGINT REFERENCES users (id));
+```
+
+```sql migration
+SET lock_timeout = '1s';
+-- error: [dropped-delete-action] "drops the foreign key of `orders` (user_id) to `users` with `ON DELETE CASCADE`"
+ALTER TABLE orders DROP COLUMN user_id;
+-- error: [dropped-delete-action] "`ON DELETE SET NULL ON UPDATE CASCADE`"
+ALTER TABLE orders DROP CONSTRAINT orders_team;
+-- error:
+ALTER TABLE notes DROP COLUMN user_id;
+```
+
+### `DROP TABLE ... CASCADE` of the referenced table
+
+```sql migration
+SET lock_timeout = '1s';
+-- error: [dropped-delete-action] "`users`"
+DROP TABLE users CASCADE;
+```
+
+### Not when the table with the key goes, or the key comes back
+
+```sql migration
+SET lock_timeout = '1s';
+-- error:
+DROP TABLE orders;
+ALTER TABLE notes ADD CONSTRAINT notes_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE NOT VALID;
+ALTER TABLE notes DROP CONSTRAINT notes_user;
+ALTER TABLE notes ADD CONSTRAINT notes_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE NOT VALID;
+```
+
 ## Indexes of keys a pg_dump schema adds
 
 `against.sql`:
