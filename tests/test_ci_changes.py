@@ -91,3 +91,22 @@ def test_the_extension_crate_runs_with_the_python_package(
     assert [crate["dir"] for crate in crates] == [name for name in CRATES if name != "sqlty-ext"]
     assert {"dir": "sqlty-sql", "package": "sqlty-sql"} in crates
     assert lines == dict.fromkeys(ci_changes.PACKAGES, "true")
+
+
+def test_lint_builds_what_the_hooks_of_the_changed_files_need() -> None:
+    """The patterns of the Lint job's `needs` step are the `files` of the hooks of prek.toml
+    that need the extension or Node."""
+    import tomllib
+
+    import yaml
+
+    hooks = {
+        hook["id"]: hook
+        for repo in tomllib.loads((ROOT / "prek.toml").read_text())["repos"]
+        for hook in repo["hooks"]
+    }
+    lint = yaml.safe_load((ROOT / ".github" / "workflows" / "tests.yml").read_text())["jobs"]["lint"]
+    [step] = [step for step in lint["steps"] if step.get("id") == "needs"]
+    assert f"extension=$(has '{hooks['sqlty-check-examples']['files']}')" in step["run"]
+    assert f"extension=$(has '{hooks['sqlty-rewrite-examples']['files']}')" in step["run"]
+    assert f"node=$(has '{hooks['vscode-check']['files']}')" in step["run"]
