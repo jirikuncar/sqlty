@@ -22,13 +22,18 @@ call passes:
 - A `TypedDict` needs a required key per named placeholder, and no other key.
 - An item or key whose type can't be the type of its parameter is reported. So
   is one that allows `None` for a parameter stored in a `NOT NULL` column.
+- A `Literal[...]` item or key with a value the column of its parameter never
+  holds (an enum or a `CHECK` list) is reported: the database rejects the
+  write, or the comparison matches no row. The parameter must be stored in the
+  column, or compared with it by `=` or `IN` only. PostgreSQL and SQLite only,
+  as MySQL compares without case.
 
 A type alias (`X = T`, `X: TypeAlias = T` or `type X = T`, in the module or
 imported) is checked as the type `T` it names.
 
 A `str` and a cast parameter take anything, and `typing.Any`, an unknown type or
 an annotation `P` can't be read from are never reported. With
-`dialect = "sqlite"` only `None` is checked. A `P` that
+`dialect = "sqlite"` only `None` and `Literal` values are checked. A `P` that
 [`param-types`](../../reference/configuration.md#param-types) writes
 always fits.
 
@@ -47,12 +52,17 @@ schema = "schema.sql"
 `schema.sql`:
 
 ```sql
-CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, born DATE);
+CREATE TABLE users (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL,
+    born DATE,
+    role TEXT CHECK (role IN ('admin', 'member'))
+);
 ```
 
 ```python
 import datetime
-from typing import TypedDict
+from typing import Literal, TypedDict
 
 from sqlty import SQL
 
@@ -68,6 +78,8 @@ by_id = SQL[tuple[str], ById]("--sql\nSELECT name FROM users WHERE id = %(id)s")
 born = SQL[tuple[str], tuple[datetime.date, int]]("--sql\nSELECT name FROM users WHERE born > %s")
 # error: [params-type-mismatch] "tuple[int, str | None] item 2 is str | None but query parameter 2 is not nullable"
 named = SQL[tuple[int], tuple[int, str | None]]("--sql\nINSERT INTO users (id, name) VALUES (%s, %s) RETURNING id")
+# error: [params-type-mismatch] "tuple[Literal['owner']] item 1 is Literal['owner'] but query parameter 1 is never 'owner'"
+owners = SQL[tuple[int], tuple[Literal["owner"]]]("--sql\nSELECT id FROM users WHERE role = %s")
 ```
 
 ## Fix
