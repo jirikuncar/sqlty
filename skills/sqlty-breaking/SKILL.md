@@ -133,9 +133,10 @@ Split a breaking change into pull requests that each pass `sqlty check` and
 - **Schema before the code that uses it.** Code that writes a column in the same
   pull request that adds it fails the forward check.
 - **Contract the code before the schema.** Stop reading and writing a column
-  before you drop it, or the running code fails. Then list it in
-  `[tool.sqlty.deprecated-columns]`, so `deprecated-column` reports a read added
-  before the drop:
+  before you drop it, or the running code fails. In pull request 5, after the
+  backfill that reads it, list it in `[tool.sqlty.deprecated-columns]`, so
+  `deprecated-column` reports a read added before the drop; remove the entry
+  with the column in 6:
 
   ```toml
   [tool.sqlty.deprecated-columns]
