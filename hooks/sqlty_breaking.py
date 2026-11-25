@@ -27,6 +27,9 @@ def main() -> None:
     root = project_root(edited.parent)
     if root is None:
         return
+    relative = edited.relative_to(root)
+    if edited.suffix != ".sql" and "migrations" not in relative.parts:
+        return
     sqlty = installed(root)
     if sqlty is None:
         return
@@ -35,19 +38,26 @@ def main() -> None:
         return
     try:
         run = subprocess.run(
-            [sqlty, "breaking", "--against", against],
+            [sqlty, "breaking", "--against", against, "--output-format", "json"],
             cwd=root,
             capture_output=True,
             text=True,
             timeout=TIMEOUT,
         )
-    except subprocess.TimeoutExpired:
+    except subprocess.TimeoutExpired, OSError:
         return
-    findings = run.stdout.strip()
-    if run.returncode not in (0, 1) or not findings:
+    if run.returncode not in (0, 1):
         return
-    lines = findings.splitlines()
-    findings = "\n".join(sorted(lines, key=lambda line: edited.name not in line))
+    try:
+        found = json.loads(run.stdout)
+    except json.JSONDecodeError:
+        return
+    if not found:
+        return
+    found.sort(key=lambda finding: finding["file"] != relative.as_posix())
+    findings = "\n".join(
+        f"{f['file']}:{f['line']}: [{f['rule']}] {f['message']} ({f['direction']})" for f in found
+    )
     if len(findings) > LIMIT:
         findings = findings[:LIMIT] + "\n..."
     context = (
@@ -72,11 +82,13 @@ def project_root(directory: Path) -> Path | None:
 
 
 def installed(root: Path) -> str | None:
-    """The project's own sqlty, as `uv add --dev sqlty` installs it, else the one on `PATH`."""
-    for venv in [root, *root.parents]:
-        for script in (venv / ".venv" / "bin" / "sqlty", venv / ".venv" / "Scripts" / "sqlty.exe"):
-            if script.is_file():
-                return str(script)
+    """The project's own sqlty, as `uv add --dev sqlty` installs it, else the one on `PATH`.
+
+    Only the `.venv` of the project itself: one in a directory above it is not the user's.
+    """
+    for script in (root / ".venv" / "bin" / "sqlty", root / ".venv" / "Scripts" / "sqlty.exe"):
+        if script.is_file():
+            return str(script)
     return shutil.which("sqlty")
 
 

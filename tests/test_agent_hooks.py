@@ -13,13 +13,21 @@ import pytest
 
 ROOT = Path(__file__).parent.parent
 HOOK = ROOT / "hooks" / "sqlty_breaking.py"
-FINDING = "migrations/002.sql:1: [missing-lock-timeout] takes a lock that blocks writes"
+
+
+def finding(
+    file: str = "migrations/002.sql", rule: str = "missing-lock-timeout"
+) -> dict[str, object]:
+    return {"file": file, "line": 1, "rule": rule, "message": "m", "direction": "migration"}
+
+
+FINDING = "migrations/002.sql:1: [missing-lock-timeout] m (migration)"
 
 
 @pytest.fixture
 def project(tmp_path: Path) -> Path:
     """A committed sqlty project, and a `sqlty` that records its arguments and prints `out`
-    (a finding unless the test writes one) with the exit code in `rc`."""
+    (one finding as JSON unless the test writes one) with the exit code in `rc`."""
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     fake = bin_dir / "sqlty"
@@ -27,7 +35,7 @@ def project(tmp_path: Path) -> Path:
         f"#!{sys.executable}\nimport pathlib, sys\n"
         f"here = pathlib.Path({str(tmp_path)!r})\n"
         "(here / 'args').write_text(' '.join(sys.argv[1:]))\n"
-        f"out = here / 'out'\nprint(out.read_text() if out.exists() else {FINDING!r})\n"
+        f"out = here / 'out'\nprint(out.read_text() if out.exists() else {json.dumps([finding()])!r})\n"
         "rc = here / 'rc'\nsys.exit(int(rc.read_text()) if rc.exists() else 1)\n"
     )
     fake.chmod(0o755)
@@ -57,7 +65,7 @@ def test_an_edited_migration_gets_the_findings(project: Path) -> None:
     output = json.loads(hook(project, "migrations/002.sql"))["hookSpecificOutput"]
     assert output["hookEventName"] == "PostToolUse"
     assert FINDING in output["additionalContext"]
-    assert (project.parent / "args").read_text() == "breaking --against HEAD"
+    assert (project.parent / "args").read_text() == "breaking --against HEAD --output-format json"
 
 
 def test_a_branch_is_checked_against_where_it_left_origin(project: Path) -> None:
@@ -81,7 +89,9 @@ def test_a_branch_is_checked_against_where_it_left_origin(project: Path) -> None
     git("add", "-A")
     git("commit", "-qm", "migration")
     hook(project, "migrations/002.sql")
-    assert (project.parent / "args").read_text() == f"breaking --against {branched}"
+    assert (
+        project.parent / "args"
+    ).read_text() == f"breaking --against {branched} --output-format json"
 
 
 def test_an_absolute_path_below_the_project_counts(project: Path) -> None:
@@ -107,15 +117,15 @@ def test_the_manifest_names_the_hook() -> None:
 
 
 def test_findings_of_the_edited_file_come_first(project: Path) -> None:
-    (project.parent / "out").write_text(f"app/q.py:2: [unknown-column] bio\n{FINDING}")
+    found = [finding("migrations/1002.sql", "a"), finding("app/q.py", "b"), finding(rule="c")]
+    (project.parent / "out").write_text(json.dumps(found))
     context = json.loads(hook(project, "migrations/002.sql"))["hookSpecificOutput"]
-    assert context["additionalContext"].index(FINDING) < context["additionalContext"].index(
-        "app/q.py"
-    )
+    rules = [line.split("[")[1][0] for line in context["additionalContext"].splitlines()[1:-1]]
+    assert rules == ["c", "a", "b"]
 
 
 def test_long_output_is_cut(project: Path) -> None:
-    (project.parent / "out").write_text(f"{FINDING}\n" * 200)
+    (project.parent / "out").write_text(json.dumps([finding()] * 200))
     context = json.loads(hook(project, "migrations/002.sql"))["hookSpecificOutput"]
     assert "\n...\n" in context["additionalContext"]
     assert len(context["additionalContext"]) < 4200
@@ -145,3 +155,26 @@ def test_a_directory_outside_git_runs_nothing(project: Path) -> None:
     shutil.rmtree(project / ".git")
     assert hook(project, "migrations/002.sql") == ""
     assert not (project.parent / "args").exists()
+
+
+def test_a_venv_above_the_project_is_not_run(project: Path) -> None:
+    planted = project.parent / ".venv" / "bin"
+    planted.mkdir(parents=True)
+    (planted / "sqlty").write_text(f"#!{sys.executable}\nimport sys\nsys.exit(3)\n")
+    (planted / "sqlty").chmod(0o755)
+    assert FINDING in hook(project, "migrations/002.sql")
+
+
+def test_a_broken_venv_says_nothing(project: Path) -> None:
+    venv = project / ".venv" / "bin"
+    venv.mkdir(parents=True)
+    (venv / "sqlty").write_text("#!/nonexistent/python\n")
+    (venv / "sqlty").chmod(0o755)
+    assert hook(project, "migrations/002.sql") == ""
+
+
+def test_a_migrations_directory_above_the_project_does_not_count(tmp_path: Path) -> None:
+    repo = tmp_path / "migrations" / "repo"
+    repo.mkdir(parents=True)
+    (repo / "pyproject.toml").write_text('[tool.sqlty]\nschema = "schema.sql"\n')
+    assert hook(repo, "app/q.py") == ""
