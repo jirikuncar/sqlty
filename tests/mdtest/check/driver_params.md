@@ -123,6 +123,44 @@ def remove(cur: psycopg.Cursor, age: bytes) -> None:
     cur.execute("DELETE FROM users WHERE age = %s", (age,))
 ```
 
+### Through an alias or a `NewType`
+
+A receiver annotated with a name the module binds once to a driver class, or to a
+`NewType` of one, is that driver's.
+
+```python
+from typing import NewType, TypeAlias
+import psycopg
+
+Conn = psycopg.Connection
+PgConn = NewType("PgConn", psycopg.Connection)
+Wrapped = NewType("Wrapped", Conn)
+Cur: TypeAlias = psycopg.Cursor
+
+def remove(conn: Conn, c2: PgConn, c3: Wrapped, cur: Cur, age: bytes) -> None:
+    # error: [param-type-mismatch] "parameter 1 expects int, got bytes"
+    conn.execute("DELETE FROM users WHERE age = %s", (age,))
+    # error: [param-type-mismatch] "parameter 1 expects int, got bytes"
+    c2.execute("DELETE FROM users WHERE age = %s", (age,))
+    # error: [param-type-mismatch] "parameter 1 expects int, got bytes"
+    c3.execute("DELETE FROM users WHERE age = %s", (age,))
+    # error: [param-type-mismatch] "parameter 1 expects int, got bytes"
+    cur.execute("DELETE FROM users WHERE age = %s", (age,))
+```
+
+#### Not when the name is bound twice
+
+```python
+import psycopg
+
+Conn = psycopg.Connection
+Conn = object
+
+def remove(conn: Conn, age: bytes) -> None:
+    # error:
+    conn.execute("DELETE FROM users WHERE age = %s", (age,))
+```
+
 ## Unrecognised receivers and unknown arguments are skipped
 
 ```python
