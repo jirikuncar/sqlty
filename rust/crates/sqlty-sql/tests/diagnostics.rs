@@ -34,6 +34,7 @@ const CASES: &[Case] = &[
     ("postgres", "DELETE FROM states WHERE 2 = level", &["[unmatched-literal] `states.level` is never 2, so this WHERE matches no row"]),
     ("postgres", "UPDATE states SET id = 2 WHERE status = 'gone' OR status IN ('open', 'lost') OR level = '2'", &[]),
     ("mysql", "SELECT id FROM states WHERE status = 'gone'", &[]),
+    ("sqlite", "SELECT id FROM states WHERE status = 'gone' AND level IN ()", &["[unmatched-literal] `states.status` is never 'gone', so this WHERE matches no row"]),
     ("postgres", "UPDATE states SET status = 'shut', level = level, id = 2 WHERE id = 1", &[]),
     ("mysql", "UPDATE states SET status = 'gone' WHERE id = 1", &[]),
     ("postgres", "SELECT o.id, SUM(i.amount), SUM(p.amount) FROM orders o JOIN order_items i ON i.order_id = o.id JOIN payments p ON p.order_id = o.id GROUP BY o.id", &["[fanout-aggregate] SUM(i.amount) aggregates order_items, whose rows repeat once per payments row", "[fanout-aggregate] SUM(p.amount) aggregates payments, whose rows repeat once per order_items row", "[chasm-join] orders joins order_items and payments one-to-many, so each row of one repeats once per row of the other"]),

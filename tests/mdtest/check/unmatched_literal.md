@@ -49,6 +49,20 @@ a = SQL[tuple[int]]("--sql\nSELECT id FROM paid WHERE status = 'pending'")
 b = SQL[tuple[int]]("--sql\nWITH t AS (SELECT id, status FROM orders WHERE status = 'paid') SELECT id FROM t WHERE status = 'pending'")
 ```
 
+## A recursive CTE
+
+A row the recursive term reads holds a value of the anchor, or one the term made from
+such a row. With several anchor branches, each counts.
+
+```python
+from sqlty import SQL
+
+# error: [unmatched-literal] "`t.kind` is never 'leaf', so this WHERE matches no row"
+a = SQL[tuple[int]]("--sql\nWITH RECURSIVE t(id, kind) AS (SELECT 1, 'root' UNION ALL SELECT id + 1, kind FROM t WHERE kind = 'leaf') SELECT id FROM t")
+# error:
+b = SQL[tuple[int]]("--sql\nWITH RECURSIVE t(id, kind) AS (SELECT 1, 'root' UNION ALL SELECT 2, 'leaf' UNION ALL SELECT id + 10, kind FROM t WHERE kind = 'leaf' AND id < 50) SELECT id FROM t")
+```
+
 ## What is not reported
 
 A listed value, a value some constant of an `IN` list matches, a term under `OR` or
@@ -65,7 +79,9 @@ d = SQL[tuple[int]]("--sql\nSELECT id FROM orders WHERE level = '3' AND status =
 e = SQL[tuple[int]]("--sql\nSELECT id FROM orders WHERE status <> 'refunded'")
 ```
 
-## MySQL compares without case
+## MySQL is not judged
+
+MySQL compares with case-insensitive collations by default.
 
 ```toml
 [tool.sqlty]

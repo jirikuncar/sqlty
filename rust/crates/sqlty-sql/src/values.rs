@@ -152,10 +152,11 @@ pub(crate) fn difference(left: &[Value], right: &[Value]) -> Vec<Value> {
 /// Whether a column of the values `allowed` never equals any of `constants`. Only a
 /// constant of their kind is judged: PostgreSQL reads `'1'` as the integer 1.
 pub(crate) fn excludes(allowed: &[Value], constants: &[Value]) -> bool {
-    let Some(first) = allowed.first() else {
+    let (Some(first), false) = (allowed.first(), constants.is_empty()) else {
         return false;
     };
     let kind = std::mem::discriminant(first);
+    let allowed: FxHashSet<&Value> = allowed.iter().collect();
     constants
         .iter()
         .all(|value| std::mem::discriminant(value) == kind && !allowed.contains(value))

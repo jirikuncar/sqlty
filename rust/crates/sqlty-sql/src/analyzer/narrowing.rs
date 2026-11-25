@@ -540,7 +540,7 @@ impl<'a> Analyzer<'a> {
     /// that compares a column of known values with constants it never holds:
     /// `column = constant` or `column IN (constants)`.
     pub(super) fn check_unmatched(&self, selection: &Expr, scope: &Scope) {
-        if !self.diag.enabled() {
+        if !self.diag.enabled() || !self.judges_names() {
             return;
         }
         for term in super::fanout::conjuncts(selection) {

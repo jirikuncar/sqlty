@@ -203,6 +203,14 @@ impl<'a> Analyzer<'a> {
                     (with.recursive, cte.query.body.as_ref())
                 {
                     if let Some(mut seed) = inner.anchor_columns(left)? {
+                        // The leftmost branch alone misses the values of the other branches.
+                        if !matches!(left.as_ref(), SetExpr::Select(_) | SetExpr::Values(_)) {
+                            for column in &mut seed {
+                                let plain = strip(column.typed(), self.dialect);
+                                (column.python_type, column.sql_type) = plain.into_strings();
+                                column.values = None;
+                            }
+                        }
                         rename_columns(&mut seed, &cte.alias, self.dialect);
                         inner.virtuals.insert(name.clone(), seed);
                         recursive = true;
