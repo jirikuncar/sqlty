@@ -344,7 +344,14 @@ fn resolved(table: &serde_json::Map<String, Value>) -> Settings {
                 usize::try_from(most).unwrap_or(usize::MAX)
             })
         }),
-        rules: pairs("rules").into_iter().collect(),
+        rules: config::rule_entries(
+            table
+                .get("rules")
+                .and_then(|rules| serde_json::from_value::<toml::Value>(rules.clone()).ok())
+                .as_ref(),
+        )
+        .into_iter()
+        .collect(),
         types,
     }
 }

@@ -86,10 +86,10 @@ KEY_DOCS: dict[str, KeyDoc] = {
         "How `queries` files name their queries; `auto` reads each file's first header",
     ),
     "rules": KeyDoc(
-        "table of rule = severity",
+        "table of rule = severity or options",
         "per-rule defaults",
         "`check`",
-        'Severity per lint rule: `"error"`, `"warn"` or `"ignore"`',
+        'Severity per lint rule: `"error"`, `"warn"` or `"ignore"`, or a table with `severity` and the rule\'s options',
     ),
     "overrides": KeyDoc(
         "array of tables",

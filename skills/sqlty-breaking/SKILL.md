@@ -61,7 +61,7 @@ migrations/0042_index.sql:2: [missing-concurrently] `CREATE INDEX` blocks writes
 | `constraint-scan` | add the constraint `NOT VALID`, then `VALIDATE CONSTRAINT` after `COMMIT`; for `SET NOT NULL`, validate a `CHECK (col IS NOT NULL)` first; before `ATTACH PARTITION`, make the key `NOT NULL` and validate a `CHECK` matching the bounds |
 | `table-rewrite` | add the column without a volatile default and backfill; change a type through a new column |
 | `add-required-column` | add the column nullable or with a constant `DEFAULT` |
-| `missing-lock-timeout` | start the migration with `SET lock_timeout = '2s';`, under 1 s when it takes several locks (see below) |
+| `missing-lock-timeout` | start the migration with `SET lock_timeout = '2s';`, under 1 s when it takes several locks (see below); with `max` configured, a longer timeout counts as unset |
 | `truncate-cascade` | name every table to empty: `TRUNCATE a, b;` |
 | `enum-value-in-transaction` | `COMMIT` after `ALTER TYPE ... ADD VALUE`, then use the value |
 | `concurrent-index-if-not-exists` | `DROP INDEX CONCURRENTLY IF EXISTS`, then `CREATE INDEX CONCURRENTLY` without `IF NOT EXISTS` |
@@ -196,7 +196,7 @@ Locks across releases:
 
 - Keep `lock_timeout` below `deadlock_timeout` (1 s by default) when a migration
   takes several locks, and retry on timeout. `missing-lock-timeout` checks that it
-  is set, not its value ([#1259](https://github.com/jirikuncar/sqlty/issues/1259)).
+  is set, and its value with `[tool.sqlty.rules.missing-lock-timeout] max = "900ms"`.
 - `ADD CONSTRAINT ... NOT VALID` and `VALIDATE CONSTRAINT` go in separate
   transactions, best in separate releases. In one transaction the `ADD` lock is
   held through the scan, and `constraint-scan` reports the `VALIDATE`.

@@ -434,14 +434,44 @@ fn check_rules(rules: &Value, key: &str, place: &str) -> Result<(), String> {
         return Err(format!("{key} must be a table of rule = severity"));
     };
     let names: Vec<&str> = Rule::ALL.iter().map(|rule| rule.name()).collect();
-    for (rule, severity) in rules {
+    for (rule, value) in rules {
         if Rule::parse(rule).is_none() {
             return Err(format!(
                 "unknown rule '{rule}' in {place}{}; run `sqlty rule` for the list",
                 suggest(rule, &names)
             ));
         }
-        if severity.as_str().and_then(Severity::parse).is_none() {
+        let options = match rule.as_str() {
+            "missing-lock-timeout" => &["severity", "max"][..],
+            _ => &["severity"][..],
+        };
+        let severity = match value.as_table() {
+            Some(table) => {
+                if let Some(key) = table.keys().find(|key| !options.contains(&key.as_str())) {
+                    return Err(format!(
+                        "unknown key '{key}' in {}.{rule}]; expected one of: {}",
+                        place.trim_end_matches(']'),
+                        options.join(", ")
+                    ));
+                }
+                if let Some(max) = table.get("max").filter(|max| {
+                    max.as_str()
+                        .and_then(sqlty_sql::migrations::lock_timeout_ms)
+                        .is_none()
+                }) {
+                    let max = max
+                        .as_str()
+                        .map_or_else(|| max.to_string(), |s| format!("'{s}'"));
+                    return Err(format!(
+                        "invalid max {max} for rule '{rule}' in {place}; expected a duration such as '2s'"
+                    ));
+                }
+                table.get("severity")
+            }
+            None => Some(value),
+        };
+        if let Some(severity) = severity.filter(|s| s.as_str().and_then(Severity::parse).is_none())
+        {
             let severity = severity
                 .as_str()
                 .map_or_else(|| severity.to_string(), |s| format!("'{s}'"));
@@ -451,6 +481,64 @@ fn check_rules(rules: &Value, key: &str, place: &str) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+/// `over` merged into the `rules` table `under`, rule by rule: a severity, plain or in
+/// `severity`, keeps the options `under` gives the rule, and an option keeps its severity.
+///
+/// Example:
+///
+/// ```
+/// use sqlty_python::config::merge_rules;
+///
+/// let mut under: toml::Table = "[missing-lock-timeout]\nmax = '2s'".parse().unwrap();
+/// merge_rules(&mut under, "missing-lock-timeout = 'error'".parse().unwrap());
+/// assert_eq!(under.to_string(), "[missing-lock-timeout]\nmax = \"2s\"\nseverity = \"error\"\n");
+/// ```
+pub fn merge_rules(under: &mut Table, over: Table) {
+    let options = |value: Value| match value {
+        Value::Table(options) => options,
+        severity => Table::from_iter([("severity".to_string(), severity)]),
+    };
+    for (rule, value) in over {
+        let merged = match under.remove(&rule) {
+            Some(Value::Table(mut own)) => {
+                own.extend(options(value));
+                Value::Table(own)
+            }
+            Some(severity) if value.is_table() => {
+                let mut own = options(severity);
+                own.extend(options(value));
+                Value::Table(own)
+            }
+            _ => value,
+        };
+        under.insert(rule, merged);
+    }
+}
+
+/// The entries of a checked `rules` table as hosts pass them, rule to severity: a rule's
+/// table gives its `severity`, and its `max` as `missing-lock-timeout.max`.
+pub fn rule_entries(rules: Option<&Value>) -> Vec<(String, String)> {
+    let mut entries = Vec::new();
+    for (rule, value) in rules.and_then(Value::as_table).into_iter().flatten() {
+        let Some(table) = value.as_table() else {
+            entries.extend(
+                value
+                    .as_str()
+                    .map(|severity| (rule.clone(), severity.to_string())),
+            );
+            continue;
+        };
+        for (key, value) in table {
+            let name = match key.as_str() {
+                "severity" => rule.clone(),
+                _ => format!("{rule}.{key}"),
+            };
+            entries.extend(value.as_str().map(|value| (name, value.to_string())));
+        }
+    }
+    entries
 }
 
 fn is_strings(value: &Value) -> bool {
@@ -527,6 +615,61 @@ mod tests {
     }
 
     #[test]
+    fn a_rule_table_gives_its_severity_and_options() {
+        let config = validate(
+            "[rules]\nselect-star = 'error'\nmissing-lock-timeout = { max = '2s' }\n\
+             [rules.unknown-column]\nseverity = 'warn'"
+                .parse()
+                .unwrap(),
+            "sqlty.toml",
+        )
+        .unwrap();
+        assert_eq!(
+            rule_entries(config.table.get("rules")),
+            [
+                ("select-star".to_string(), "error".to_string()),
+                ("missing-lock-timeout.max".to_string(), "2s".to_string()),
+                ("unknown-column".to_string(), "warn".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn rules_merge_rule_by_rule() {
+        let merged = |under: &str, over: &str| {
+            let mut under: Table = under.parse().unwrap();
+            merge_rules(&mut under, over.parse().unwrap());
+            rule_entries(Some(&Value::Table(under)))
+        };
+        let entries = |pairs: &[(&str, &str)]| -> Vec<(String, String)> {
+            let pair = |(key, value): &(&str, &str)| (key.to_string(), value.to_string());
+            pairs.iter().map(pair).collect()
+        };
+        let max = "missing-lock-timeout = { max = '1s' }";
+        let error = "missing-lock-timeout = 'error'";
+        let both = [
+            ("missing-lock-timeout.max", "1s"),
+            ("missing-lock-timeout", "error"),
+        ];
+        assert_eq!(merged(max, error), entries(&both));
+        assert_eq!(
+            merged(error, max),
+            entries(&[
+                ("missing-lock-timeout", "error"),
+                ("missing-lock-timeout.max", "1s")
+            ])
+        );
+        assert_eq!(
+            merged(error, "missing-lock-timeout = 'warn'"),
+            entries(&[("missing-lock-timeout", "warn")])
+        );
+        assert_eq!(
+            merged("", max),
+            entries(&[("missing-lock-timeout.max", "1s")])
+        );
+    }
+
+    #[test]
     fn suggests_like_difflib() {
         assert_eq!(suggest("dialet", &TOOL_KEYS), " (did you mean 'dialect'?)");
         assert_eq!(
@@ -552,6 +695,14 @@ mod tests {
         assert!(invalid("[rules]\nstale-typ = 'warn'").contains("did you mean 'stale-type'?"));
         assert!(invalid("[rules]\nstale-type = 'loud'").contains("invalid severity 'loud'"));
         assert!(invalid("[rules]\nstale-type = 1").contains("invalid severity 1"));
+        assert!(invalid("[rules.missing-lock-timeout]\nmax = 2").contains("invalid max 2"));
+        assert_eq!(
+            invalid("[rules.select-star]\nmax = '2s'"),
+            "sqlty.toml: unknown key 'max' in [tool.sqlty.rules.select-star]; expected one of: severity"
+        );
+        assert!(
+            invalid("[rules.missing-lock-timeout]\nseverity = 1").contains("invalid severity 1")
+        );
         assert!(invalid("[[overrides]]\nrule = {}").contains("did you mean 'rules'?"));
         assert!(invalid("[[functions]]\nquery = 'q'").contains("unknown key 'query'"));
         assert!(invalid("dialect = 'postgress'").contains("did you mean 'postgres'?"));

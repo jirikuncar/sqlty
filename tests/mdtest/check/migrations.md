@@ -70,6 +70,87 @@ COMMIT;
 ALTER TABLE users ADD COLUMN about TEXT;
 ```
 
+## A lock timeout above the maximum
+
+```toml
+[tool.sqlty.rules.missing-lock-timeout]
+max = "2s"
+```
+
+```sql migration
+SET lock_timeout TO 2000;
+-- error:
+ALTER TABLE users ADD COLUMN bio TEXT;
+```
+
+```sql migration
+SET lock_timeout = '1min';
+-- error: [missing-lock-timeout] "with `lock_timeout` 1min, above the configured maximum of 2s"
+ALTER TABLE users ADD COLUMN bio TEXT;
+```
+
+The `SET LOCAL` of a transaction wins over the session's, until the transaction ends.
+
+```sql migration
+SET lock_timeout = '1s';
+BEGIN;
+SET LOCAL lock_timeout = '10s';
+-- error: [missing-lock-timeout] "with `lock_timeout` 10s"
+ALTER TABLE users ADD COLUMN bio TEXT;
+COMMIT;
+```
+
+```sql migration
+SET lock_timeout = '10s';
+BEGIN;
+SET LOCAL lock_timeout = '500ms';
+ALTER TABLE users ADD COLUMN bio TEXT;
+COMMIT;
+-- error: [missing-lock-timeout] "with `lock_timeout` 10s"
+ALTER TABLE users ADD COLUMN about TEXT;
+```
+
+A later session `SET` replaces the `SET LOCAL`, as in PostgreSQL.
+
+```sql migration
+BEGIN;
+SET LOCAL lock_timeout = '500ms';
+SET lock_timeout = '1min';
+-- error: [missing-lock-timeout] "with `lock_timeout` 1min"
+ALTER TABLE users ADD COLUMN bio TEXT;
+COMMIT;
+```
+
+A value that PostgreSQL reads as zero turns the timeout off.
+
+```sql migration
+SET lock_timeout = '0.0s';
+-- error: [missing-lock-timeout] "without `SET lock_timeout` first"
+ALTER TABLE users ADD COLUMN bio TEXT;
+```
+
+A value sqlty cannot read, such as a template variable, counts as within the maximum.
+
+```sql migration
+SET lock_timeout = '${timeout}';
+-- error:
+ALTER TABLE users ADD COLUMN bio TEXT;
+```
+
+### A severity in the table
+
+```toml
+[tool.sqlty.rules.missing-lock-timeout]
+severity = "ignore"
+max = "2s"
+```
+
+```sql migration
+SET lock_timeout = '1min';
+-- error:
+ALTER TABLE users ADD COLUMN bio TEXT;
+```
+
 ## Vacuuming in and out of a transaction
 
 ```sql migration

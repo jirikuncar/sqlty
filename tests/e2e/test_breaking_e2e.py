@@ -610,6 +610,47 @@ def test_a_migration_is_reported_once_with_its_own_severity(cli: Cli, migrations
     ]
 
 
+@pytest.mark.parametrize(("max", "found"), [("1s", ["missing-lock-timeout"]), ("2s", [])])
+def test_a_lock_timeout_above_the_maximum_of_an_override_counts_as_unset(
+    cli: Cli, migrations: Path, max: str, found: list[str]
+) -> None:
+    (migrations / "pyproject.toml").write_text(
+        '[tool.sqlty]\nschema = "migrations/"\n'
+        'rules.missing-concurrently = "ignore"\n'
+        '[[tool.sqlty.overrides]]\ninclude = ["migrations/**"]\n'
+        f'rules.missing-lock-timeout = {{ severity = "error", max = "{max}" }}\n'
+    )
+
+    result = cli(["breaking", "--against", "HEAD", "--output-format", "json"], {"cwd": migrations})
+
+    assert [(row["rule"], row["severity"]) for row in json.loads(result.stdout)] == [
+        (rule, "error") for rule in found
+    ], result.stderr
+
+
+def test_a_database_severity_keeps_the_top_level_maximum(cli: Cli, migrations: Path) -> None:
+    (migrations / "pyproject.toml").write_text(
+        '[tool.sqlty]\nschema = "migrations/"\nrules.missing-concurrently = "ignore"\n'
+        'rules.missing-lock-timeout = { max = "1s" }\n'
+        '[tool.sqlty.databases.events]\nschema = "events/"\n'
+        'rules = { missing-concurrently = "ignore", missing-lock-timeout = "error" }\n'
+    )
+    (migrations / "events").mkdir()
+    (migrations / "events" / "0001_events.sql").write_text("CREATE TABLE events (id INT);\n")
+    git(migrations, "add", "pyproject.toml", "events")
+    git(migrations, "commit", "-q", "-m", "events")
+    (migrations / "events" / "0002_lock.sql").write_text(
+        "SET lock_timeout = '1min';\nLOCK TABLE events;\n"
+    )
+
+    result = cli(["breaking", "--against", "HEAD", "--output-format", "json"], {"cwd": migrations})
+
+    assert [(row["file"], row["severity"]) for row in json.loads(result.stdout)] == [
+        ("migrations/0002_index.sql", "warn"),
+        ("events/0002_lock.sql", "error"),
+    ], result.stderr
+
+
 @pytest.mark.parametrize("baseline", ["HEAD", "baseline.sql"])
 def test_migrations_of_a_database_without_files_are_judged(
     cli: Cli, migrations: Path, baseline: str

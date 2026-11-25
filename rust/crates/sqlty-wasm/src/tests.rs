@@ -257,7 +257,7 @@ fn settings_resolved_by_the_host_apply_with_their_types() {
         "dialect": "sqlite",
         "schema": "ignored by the engine.sql",
         "types": {"DATE": "datetime.date"},
-        "rules": {"stale-rewrite": "error"},
+        "rules": {"stale-rewrite": {"severity": "error"}},
     });
     let answer = ask(&json!({
         "op": "analyze", "source": source, "schema": "CREATE TABLE t (d DATE NOT NULL);",

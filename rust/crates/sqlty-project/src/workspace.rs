@@ -1343,6 +1343,7 @@ mod tests {
             (
                 "/repo/pyproject.toml",
                 "[tool.sqlty]\nschema = [\"schema.sql\", \"gone.sql\", \"none/*.sql\"]\n\
+                 types = { DATE = \"str\" }\n\
                  [tool.sqlty.databases.logs]\ntypes = { \"t.c\" = \"int\" }\n",
             ),
             (
