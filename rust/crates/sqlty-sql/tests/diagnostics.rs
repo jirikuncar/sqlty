@@ -353,6 +353,9 @@ const SCHEMAS: &[Case] = &[
 #[rustfmt::skip]
 const PARAMS: &[Case] = &[
     ("postgres", "UPDATE states SET level = %s WHERE status = %s", &["1: int (INT) Nullable of typing.Literal[1]", "2: str (TEXT) Unknown of typing.Literal['open', 'shut']"]),
+    ("postgres", "SELECT id FROM states WHERE status IN (%s, 'open') AND (%s = 'all' OR status = %s) AND status > %s AND status NOT IN (%s)", &["1: str (TEXT) Unknown of typing.Literal['open', 'shut']", "2: str (None) Unknown", "3: str (TEXT) Unknown of typing.Literal['open', 'shut']", "4: str (TEXT) Unknown", "5: str (TEXT) Unknown"]),
+    ("postgres", "SELECT id FROM states s JOIN states t ON t.id = s.id WHERE s.status = %(v)s OR t.status = %(v)s OR s.id::text = %(v)s", &["1 v: str (TEXT) Unknown"]),
+    ("postgres", "SELECT COALESCE(status, %s) FROM states WHERE status = %s AND status = %s::text", &["1: str (TEXT) Unknown", "2: str (TEXT) Unknown of typing.Literal['open', 'shut']", "3: str (TEXT) Unknown cast"]),
     ("postgres", "UPDATE orders o SET note = %s FROM customers c WHERE c.id = o.customer_id AND c.name = %s", &["1: str (TEXT) Nullable", "2: str (TEXT) Unknown"]),
     ("mysql", "UPDATE orders, customers SET orders.note = ? WHERE customers.name = ?", &["1: str (TEXT) Nullable", "2: str (TEXT) Unknown"]),
     ("postgres", "SELECT %s UNION SELECT id FROM orders WHERE id = %s", &["1: None (None) Unknown", "2: int (INT) Unknown"]),

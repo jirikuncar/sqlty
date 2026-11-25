@@ -72,7 +72,9 @@ pub struct Param {
 #[derive(Default)]
 struct Hint {
     typed: Typed,
-    literal: Option<Rc<str>>,
+    /// The values of the columns it is stored in or compared with by `=` or `IN`, once one
+    /// is; `Some(None)` once another use, or a column without a value set, takes any value.
+    values: Option<Option<Vec<crate::values::Value>>>,
     nullability: Nullability,
     cast: bool,
     untyped: Option<&'static str>,
@@ -148,14 +150,35 @@ impl Hints {
             .get_or_insert("TEXT");
     }
 
-    fn add(&mut self, index: usize, mut typed: Typed, nullability: Nullability) {
+    /// [`Hints::add`] of a parameter stored in, or compared by `=` or `IN` with, a column
+    /// of type `typed`: its value set, unless the column ignores case, joins the others.
+    fn add_column(&mut self, index: usize, typed: Typed, nullability: Nullability) {
+        let exact = !typed
+            .sql()
+            .is_some_and(|sql| sql.eq_ignore_ascii_case("CITEXT"));
+        let column = typed.values.clone().filter(|_| exact);
         let hint = self.0.entry(index).or_default();
+        hint.values = Some(match (hint.values.take(), column) {
+            (None, Some(column)) => Some(column.to_vec()),
+            (Some(Some(known)), Some(column)) => Some(crate::values::union(known, column.to_vec())),
+            _ => None,
+        });
+        hint.record(typed, nullability);
+    }
+
+    fn add(&mut self, index: usize, typed: Typed, nullability: Nullability) {
+        let hint = self.0.entry(index).or_default();
+        hint.values = Some(None);
+        hint.record(typed, nullability);
+    }
+}
+
+impl Hint {
+    /// The first type and the first nullability a use gives win.
+    fn record(&mut self, mut typed: Typed, nullability: Nullability) {
+        let hint = self;
         if hint.typed.python.is_none() && typed.python.is_some() {
             // A parameter is compared with a value set, not limited to it: `str`, not `Literal`.
-            hint.literal = typed
-                .python
-                .clone()
-                .filter(|python| crate::values::base(python).is_some());
             typed.python = typed.python.map(|python| Rc::from(widen(&python)));
             hint.typed = typed;
         }
@@ -253,7 +276,10 @@ pub(super) fn params_of(
                     nullability: hint.nullability,
                     cast: hint.cast,
                     untyped_sql_type: hint.untyped.map(str::to_string),
-                    literal: hint.literal.map(|ty| ty.to_string()),
+                    literal: hint
+                        .values
+                        .flatten()
+                        .and_then(|set| crate::values::render(&set)),
                 }
             })
             .collect(),
@@ -641,7 +667,7 @@ impl<'a> Analyzer<'a> {
         let Some(col) = self.schema.column(table, column).flatten() else {
             return;
         };
-        out.add(
+        out.add_column(
             index,
             col.typed(self.dialect),
             Nullability::declared(col.not_null),
@@ -666,8 +692,16 @@ impl<'a> Analyzer<'a> {
         let _ = expr.visit(&mut walker);
     }
 
-    /// Parameter `placeholder` meets `other`: it takes the type of `other`.
-    fn hint_pair(&self, placeholder: &Expr, other: &Expr, scope: &Scope, out: &mut Hints) {
+    /// Parameter `placeholder` meets `other`: it takes the type of `other`, and its values
+    /// when `equal` (`=`, `IN`) and `other` is a column.
+    fn hint_pair(
+        &self,
+        placeholder: &Expr,
+        other: &Expr,
+        equal: bool,
+        scope: &Scope,
+        out: &mut Hints,
+    ) {
         let Some(index) = placeholder_index(placeholder) else {
             return;
         };
@@ -675,7 +709,12 @@ impl<'a> Analyzer<'a> {
             return;
         }
         let Ok(typed) = self.expr(other, scope);
-        if is_typed(&typed) {
+        if !is_typed(&typed) {
+            return;
+        }
+        if equal && matches!(other, Expr::Identifier(_) | Expr::CompoundIdentifier(_)) {
+            out.add_column(index, typed, Nullability::Unknown);
+        } else {
             out.add(index, typed, Nullability::Unknown);
         }
     }
@@ -814,16 +853,17 @@ impl<'a> Analyzer<'a> {
     fn expr_params(&self, expr: &Expr, scope: &Scope, out: &mut Hints) {
         match expr {
             Expr::BinaryOp { left, op, right } if is_comparison(op) => {
+                let equal = *op == BinaryOperator::Eq;
                 if let (Expr::Tuple(lefts), Expr::Tuple(rights)) = (&**left, &**right) {
                     for (l, r) in lefts.iter().zip(rights) {
-                        self.hint_pair(l, r, scope, out);
-                        self.hint_pair(r, l, scope, out);
+                        self.hint_pair(l, r, equal, scope, out);
+                        self.hint_pair(r, l, equal, scope, out);
                     }
                 } else if let (Some(array), true) = (any_argument(left), is_array_search(op)) {
                     self.hint_array(array, right, scope, out);
                 } else {
-                    self.hint_pair(left, right, scope, out);
-                    self.hint_pair(right, left, scope, out);
+                    self.hint_pair(left, right, equal, scope, out);
+                    self.hint_pair(right, left, equal, scope, out);
                     self.hint_shifted(left, right, scope, out);
                     self.hint_shifted(right, left, scope, out);
                 }
@@ -832,7 +872,7 @@ impl<'a> Analyzer<'a> {
                 self.hint_array(right, left, scope, out);
                 if let Expr::Array(array) = right.as_ref() {
                     for element in &array.elem {
-                        self.hint_pair(element, left, scope, out);
+                        self.hint_pair(element, left, false, scope, out);
                     }
                 }
                 if let Some(index) = placeholder_index(left) {
@@ -869,36 +909,37 @@ impl<'a> Analyzer<'a> {
                     .collect();
                 for result in &results {
                     for other in &results {
-                        self.hint_pair(result, other, scope, out);
+                        self.hint_pair(result, other, false, scope, out);
                     }
                 }
                 if let Some(operand) = operand {
                     for when in conditions {
-                        self.hint_pair(&when.condition, operand, scope, out);
-                        self.hint_pair(operand, &when.condition, scope, out);
+                        self.hint_pair(&when.condition, operand, false, scope, out);
+                        self.hint_pair(operand, &when.condition, false, scope, out);
                     }
                 }
             }
             Expr::IsDistinctFrom(left, right) | Expr::IsNotDistinctFrom(left, right) => {
-                self.hint_pair(left, right, scope, out);
-                self.hint_pair(right, left, scope, out);
+                self.hint_pair(left, right, false, scope, out);
+                self.hint_pair(right, left, false, scope, out);
             }
             Expr::Between {
                 expr, low, high, ..
             } => {
                 for bound in [low, high] {
-                    self.hint_pair(bound, expr, scope, out);
-                    self.hint_pair(expr, bound, scope, out);
+                    self.hint_pair(bound, expr, false, scope, out);
+                    self.hint_pair(expr, bound, false, scope, out);
                 }
             }
             Expr::In {
                 expr,
                 target: InTarget::List(list),
+                negated,
                 ..
             } => {
                 for item in list {
-                    self.hint_pair(item, expr, scope, out);
-                    self.hint_pair(expr, item, scope, out);
+                    self.hint_pair(item, expr, !negated, scope, out);
+                    self.hint_pair(expr, item, !negated, scope, out);
                 }
             }
             Expr::In {
@@ -972,8 +1013,8 @@ impl<'a> Analyzer<'a> {
         if name == "GENERATE_SERIES" {
             // The bounds share a type; the step of a time series is an interval.
             if let [Some(start), Some(stop), step @ ..] = args.as_slice() {
-                self.hint_pair(start, stop, scope, out);
-                self.hint_pair(stop, start, scope, out);
+                self.hint_pair(start, stop, false, scope, out);
+                self.hint_pair(stop, start, false, scope, out);
                 if let [Some(step)] = step {
                     let temporal = [start, stop].into_iter().any(|bound| {
                         self.expr(bound, scope).is_ok_and(|typed| {
@@ -987,14 +1028,14 @@ impl<'a> Analyzer<'a> {
                         Some(index) if temporal => {
                             out.add(index, self.param_typed("INTERVAL"), Nullability::Unknown);
                         }
-                        _ => self.hint_pair(step, start, scope, out),
+                        _ => self.hint_pair(step, start, false, scope, out),
                     }
                 }
             }
         } else if info.is_some_and(|info| info.same_type) {
             for placeholder in args.iter().flatten() {
                 for other in args.iter().flatten() {
-                    self.hint_pair(placeholder, other, scope, out);
+                    self.hint_pair(placeholder, other, false, scope, out);
                 }
             }
             // A later argument stands in for a NULL one.
