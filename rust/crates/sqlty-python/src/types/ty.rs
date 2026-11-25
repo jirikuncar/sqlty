@@ -250,6 +250,20 @@ pub struct NewType {
     pub supertype: Ty,
 }
 
+/// Drops a chain of `NewType`s link by link: the derived drop recurses once per link and
+/// overflows the stack on a long chain.
+impl Drop for NewType {
+    fn drop(&mut self) {
+        let mut next = std::mem::replace(&mut self.supertype, Ty::Never);
+        while let Ty::NewType(link) = next {
+            next = match Arc::try_unwrap(link) {
+                Ok(mut link) => std::mem::replace(&mut link.supertype, Ty::Never),
+                Err(_) => break,
+            };
+        }
+    }
+}
+
 /// A value of `Literal[...]`; an integer as its decimal digits, of any size.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Lit {
@@ -417,14 +431,20 @@ impl Ty {
         }
     }
 
-    /// `_erase`: `NewType` as its supertype and `list[str]` as `list`, as inferred column
-    /// types are bare.
-    #[must_use]
-    pub fn erase(&self) -> Ty {
+    /// The type a chain of `NewType`s ends in: `self` when it is not one.
+    pub fn base(&self) -> &Ty {
         let mut tp = self;
         while let Ty::NewType(new) = tp {
             tp = &new.supertype;
         }
+        tp
+    }
+
+    /// `_erase`: `NewType` as its supertype and `list[str]` as `list`, as inferred column
+    /// types are bare.
+    #[must_use]
+    pub fn erase(&self) -> Ty {
+        let tp = self.base();
         match tp {
             Ty::Union(members) => {
                 Ty::union(members.iter().map(Ty::erase)).unwrap_or_else(|| tp.clone())
@@ -441,7 +461,7 @@ impl Ty {
             .iter()
             .map(|member| match member {
                 Ty::Class(_) if member.is_none() || member.is_top() => Some(true),
-                Ty::NewType(new) => new.supertype.admits_none(),
+                Ty::NewType(_) => member.base().admits_none(),
                 // `None` is never a value of the `Literal`s read here.
                 Ty::Class(_) | Ty::Generic(..) | Ty::Literal(_) => Some(false),
                 Ty::Never | Ty::Union(_) => None,
@@ -608,5 +628,24 @@ mod tests {
             "typing.Literal[False]"
         );
         assert_eq!(Ty::Never.admits_none(), None);
+    }
+
+    #[test]
+    fn a_long_newtype_chain_drops_on_a_small_stack() {
+        let dropped = std::thread::Builder::new()
+            .stack_size(1 << 20)
+            .spawn(|| {
+                let mut chain = Ty::none();
+                for link in 0..200_000 {
+                    chain = Ty::NewType(Arc::new(NewType {
+                        name: format!("N{link}"),
+                        module: "m".into(),
+                        supertype: chain,
+                    }));
+                }
+                assert_eq!(chain.admits_none(), Some(true));
+            })
+            .map(std::thread::JoinHandle::join);
+        assert!(matches!(dropped, Ok(Ok(()))));
     }
 }

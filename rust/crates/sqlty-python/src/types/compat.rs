@@ -139,10 +139,7 @@ pub fn declared_literal_values(tp: &Ty, inferred: &[Lit]) -> Option<Vec<Lit>> {
     };
     let mut admitted: Vec<Lit> = Vec::new();
     for member in tp.members() {
-        let mut member = member;
-        while let Ty::NewType(new) = member {
-            member = &new.supertype;
-        }
+        let member = member.base();
         match member {
             Ty::Literal(values) => {
                 for value in values {
