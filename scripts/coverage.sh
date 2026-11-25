@@ -4,16 +4,24 @@
 #   scripts/coverage.sh [PACKAGE...]   # python, or a directory of rust/crates; all by default
 #
 # Python is the package of src/sqlty and the extension crate (rust/crates/sqlty-ext); every
-# other crate counts only its own tests. Needs a nightly toolchain with llvm-tools (for
+# other crate counts only its own tests. Writes each package's wall time and test times
+# to rust/target/test-reports, summed up by scripts/slowest.py. Needs a nightly toolchain with llvm-tools (for
 # `#[coverage(off)]`) and cargo-llvm-cov; the `pg` tests run when SQLTY_PG_DSN is set.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 export RUSTUP_TOOLCHAIN=${RUSTUP_TOOLCHAIN:-nightly}
 crates=$(ls rust/crates)
+reports=$PWD/rust/target/test-reports
+rm -rf "$reports" && mkdir -p "$reports"
 # The extension crate is gated with the Python package.
 (($#)) || set -- python $(grep -vx sqlty-ext <<<"$crates")
 runner=test tests=(test)
 if cargo nextest --version >/dev/null 2>&1; then runner=nextest tests=(nextest run); fi
+
+# The JUnit report of the last nextest run (rust/.config/nextest.toml), as $reports/$1.xml.
+report() {
+  if [[ $runner == nextest ]]; then cp rust/target/nextest/default/junit.xml "$reports/$1.xml"; fi
+}
 
 # Fails when the crate in $1 leaves more lines unrun than its floor in
 # scripts/coverage-floors.txt (none: 0); asks to lower a floor it is under.
@@ -46,12 +54,13 @@ python_package() {
     (cd rust && cargo llvm-cov clean --workspace)
     uv run --no-sync maturin develop --manifest-path rust/crates/sqlty-ext/Cargo.toml
     local pytest=(uv run --no-sync pytest --cov --cov-append --cov-fail-under=0 --hypothesis-profile=coverage)
-    "${pytest[@]}" -m "not timing and not pg"
+    "${pytest[@]}" -m "not timing and not pg" --junit-xml="$reports/python.xml"
     if [[ -n ${SQLTY_PG_DSN:-} ]]; then
-      "${pytest[@]}" -m pg -n 0
+      "${pytest[@]}" -m pg -n 0 --junit-xml="$reports/python-pg.xml"
     fi
-    "${pytest[@]}" -m timing -n 0 -p no:randomly
+    "${pytest[@]}" -m timing -n 0 -p no:randomly --junit-xml="$reports/python-timing.xml"
     (cd rust && uv run --no-sync cargo "${tests[@]}" -p sqlty-core)
+    report python-core
     uv run --no-sync coverage report
     gate sqlty-ext
   )
@@ -61,9 +70,13 @@ crate() {
   local package
   package=$(sed -n 's/^name = "\(.*\)"/\1/p;T;q' "rust/crates/$1/Cargo.toml")
   (cd rust && cargo llvm-cov clean --workspace && cargo llvm-cov $runner --no-report -p "$package")
+  report "$1"
   gate "$1"
 }
 
 for package; do
+  start=$SECONDS
   if [[ $package == python ]]; then python_package; else crate "$package"; fi
+  echo "$package $((SECONDS - start))" >>"$reports/times.txt"
 done
+python3 scripts/slowest.py "$reports" >>"${GITHUB_STEP_SUMMARY:-/dev/stdout}"
