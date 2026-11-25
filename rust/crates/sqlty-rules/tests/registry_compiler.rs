@@ -195,8 +195,8 @@ fn a_page_is_a_markdown_file_named_in_kebab_case() {
 }
 
 #[test]
-fn at_most_sixty_four_rules() {
-    let pages: Vec<_> = (0..65u32)
+fn at_most_128_rules() {
+    let pages: Vec<_> = (0..129u32)
         .map(|i| {
             let name = format!(
                 "rule-{}",
@@ -209,7 +209,7 @@ fn at_most_sixty_four_rules() {
             (format!("{name}.md"), text)
         })
         .collect();
-    assert!(compile(&pages[..64]).is_ok());
+    assert!(compile(&pages[..128]).is_ok());
     let message = compile(&pages).expect_err("too many");
-    assert_eq!(message, "65 rule pages, but a RuleSet holds at most 64");
+    assert_eq!(message, "129 rule pages, but a RuleSet holds at most 128");
 }

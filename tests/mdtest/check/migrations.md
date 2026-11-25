@@ -629,3 +629,138 @@ ALTER TABLE teams ADD COLUMN name TEXT;
 TRUNCATE teams CASCADE;
 COMMIT;
 ```
+
+## A backfill of a column the code writes the table without
+
+`app/q.py`:
+
+```python
+from sqlty import SQL
+
+signup = SQL("--sql\nINSERT INTO users (id, email) VALUES (%s, %s)")
+rename = SQL("--sql\nUPDATE users SET email = %s WHERE id = %s")
+upsert = SQL("--sql\nINSERT INTO users (id) VALUES (%s) ON CONFLICT (id) DO UPDATE SET team_id = 1")
+read = SQL("--sql\nSELECT id FROM users")
+```
+
+```sql migration
+SET lock_timeout = '1s';
+ALTER TABLE users ADD COLUMN handle TEXT;
+-- error: [backfill-without-writer] "fills `users.handle`, which `app/q.py:3` inserts into `users` without: rows it writes after the backfill have no `handle`; deploy code that writes `handle` first, then backfill"
+UPDATE users SET handle = email WHERE id BETWEEN 1 AND 5000;
+-- error: [backfill-without-writer] "fills `users.team_id`, which `app/q.py:3` inserts into `users` without: rows it writes after the backfill have no `team_id`; deploy code that writes `team_id` first, then backfill"
+UPDATE users SET team_id = 1 WHERE id BETWEEN 1 AND 5000;
+```
+
+### An update of the column the backfill copies
+
+An `UPDATE` that leaves the column out keeps its value, unless it changes what the
+value was copied from.
+
+`app/q.py`:
+
+```python
+from sqlty import SQL
+
+rename = SQL("--sql\nUPDATE users SET email = %s WHERE id = %s")
+move = SQL("--sql\nUPDATE users SET team_id = %s WHERE id = %s")
+```
+
+```sql migration
+SET lock_timeout = '1s';
+ALTER TABLE users ADD COLUMN handle TEXT;
+-- error: [backfill-without-writer] "fills `users.handle` from `email`, which `app/q.py:3` updates without `handle`: rows it changes after the backfill keep the old `handle`"
+UPDATE users SET handle = lower(email) WHERE id BETWEEN 1 AND 5000;
+```
+
+### Not when every query writes the column, or none writes the table
+
+`app/q.py`:
+
+```python
+from sqlty import SQL
+
+signup = SQL("--sql\nINSERT INTO users (id, email, handle) VALUES (%s, %s, %s)")
+everything = SQL("--sql\nINSERT INTO users VALUES (%s, %s, %s, %s)")
+merged = SQL("--sql\nMERGE INTO users u USING teams t ON u.team_id = t.id WHEN MATCHED THEN DELETE")
+other = SQL("--sql\nINSERT INTO teams (id) VALUES (%s)")
+```
+
+```sql migration
+SET lock_timeout = '1s';
+ALTER TABLE users ADD COLUMN handle TEXT;
+-- error:
+UPDATE users SET handle = email WHERE id BETWEEN 1 AND 5000;
+CREATE TABLE teams (id BIGINT PRIMARY KEY, name TEXT);
+UPDATE teams SET name = 'x' WHERE id BETWEEN 1 AND 5000;
+```
+
+### Not for a column with a default or a table with a row trigger
+
+`app/q.py`:
+
+```python
+from sqlty import SQL
+
+signup = SQL("--sql\nINSERT INTO users (id, email) VALUES (%s, %s)")
+```
+
+```sql migration
+SET lock_timeout = '1s';
+ALTER TABLE users ADD COLUMN plan TEXT DEFAULT 'free';
+ALTER TABLE users ADD COLUMN handle TEXT;
+ALTER TABLE users ALTER COLUMN handle SET DEFAULT '';
+-- error:
+UPDATE users SET plan = 'pro', handle = email WHERE id BETWEEN 1 AND 5000;
+```
+
+`app/q.py`:
+
+```python
+from sqlty import SQL
+
+signup = SQL("--sql\nINSERT INTO users (id, email) VALUES (%s, %s)")
+```
+
+```sql migration
+SET lock_timeout = '1s';
+ALTER TABLE users ADD COLUMN handle TEXT;
+CREATE TRIGGER users_handle BEFORE INSERT OR UPDATE ON users FOR EACH ROW EXECUTE FUNCTION set_handle();
+-- error:
+UPDATE users SET handle = email WHERE id BETWEEN 1 AND 5000;
+```
+
+### Once the default is dropped
+
+`app/q.py`:
+
+```python
+from sqlty import SQL
+
+signup = SQL("--sql\nINSERT INTO users (id, email) VALUES (%s, %s)")
+```
+
+```sql migration
+SET lock_timeout = '1s';
+ALTER TABLE users ADD COLUMN handle TEXT DEFAULT '';
+ALTER TABLE users ALTER COLUMN handle DROP DEFAULT;
+-- error: [backfill-without-writer] "fills `users.handle`"
+UPDATE users SET handle = email WHERE id BETWEEN 1 AND 5000;
+```
+
+### Rows copied into a new table
+
+`app/q.py`:
+
+```python
+from sqlty import SQL
+
+signup = SQL("--sql\nINSERT INTO accounts (id) VALUES (%s)")
+```
+
+```sql migration
+SET lock_timeout = '1s';
+CREATE TABLE accounts (id BIGINT PRIMARY KEY, email TEXT);
+-- error: [backfill-without-writer] "fills `accounts.email`, which `app/q.py:3` inserts into `accounts` without: rows it writes after the backfill have no `email`; deploy code that writes `email` first, then backfill"
+INSERT INTO accounts (id, email) SELECT id, email FROM users ON CONFLICT (id) DO NOTHING;
+```

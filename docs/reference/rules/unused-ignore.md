@@ -1,5 +1,5 @@
 ---
-order: 457
+order: 458
 group: "suppression"
 severity: "warn"
 fixable: false

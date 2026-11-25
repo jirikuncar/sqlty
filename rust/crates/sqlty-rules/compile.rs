@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use serde::Deserialize;
 
 /// The most rules a `RuleSet` (one `u64`) holds.
-const MAX_RULES: usize = 64;
+const MAX_RULES: usize = 128;
 
 /// The groups a rule may name, with the `Group` variant of each.
 const GROUPS: [(&str, &str); 8] = [

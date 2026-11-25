@@ -27,7 +27,9 @@ use clap::ValueEnum;
 use sqlty_project::{Checker, FileSettings, Flags, Options, Shared, Workspace};
 use sqlty_python::checker::Diagnostic;
 use sqlty_python::index::{defines_helpers, helpers_of, Builder, HelperIndex, Module, Roots};
+use sqlty_python::migrations::{check_migrations_with, queries_of};
 use sqlty_python::project::{self, Discovery};
+use sqlty_python::rewriter::ImportStyle;
 use sqlty_python::rules::{RuleConfig, Severity};
 use sqlty_python::types::stdlib::Version;
 use sqlty_sql::analyzer::Schema;
@@ -540,6 +542,8 @@ struct Migrations {
     files: Vec<(PathBuf, PathBuf, RuleConfig)>,
     /// The texts, read when a baseline first differs.
     texts: OnceCell<Vec<Arc<str>>>,
+    /// The queries of the files of the head checked against this schema, `(path:line, sql)`.
+    writers: Vec<(String, String)>,
 }
 
 /// The address of a schema text: equal for the files that share it.
@@ -559,14 +563,33 @@ fn migration_sets(head: &mut Revision<Workspace>) -> Result<Vec<Migrations>, Str
     if sources.is_empty() {
         return Ok(Vec::new());
     }
+    let modules = head.workspace.files().len();
     let mut paths = head.workspace.files().to_vec();
     paths.extend(head.workspace.query_files()?);
+    let disk = Shared(Arc::new(sqlty_project::Disk));
     let mut routed: HashMap<*const u8, Vec<PathBuf>> = HashMap::new();
-    for path in paths {
-        if let Some(schema) = &head.workspace.settings(&path)?.schema_sql {
-            let files = routed.entry(address(schema)).or_default();
-            files.push(relative(&head.root, &path));
-        }
+    let mut writers: HashMap<*const u8, Vec<(String, String)>> = HashMap::new();
+    for (at, path) in paths.into_iter().enumerate() {
+        let settings = head.workspace.settings(&path)?;
+        let Some(schema) = &settings.schema_sql else {
+            continue;
+        };
+        let shown = relative(&head.root, &path);
+        let label = shown.to_string_lossy().replace('\\', "/");
+        let style = ImportStyle::parse(settings.import_style.as_deref()).unwrap_or_default();
+        let queries = match at < modules {
+            true => head
+                .workspace
+                .text(&path)
+                .map(|text| queries_of(&label, text, &style, None)),
+            false => disk.text(&head.root.join(&path)).map(|text| {
+                let text = text.replace("\r\n", "\n");
+                queries_of(&label, &text, &style, Some(settings.query_format))
+            }),
+        };
+        let found = writers.entry(address(schema)).or_default();
+        found.extend(queries.unwrap_or_default());
+        routed.entry(address(schema)).or_default().push(shown);
     }
     let mut seen: HashMap<Vec<PathBuf>, usize> = HashMap::new();
     let mut sets: Vec<Migrations> = Vec::new();
@@ -597,11 +620,14 @@ fn migration_sets(head: &mut Revision<Workspace>) -> Result<Vec<Migrations>, Str
                     settings: Arc::clone(&source.settings),
                     files,
                     texts: OnceCell::new(),
+                    writers: Vec::new(),
                 });
                 sets.len() - 1
             }
         };
         let schema = source.settings.schema_sql.as_ref().map(address);
+        let written = schema.and_then(|schema| writers.remove(&schema));
+        sets[at].writers.extend(written.into_iter().flatten());
         // Each configuration reads its own text, so no file is probed twice.
         let found = schema.and_then(|schema| routed.get(&schema));
         let probes = &mut sets[at].probes;
@@ -653,7 +679,7 @@ fn migrations(
                 .zip(&set.files)
                 .map(|(text, (_, _, rules))| (&**text, rules))
                 .collect();
-            let found = sqlty_python::migrations::check_migrations_with(&baseline, &checked);
+            let found = check_migrations_with(&baseline, &checked, &set.writers);
             for (((path, ..), text), found) in set.files.iter().zip(texts).zip(found) {
                 for diagnostic in found {
                     // A statement several baselines or databases judge: once, the strictest.
@@ -1470,6 +1496,54 @@ mod tests {
         assert_eq!(found(EVENTS), expected);
         assert!(sets[0].texts.get().is_some());
         assert_eq!(found(&format!("{EVENTS}{USERS}")), expected);
+        std::fs::remove_dir_all(&root).expect("removes");
+    }
+
+    #[test]
+    fn a_backfill_is_judged_against_the_queries_of_the_head() {
+        let root = project(
+            "writers",
+            &[
+                (
+                    "pyproject.toml",
+                    "[tool.sqlty]\nschema = \"migrations/\"\nqueries = \"sql/\"\n",
+                ),
+                ("migrations/0001.sql", USERS),
+                (
+                    "migrations/0002.sql",
+                    "UPDATE users SET bio = '' WHERE id BETWEEN 1 AND 9;\n",
+                ),
+                (
+                    "app/q.py",
+                    "q = \"--sql\\nINSERT INTO users (id, bio) VALUES (1, '')\"\n",
+                ),
+                (
+                    "sql/users.sql",
+                    "-- name: add!\r\nINSERT INTO users (id) VALUES (:id);\r\n",
+                ),
+                ("other/pyproject.toml", "[tool.sqlty]\n"),
+                (
+                    "other/q.py",
+                    "q = \"--sql\\nINSERT INTO users (id) VALUES (1)\"\n",
+                ),
+            ],
+        );
+        let sets = migration_sets(&mut open(&root)).expect("reads");
+        let labels: Vec<&str> = sets[0]
+            .writers
+            .iter()
+            .map(|(label, _)| label.as_str())
+            .collect();
+        assert_eq!(labels, ["app/q.py:1", "sql/users.sql:2"]);
+        let found = migrations("b", &sets, &mut schema_files(USERS)).expect("judges");
+        let messages: Vec<&str> = found
+            .iter()
+            .map(|f| f.diagnostic.message.as_str())
+            .collect();
+        let [message] = messages.as_slice() else {
+            panic!("{messages:?}");
+        };
+        assert!(message.contains("`sql/users.sql:2`"), "{message}");
         std::fs::remove_dir_all(&root).expect("removes");
     }
 

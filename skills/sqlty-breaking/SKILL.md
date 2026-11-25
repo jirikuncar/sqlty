@@ -72,6 +72,7 @@ migrations/0042_index.sql:2: [missing-concurrently] `CREATE INDEX` blocks writes
 | `drop-primary-key` | add the new key in the same transaction, or `REPLICA IDENTITY USING INDEX` first |
 | `rerun-backfill` | `ON CONFLICT (key) DO NOTHING`, or skip copied rows with `NOT EXISTS` |
 | `dropped-delete-action` | add a key with the same `ON DELETE` action first, or delete the rows in the application |
+| `backfill-without-writer` | deploy code that writes the column in every `INSERT` of the table and every `UPDATE` of its source, then backfill |
 
 Every `schema` of the configuration is judged, each `[tool.sqlty.databases]` entry
 included, with the severities of `rules` and of the `[[tool.sqlty.overrides]]` that
@@ -146,7 +147,7 @@ rules:
 | Step | Rule | Why |
 |------|------|-----|
 | Readers first | Ship code that reads both the old and the new shape one release before code writes the new one | during a rollout, old code reads what new code writes |
-| Dual write | Write the new column or table in the same transaction as the old one, before any backfill | a row written after the backfill is never copied ([#1260](https://github.com/jirikuncar/sqlty/issues/1260)) |
+| Dual write | Write the new column or table in the same transaction as the old one, before any backfill | a row written after the backfill is never copied; `backfill-without-writer` names a query of the code that leaves the column out |
 | Backfill last | Run the backfill once the dual-writing release is fully deployed, from a job the deploy doesn't wait for | every writer is live before it reads |
 | Small batches | Batch by key, one transaction per batch, `SET LOCAL lock_timeout` and `statement_timeout`, a short pause, `SKIP LOCKED` | `unbatched-backfill` and `locked-backfill` report the rest |
 | Rerunnable | `ON CONFLICT ... DO UPDATE ... WHERE` the stored row is older; a rerun writes nothing | a retried batch must not fail or overwrite newer rows; `rerun-backfill` reports an `INSERT ... SELECT` without `ON CONFLICT` |

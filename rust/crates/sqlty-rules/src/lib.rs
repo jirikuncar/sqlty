@@ -83,7 +83,7 @@ impl Rule {
 
 /// A set of rules, one bit each.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct RuleSet(u64);
+pub struct RuleSet(u128);
 
 impl RuleSet {
     /// The set with no rule.
