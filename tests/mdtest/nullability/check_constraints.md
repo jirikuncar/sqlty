@@ -87,3 +87,121 @@ ALTER TABLE items DROP CONSTRAINT items_check;
 SELECT COALESCE(a_id, b_id) AS ref FROM items
 -- inferred: tuple[int | None]
 ```
+
+## A CHECK that ties columns to a discriminator
+
+A tagged union stored as a discriminator and per-variant columns: the `CHECK` lists, for
+each value of `kind`, which columns are set. A `WHERE` or `CASE` branch that picks a value
+of `kind` leaves only its arm, so the columns that arm requires are non-null.
+
+`schema.sql`:
+
+```sql
+CREATE TYPE pay_kind AS ENUM ('card', 'iban', 'cash');
+CREATE TABLE payments (
+    id SERIAL PRIMARY KEY,
+    kind pay_kind NOT NULL,
+    card_last4 TEXT,
+    iban TEXT,
+    CHECK ((kind = 'card' AND card_last4 IS NOT NULL AND iban IS NULL)
+        OR (kind IN ('iban', 'cash') AND iban IS NOT NULL AND card_last4 IS NULL))
+);
+CREATE TABLE refunds (id SERIAL PRIMARY KEY, payment_id INTEGER);
+CREATE TABLE loose (id SERIAL PRIMARY KEY, kind TEXT, card_last4 TEXT, CHECK (kind = 'card' AND card_last4 IS NOT NULL OR kind = 'iban'));
+CREATE TABLE other (
+    id SERIAL PRIMARY KEY,
+    kind TEXT NOT NULL,
+    a TEXT,
+    CHECK (kind = 'a' AND length(a) > 0 OR kind = 'b'),
+    CHECK ((kind = 'a') = (a IS NOT NULL) OR kind > 'b')
+);
+```
+
+### WHERE
+
+```sql
+SELECT card_last4, iban FROM payments WHERE kind = 'card'
+-- inferred: tuple[str, str | None]
+```
+
+```sql
+SELECT p.iban FROM payments p WHERE p.kind IN ('cash', 'iban') AND p.id > 1
+-- inferred: tuple[str]
+```
+
+```sql
+SELECT card_last4 FROM payments WHERE kind <> 'iban' AND kind <> 'cash'
+-- inferred: tuple[str]
+```
+
+### CASE
+
+```sql
+SELECT CASE kind WHEN 'card' THEN card_last4 ELSE iban END AS account FROM payments
+-- inferred: tuple[str]
+```
+
+```sql
+SELECT CASE WHEN kind = 'card' THEN card_last4 ELSE 'none' END AS last4 FROM payments
+-- inferred: tuple[str]
+```
+
+### What is not narrowed
+
+Without a condition on `kind`, under `OR` that keeps both arms, on the side an outer join
+null-extends (even where `WHERE` drops its NULL rows), or where the `CHECK` can be NULL
+(`loose.kind` is nullable), the columns keep their declared nullability.
+
+```sql
+SELECT card_last4 FROM payments
+-- inferred: tuple[str | None]
+```
+
+```sql
+SELECT iban FROM payments WHERE kind = 'card' OR kind = 'iban'
+-- inferred: tuple[str | None]
+```
+
+```sql
+SELECT p.card_last4 FROM refunds r LEFT JOIN payments p ON p.id = r.payment_id WHERE p.kind = 'card'
+-- inferred: tuple[str | None]
+```
+
+```sql
+SELECT p.card_last4 FROM refunds r LEFT JOIN payments p ON p.id = r.payment_id AND p.kind = 'card'
+-- inferred: tuple[str | None]
+```
+
+```sql
+SELECT CASE WHEN kind = 'card' THEN iban ELSE '-' END AS iban FROM payments
+-- inferred: tuple[str | None]
+```
+
+```sql
+SELECT card_last4 FROM loose WHERE kind = 'card'
+-- inferred: tuple[str | None]
+```
+
+A `CHECK` of another shape, a function or another operator, is not read.
+
+```sql
+SELECT a FROM other WHERE kind = 'a'
+-- inferred: tuple[str | None]
+```
+
+### In Python
+
+`sqlty rewrite` writes the narrowed type, and `sqlty check` reports a `SQL[tuple[...]]`
+that still says `None` for a column the arm requires.
+
+```python
+cards = "--sql\nSELECT card_last4 FROM payments WHERE kind = 'card'"
+# rewritten: cards = SQL[tuple[str]]("--sql\nSELECT card_last4 FROM payments WHERE kind = 'card'")
+```
+
+```python
+from sqlty import SQL
+
+# error: [stale-type] "SQL[tuple[str | None]] should be SQL[tuple[str]]"
+cards = SQL[tuple[str | None]]("--sql\nSELECT card_last4 FROM payments WHERE kind = 'card'")
+```

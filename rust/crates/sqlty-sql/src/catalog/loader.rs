@@ -24,8 +24,8 @@ use crate::ddl::{RowEvents, RowTrigger};
 use crate::values::{self, Value};
 
 use super::columns::{
-    apply_check, column_named, is_rowid_type, mark_loose_primary_key, mark_primary_key,
-    merge_columns, nonnull_groups, raw_column, unique_key, RawColumn,
+    apply_check, column_named, discriminates, is_rowid_type, mark_loose_primary_key,
+    mark_primary_key, merge_columns, nonnull_groups, raw_column, unique_key, RawColumn,
 };
 use super::names::{fold, key_of, lookup_key, parts, schema_for_new, type_key};
 use super::{Catalog, ForeignKey, TypeOverrides};
@@ -40,6 +40,8 @@ pub(super) struct RawTable {
     pub(super) unknown: bool,
     /// Groups of columns a `CHECK` keeps at least one of non-null.
     pub(super) nonnull_groups: Vec<Vec<String>>,
+    /// The conditions of its `CHECK` constraints.
+    pub(super) checks: Vec<Expr>,
     /// `BEFORE` row triggers by name, and the statements they fire for.
     pub(super) row_triggers: Vec<(String, RowEvents)>,
     pub(super) foreign_keys: Vec<RawForeignKey>,
@@ -605,6 +607,9 @@ impl Loader {
                     table
                         .nonnull_groups
                         .extend(nonnull_groups(&check.expr, self.dialect));
+                    table
+                        .checks
+                        .extend(discriminates(&check.expr).then(|| (*check.expr).clone()));
                 }
             }
         }
@@ -614,6 +619,9 @@ impl Loader {
                 table
                     .nonnull_groups
                     .extend(nonnull_groups(&check.expr, self.dialect));
+                table
+                    .checks
+                    .extend(discriminates(&check.expr).then(|| (*check.expr).clone()));
             }
             if let TableConstraint::PrimaryKey(pk) = constraint {
                 // SQLite fills a sole `INTEGER PRIMARY KEY`, the rowid, on INSERT.

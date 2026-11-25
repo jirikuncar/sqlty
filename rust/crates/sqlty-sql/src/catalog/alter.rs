@@ -12,7 +12,8 @@ use sqlparser::ast::{
 use crate::analyzer::SqlDialect;
 
 use super::columns::{
-    apply_check, check_narrows, mark_primary_key, nonnull_groups, raw_column, unique_key,
+    apply_check, check_narrows, discriminates, mark_primary_key, nonnull_groups, raw_column,
+    unique_key,
 };
 use super::loader::{AlterFail, Loader, RawTable, Rel, Taint, TypeDef, LARGE_ENUM};
 use super::names::{fold, parts};
@@ -488,6 +489,9 @@ pub(super) fn alter_op(
             table
                 .nonnull_groups
                 .extend(nonnull_groups(&check.expr, dialect));
+            table
+                .checks
+                .extend(discriminates(&check.expr).then(|| (*check.expr).clone()));
         }
         // The dropped constraint may be a `CHECK`, and constraints are not tracked by name.
         AlterTableOperation::DropConstraint { name, .. } => {
@@ -495,6 +499,7 @@ pub(super) fn alter_op(
                 column.values = None;
             }
             table.nonnull_groups.clear();
+            table.checks.clear();
             let name = fold(name, dialect);
             drop_foreign_key(table, &name);
             drop_unique(table, &name);

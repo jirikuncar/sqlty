@@ -145,9 +145,11 @@ impl Facts {
             .any(|(r, c)| r == reference && c == column)
     }
 
-    /// Whether no row can satisfy these facts: a column is proven both NULL and not NULL.
+    /// Whether no row can satisfy these facts: a column is proven both NULL and not NULL,
+    /// or equal to one of no values.
     pub(super) fn contradicts(&self) -> bool {
         self.null.iter().any(|(r, c)| self.is_non_null(r, c))
+            || self.values.iter().any(|(_, _, values)| values.is_empty())
     }
 
     /// Nullability of a column of `reference`, given what its source declares. `column` is
@@ -1215,18 +1217,43 @@ impl<'a> Analyzer<'a> {
             };
             let taken = skipped.with(self.learn(&condition, true, scope));
             if reached(&taken) {
-                results.push(self.nullability(&when.result, scope, &taken));
+                results.push(self.branch_nullability(&when.result, scope, &taken));
             }
             let unmatched = self.learn_not_true(&condition, scope, &skipped);
-            skipped = skipped.with(unmatched);
+            skipped = skipped
+                .with(unmatched)
+                .with(self.learn_skipped(&condition, scope));
         }
         // Without ELSE, a row no WHEN matches yields NULL.
         if reached(&skipped) {
             results.push(else_result.map_or(Nullability::Nullable, |expr| {
-                self.nullability(expr, scope, &skipped)
+                self.branch_nullability(expr, scope, &skipped)
             }));
         }
         any_nullable(results)
+    }
+
+    /// Nullability of the result of a `CASE` branch read under `facts`, in each arm of the
+    /// `CHECK`s of `scope` they leave: `CASE WHEN kind = 'card' THEN card_last4 END` where a
+    /// `CHECK` ties `card_last4` to `kind = 'card'`.
+    fn branch_nullability(&self, result: &Expr, scope: &Scope, facts: &Facts) -> Nullability {
+        let nullability = self.nullability(result, scope, facts);
+        let checked = self.checked(vec![Learned::default()], scope, facts);
+        if nullability == Nullability::NonNull || checked.len() < 2 {
+            return nullability;
+        }
+        let arms = checked
+            .into_iter()
+            .map(|arm| facts.with(arm))
+            .filter(|arm| !arm.contradicts());
+        let mut arms = arms.peekable();
+        if arms.peek().is_some()
+            && arms.all(|arm| self.nullability(result, scope, &arm) == Nullability::NonNull)
+        {
+            Nullability::NonNull
+        } else {
+            nullability
+        }
     }
 
     fn function_nullability(

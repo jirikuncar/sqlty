@@ -6,8 +6,8 @@
 use std::ops::ControlFlow;
 
 use sqlparser::ast::{
-    visit_expressions, ColumnDef, ColumnOption, DataType, Expr, FunctionArg, FunctionArgExpr,
-    FunctionArguments, GeneratedAs, Ident, IndexColumn, ObjectName,
+    visit_expressions, BinaryOperator, ColumnDef, ColumnOption, DataType, Expr, FunctionArg,
+    FunctionArgExpr, FunctionArguments, GeneratedAs, Ident, InTarget, IndexColumn, ObjectName,
 };
 
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -250,6 +250,53 @@ fn checked(columns: &[RawColumn], expr: &Expr, dialect: SqlDialect) -> Vec<(usiz
 /// The groups of columns a `CHECK` keeps at least one of non-null, conjunct by conjunct:
 /// `num_nonnulls(a, b) = 1` (or `>= 1`, `> 0`), `num_nulls(a, b) = 0` (each of them on its
 /// own), `a IS NOT NULL OR b IS NOT NULL`. MySQL before 8.0.16 ignores `CHECK`.
+/// Whether `check` ties columns to a discriminator, the only `CHECK` narrowing reads: an
+/// `OR` of `AND`s of `col = constant`, `col IN (constants)` and `col IS [NOT] NULL`, with
+/// both a value and a NULL test.
+pub(super) fn discriminates(check: &Expr) -> bool {
+    fn leaves<'e>(expr: &'e Expr, into: &mut Vec<&'e Expr>) -> bool {
+        match expr {
+            Expr::Nested(inner) => leaves(inner, into),
+            Expr::BinaryOp {
+                left,
+                op: BinaryOperator::And | BinaryOperator::Or,
+                right,
+            } => leaves(left, into) && leaves(right, into),
+            leaf => {
+                into.push(leaf);
+                true
+            }
+        }
+    }
+    let column = |expr: &Expr| matches!(expr, Expr::Identifier(_));
+    let constant = |expr: &Expr| values::constant(expr).is_some();
+    let mut found = Vec::new();
+    if !leaves(check, &mut found) {
+        return false;
+    }
+    let (mut values, mut nulls) = (false, false);
+    for leaf in found {
+        match leaf {
+            Expr::IsNull(inner) | Expr::IsNotNull(inner) if column(inner) => nulls = true,
+            Expr::BinaryOp {
+                left,
+                op: BinaryOperator::Eq,
+                right,
+            } if column(left) && constant(right) || column(right) && constant(left) => {
+                values = true;
+            }
+            Expr::In {
+                expr,
+                target: InTarget::List(list),
+                negated: false,
+                ..
+            } if column(expr) && list.iter().all(constant) => values = true,
+            _ => return false,
+        }
+    }
+    values && nulls
+}
+
 pub(super) fn nonnull_groups(expr: &Expr, dialect: SqlDialect) -> Vec<Vec<String>> {
     use sqlparser::ast::BinaryOperator::{And, Eq, Gt, GtEq, Lt, LtEq, Or};
 
