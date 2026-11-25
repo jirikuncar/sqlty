@@ -27,7 +27,8 @@ query = SQL.lower()
 
 ## Wrapper calls spelled apart
 
-The wrapper and its `[` may be apart by blanks or a line continuation, and are still read.
+The wrapper and its `[` may be apart by blanks or a line continuation, and are still read,
+also in a module that does not import it.
 
 ```toml
 [tool.sqlty]

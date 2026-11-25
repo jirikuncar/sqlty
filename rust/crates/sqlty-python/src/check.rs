@@ -170,9 +170,9 @@ pub(crate) fn may_wrap(text: &str, import_line: &str) -> bool {
         .map_or("SQL", str::trim);
     text.contains(name)
         && (text.contains("sqlty")
-            || [name, "SQL", &crate::tokens::template_wrapper(name)]
-                .iter()
-                .any(|name| subscripted(text, name)))
+            || subscripted(text, name)
+            || name != "SQL" && subscripted(text, "SQL")
+            || subscripted(text, &crate::tokens::template_wrapper(name)))
 }
 
 /// Whether `name` may be subscripted in `text`: followed by `[` past what can sit between
@@ -1222,8 +1222,6 @@ pub fn sites(
         .collect()
 }
 
-/// [`diagnostics`] of `parsed`, else [`unparsed`] of `text`; a panic becomes one
-/// `internal-error` in their place, so one module cannot stop a whole check.
 static MARKED_TEMPLATE: LazyLock<Regex> = LazyLock::new(|| {
     sqlty_sql::regex(
         r#"(?:^|[^\w])(?:[tT][rR]?|[rR][tT])(?:'|")+[\s\x1c-\x1f]*--[\s\x1c-\x1f]?sql"#,
@@ -1248,6 +1246,8 @@ pub fn may_report(
         || mentions_helpers(text, helpers)
 }
 
+/// [`diagnostics`] of `parsed`, else [`unparsed`] of `text`; a panic becomes one
+/// `internal-error` in their place, so one module cannot stop a whole check.
 pub fn module(text: &str, parsed: Option<&Arc<Source>>, run: &Run<'_>) -> Found {
     let found = catch_unwind(AssertUnwindSafe(|| match parsed {
         Some(parsed) => diagnostics(parsed, run),
@@ -1505,7 +1505,7 @@ pub fn diagnostics(source: &Arc<Source>, run: &Run<'_>) -> Found {
                     wrapper
                 )
                 .is_empty(),
-        "may_wrap misses a wrapper call in {text:?}"
+        "may_wrap misses a `SQL[T](...)` or `SQL[Any]` call in {text:?}"
     );
     let queries: Vec<RowQuery> = if may_wrap(text, import_line) {
         row_queries(scanned())

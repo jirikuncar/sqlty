@@ -24,13 +24,17 @@ fn project(name: &str, files: &[(&str, &str)]) -> PathBuf {
 }
 
 fn open(root: &Path) -> Workspace {
+    open_with(root, false)
+}
+
+fn open_with(root: &Path, parse: bool) -> Workspace {
     let options = Options {
         flags: Flags::default(),
         discovery: Discovery::new(Box::new(Disk), root),
         version: (3, 14),
         extra_roots: Vec::new(),
         force_exclude: false,
-        parse: false,
+        parse,
     };
     Workspace::open(&[root.to_path_buf()], Shared(Arc::new(Disk)), options).expect("opens")
 }
@@ -55,4 +59,36 @@ fn a_database_without_schema_files_has_no_schema_source() {
         .collect();
     fs::remove_dir_all(&root).expect("removes");
     assert_eq!(databases, ["default"]);
+}
+
+#[test]
+fn modules_no_check_can_report_in_are_skipped_but_not_the_rest() {
+    let root = project(
+        "prefilter",
+        &[
+            ("pyproject.toml", "[tool.sqlty]\nschema = \"schema.sql\"\n"),
+            ("schema.sql", "CREATE TABLE users (id INTEGER NOT NULL);"),
+            ("app/__init__.py", ""),
+            (
+                "app/db.py",
+                "from typing import Annotated, LiteralString\n\nfrom sqlty import SQL\n\n\ndef value[T](query: Annotated[LiteralString, SQL], form: type[T]) -> T | None: ...\n",
+            ),
+            ("app/plain.py", "x = 1\n"),
+            ("app/ignored.py", "x = 1  # sqlty: ignore\n"),
+            (
+                "app/calls.py",
+                "from app.db import value as v\n\nfound = v(\"SELECT id FROM users\", str)\n",
+            ),
+        ],
+    );
+    let mut rules: Vec<&str> = open_with(&root, true)
+        .check_all()
+        .expect("checks")
+        .iter()
+        .flatten()
+        .map(|found| found.rule.name())
+        .collect();
+    fs::remove_dir_all(&root).expect("removes");
+    rules.sort_unstable();
+    assert_eq!(rules, ["column-type-mismatch", "unused-ignore"]);
 }

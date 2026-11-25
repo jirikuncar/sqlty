@@ -468,10 +468,6 @@ fn wanted(call: &ExprCall) -> bool {
     }
 }
 
-/// The calls of the helpers the module defines or imports from the
-/// modules of `helpers`, by line, their arguments typed by `types`, asked only when the
-/// module has some. A query built in a way that is not modelled (see [`compose`]) is left
-/// unchecked.
 /// Whether `text` may define a marked helper: `Annotated[..., SQL]` from sqlty.
 pub(crate) fn defines_helpers(text: &str) -> bool {
     text.contains("Annotated") && text.contains("sqlty") && text.contains("SQL")
@@ -482,6 +478,10 @@ pub(crate) fn mentions_helpers(text: &str, helpers: Option<&HelperIndex>) -> boo
     helpers.is_some_and(|helpers| !helpers.modules.is_empty() && helpers.mentions(text))
 }
 
+/// The calls of the helpers the module defines or imports from the
+/// modules of `helpers`, by line, their arguments typed by `types`, asked only when the
+/// module has some. A query built in a way that is not modelled (see [`compose`]) is left
+/// unchecked.
 pub fn helper_calls_in<'a, 't>(
     facts: &ModuleFacts<'a>,
     helpers: Option<&'a HelperIndex>,
