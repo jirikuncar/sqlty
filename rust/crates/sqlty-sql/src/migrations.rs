@@ -21,12 +21,12 @@ use std::ops::{ControlFlow, Range};
 
 use rustc_hash::{FxHashMap, FxHashSet};
 use sqlparser::ast::{
-    visit_expressions, AlterColumnOperation, AlterIndexOperation, AlterTable, AlterTableOperation,
-    AlterType, AlterTypeOperation, BinaryOperator, CascadeOption, CharacterLength, CheckConstraint,
-    ColumnDef, ColumnOption, CopySource, CreateTable, DataType, Delete, DetachPartitionMode,
-    ExactNumberInfo, Expr, ForValues, ForeignKeyConstraint, FromTable, Ident, InTarget, Insert,
-    LockTableMode, Merge, ObjectName, ObjectType, RenameTableNameKind, ReplicaIdentity, SetExpr,
-    Statement, TableConstraint, TableFactor, TableObject,
+    visit_expressions, visit_relations, AlterColumnOperation, AlterIndexOperation, AlterTable,
+    AlterTableOperation, AlterType, AlterTypeOperation, BinaryOperator, CascadeOption,
+    CharacterLength, CheckConstraint, ColumnDef, ColumnOption, CopySource, CreateTable, DataType,
+    Delete, DetachPartitionMode, ExactNumberInfo, Expr, ForValues, ForeignKeyConstraint, FromTable,
+    Ident, InTarget, Insert, LockTableMode, Merge, ObjectName, ObjectType, RenameTableNameKind,
+    ReplicaIdentity, SetExpr, Statement, TableConstraint, TableFactor, TableObject,
 };
 
 use crate::analyzer::{parse_ddl, SqlDialect};
@@ -296,6 +296,18 @@ impl Model {
                             );
                         }
                     }
+                }
+                if let Some(table) = parsed
+                    .as_ref()
+                    .and_then(rerun_insert)
+                    .filter(|table| !self.created.contains(table))
+                {
+                    report(
+                        Rule::RerunBackfill,
+                        format!(
+                            "copies rows into `{table}` without `ON CONFLICT`: run again after a timeout or a restart, it fails on the key or adds the rows twice; add `ON CONFLICT (key) DO NOTHING`, or `DO UPDATE ... WHERE` to keep newer rows"
+                        ),
+                    );
                 }
                 if let Some((target, selection)) = parsed
                     .as_ref()
@@ -1956,6 +1968,41 @@ fn filled(stmt: &Statement) -> Option<String> {
     }
 }
 
+/// The table an `INSERT ... SELECT` without `ON CONFLICT` copies into, unless its query
+/// reads that table, as `NOT EXISTS` or an anti-join on the key does to skip copied rows.
+fn rerun_insert(stmt: &Statement) -> Option<String> {
+    let insert = match stmt {
+        Statement::Query(query) => match &*query.body {
+            SetExpr::Insert(insert) => return rerun_insert(insert),
+            _ => return None,
+        },
+        Statement::Insert(insert) => insert,
+        _ => return None,
+    };
+    let Insert {
+        table: TableObject::TableName(table),
+        source: Some(source),
+        on: None,
+        ignore: false,
+        ..
+    } = insert
+    else {
+        return None;
+    };
+    if matches!(*source.body, SetExpr::Values(_)) {
+        return None;
+    }
+    let table = key(table);
+    let reads_target = visit_relations(source, |relation| {
+        if key(relation) == table {
+            ControlFlow::Break(())
+        } else {
+            ControlFlow::Continue(())
+        }
+    });
+    reads_target.is_continue().then_some(table)
+}
+
 fn unique_message(table: &ObjectName) -> String {
     format!(
         "the constraint builds its index under an ACCESS EXCLUSIVE lock on `{table}`: `CREATE UNIQUE INDEX CONCURRENTLY`, then add the constraint `USING INDEX`"
@@ -3603,6 +3650,24 @@ mod tests {
     fn a_pg_dump_schema_is_not_a_migration() {
         let dump = "--\n-- PostgreSQL database dump\n--\n\nCREATE INDEX i ON public.users USING btree (bio);";
         assert_eq!(rules(USERS, dump), []);
+    }
+
+    #[test]
+    fn an_insert_select_without_on_conflict_fails_or_duplicates_when_run_again() {
+        let baseline =
+            format!("{USERS}\nCREATE TABLE stats (team_id BIGINT PRIMARY KEY, n BIGINT);");
+        let copy =
+            "INSERT INTO stats (team_id, n) SELECT team_id, count(*) FROM users GROUP BY team_id";
+        assert_eq!(rules(&baseline, copy), [Rule::RerunBackfill]);
+        let with =
+            format!("WITH t AS (SELECT team_id, count(*) AS n FROM users GROUP BY team_id) {copy}");
+        assert_eq!(rules(&baseline, &with), [Rule::RerunBackfill]);
+        for safe in [
+            format!("{copy} ON CONFLICT (team_id) DO UPDATE SET n = excluded.n"),
+            format!("{copy} HAVING NOT EXISTS (SELECT 1 FROM public.stats s WHERE s.team_id = users.team_id)"),
+        ] {
+            assert_eq!(rules(&baseline, &safe), []);
+        }
     }
 
     #[test]
