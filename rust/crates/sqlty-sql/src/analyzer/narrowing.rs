@@ -351,10 +351,10 @@ impl<'a> Analyzer<'a> {
     /// row it is NULL for, and an outer join's NULL row passes none.
     fn checks_in(&self, scope: &Scope, facts: &Facts) -> Vec<Expr> {
         let mut found = Vec::new();
-        for source in scope {
-            let Some(table) = source.table.named() else {
-                continue;
-            };
+        let named = scope
+            .iter()
+            .filter_map(|source| Some((source, source.table.named()?)));
+        for (source, table) in named {
             if source.reference.is_empty()
                 || facts.is_null_extended(&source.reference)
                 || self.virtual_columns(table).is_some()

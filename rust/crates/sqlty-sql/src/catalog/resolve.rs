@@ -471,12 +471,7 @@ impl<'a> Resolver<'a> {
                         })
                         .cloned()
                         .collect(),
-                    checks: table
-                        .checks
-                        .iter()
-                        .filter(|check| names_only(check, &table.columns, self.dialect))
-                        .cloned()
-                        .collect(),
+                    checks: table.checks.clone(),
                     row_triggers: table.row_triggers.iter().fold(
                         RowEvents::default(),
                         |all, (_, events)| RowEvents {
@@ -531,23 +526,6 @@ fn reads_generated(expr: &Expr, columns: &[RawColumn]) -> bool {
         _ => ControlFlow::Continue(()),
     })
     .is_break()
-}
-
-/// Whether `check` reads only bare names of `columns`: a renamed or dropped column, or a
-/// qualified name, leaves the condition unknown.
-fn names_only(check: &Expr, columns: &[RawColumn], dialect: SqlDialect) -> bool {
-    visit_expressions(check, |expr| match expr {
-        Expr::Identifier(ident)
-            if columns
-                .iter()
-                .any(|c| c.name == super::names::fold(ident, dialect)) =>
-        {
-            ControlFlow::Continue(())
-        }
-        Expr::Identifier(_) | Expr::CompoundIdentifier(_) => ControlFlow::Break(()),
-        _ => ControlFlow::Continue(()),
-    })
-    .is_continue()
 }
 
 /// The values of a `Literal` Python type, read once when the catalog is built so the
