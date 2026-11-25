@@ -3,47 +3,7 @@ name: Docs
 on:
   push:
     branches: [main]
-    paths:
-      - "docs/**"
-      - "examples/**"
-      - "npm/wasm/**"
-      - "scripts/generate_playground_examples.py"
-      - "scripts/vendor_assets.py"
-      - "scripts/offline.py"
-      - "scripts/playground_links.py"
-      - "scripts/structured_data.py"
-      - "tests/_mdtest/parser.py"
-      - "scripts/check_playground.py"
-      - "overrides/**"
-      - "zensical.toml"
-      - ".github/workflows/docs.yml"
-      - ".github/actions/setup/**"
-      - "Makefile"
-      - "rust/**"
-      - "rust-toolchain.toml"
-      - "src/sqlty/lexer.py"
-      - "pyproject.toml"
   pull_request:
-    paths:
-      - "docs/**"
-      - "examples/**"
-      - "npm/wasm/**"
-      - "scripts/generate_playground_examples.py"
-      - "scripts/vendor_assets.py"
-      - "scripts/offline.py"
-      - "scripts/playground_links.py"
-      - "scripts/structured_data.py"
-      - "tests/_mdtest/parser.py"
-      - "scripts/check_playground.py"
-      - "overrides/**"
-      - "zensical.toml"
-      - ".github/workflows/docs.yml"
-      - ".github/actions/setup/**"
-      - "Makefile"
-      - "rust/**"
-      - "rust-toolchain.toml"
-      - "src/sqlty/lexer.py"
-      - "pyproject.toml"
   workflow_dispatch:
 
 permissions:
@@ -54,8 +14,27 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  # Whether the change reaches the site (scripts/ci_changes.py); any other event runs it.
+  affected:
+    name: Affected packages
+    runs-on: ubuntu-latest
+    outputs:
+      site: ${{ steps.changes.outputs.site }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - id: changes
+        env:
+          BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || '' }}
+        run: python3 scripts/ci_changes.py $BASE
+
   build:
     name: Build
+    needs: affected
+    if: needs.affected.outputs.site == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -138,33 +117,10 @@ jobs:
           uvx --python 3.13 --from playwright==1.64.1 playwright install --with-deps chromium-headless-shell
           uvx --python 3.13 --with playwright==1.64.1 python scripts/check_playground.py "${PAGE_URL}playground/"
 
-  changes:
-    name: Docs changes
-    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: ubuntu-latest
-    permissions:
-      pull-requests: read
-    outputs:
-      docs: ${{ steps.files.outputs.docs }}
-    steps:
-      - name: Look for changes to the docs or how they are previewed
-        id: files
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
-          NUMBER: ${{ github.event.pull_request.number }}
-        run: |
-          if gh api --paginate "repos/$REPO/pulls/$NUMBER/files" --jq '.[].filename' \
-            | grep -qE '^(docs/|overrides/|zensical\.toml$|wrangler\.jsonc$|\.github/workflows/docs(-preview-cleanup)?\.yml$)'; then
-            echo "docs=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "docs=false" >> "$GITHUB_OUTPUT"
-          fi
-
   preview:
     name: Preview
-    needs: [build, changes]
-    if: needs.changes.outputs.docs == 'true'
+    needs: build
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     permissions:
       contents: read

@@ -127,6 +127,9 @@ package) are packages of their own, each owning the files it reads: a change to
 `tests/test_cli.py` runs none of them. So is `docs`, the Markdown of the guides: a
 change to it alone runs the tests that read them and the Markdown tests of `docs/` and
 `README.md`, not the Python matrix.
+The Docs, VS Code extension and Compatibility workflows have no `paths:` filter: their
+first job runs the same script and gates the rest on its `site`, `vscode` or `compat`
+output, so one list says what each reads.
 The required check is `CI`, which passes when every job the change needed passed.
 
 A package's coverage counts its own tests only: a crate's Rust tests, or for the Python
