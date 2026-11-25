@@ -734,19 +734,18 @@ fn written_rows<'q>(body: &'q SetExpr, into: &mut Vec<Vec<&'q Expr>>) {
         }
         SetExpr::Query(query) => written_rows(&query.body, into),
         body => {
-            if let SetExpr::Select(select) = body {
-                let items: Option<Vec<&Expr>> = select
-                    .projection
-                    .iter()
-                    .map(|item| match item {
-                        SelectItem::UnnamedExpr(expr) | SelectItem::ExprWithAlias { expr, .. } => {
-                            Some(expr)
-                        }
-                        _ => None,
-                    })
-                    .collect();
-                into.extend(items);
-            }
+            let items: Option<Vec<&Expr>> = body
+                .as_select()
+                .into_iter()
+                .flat_map(|select| &select.projection)
+                .map(|item| match item {
+                    SelectItem::UnnamedExpr(expr) | SelectItem::ExprWithAlias { expr, .. } => {
+                        Some(expr)
+                    }
+                    _ => None,
+                })
+                .collect();
+            into.extend(items);
         }
     }
 }
