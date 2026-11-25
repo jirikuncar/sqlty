@@ -261,6 +261,18 @@ impl Model {
                         "takes a lock that blocks writes without `SET lock_timeout` first: while it waits for the lock, the queries it blocks wait behind it".to_string(),
                     );
                 }
+                if let Some((table, constraint)) = parsed
+                    .as_ref()
+                    .and_then(validated)
+                    .filter(|(table, _)| session.locking.contains(table))
+                {
+                    report(
+                        Rule::ConstraintScan,
+                        format!(
+                            "validating `{constraint}` in the transaction that locked `{table}` holds that lock through the scan: `COMMIT` before `VALIDATE CONSTRAINT`"
+                        ),
+                    );
+                }
                 if session.transaction {
                     let held = session.locked.len();
                     let locked = match &parsed {
@@ -2007,6 +2019,19 @@ fn rewrite_command_message(command: &str) -> String {
     )
 }
 
+/// The table and constraint of `ALTER TABLE ... VALIDATE CONSTRAINT`.
+fn validated(stmt: &Statement) -> Option<(String, String)> {
+    let Statement::AlterTable(alter) = stmt else {
+        return None;
+    };
+    alter.operations.iter().find_map(|op| match op {
+        AlterTableOperation::ValidateConstraint { name: validated } => {
+            Some((key(&alter.name), name(validated)))
+        }
+        _ => None,
+    })
+}
+
 /// Whether `op` takes a lock weaker than `SHARE`, which lets writes go on.
 fn keeps_writes(op: &AlterTableOperation) -> bool {
     match op {
@@ -3643,6 +3668,16 @@ mod tests {
         ] {
             assert_eq!(rules(&baseline, &safe), []);
         }
+    }
+
+    #[test]
+    fn validating_a_foreign_key_in_the_transaction_that_added_it_scans_under_its_lock() {
+        let together = "SET lock_timeout = '1s'; BEGIN;
+            ALTER TABLE users ADD CONSTRAINT fk FOREIGN KEY (team_id) REFERENCES teams (id) NOT VALID;
+            ALTER TABLE users VALIDATE CONSTRAINT fk; COMMIT;";
+        assert_eq!(rules(USERS, together), [Rule::ConstraintScan]);
+        let apart = together.replace("VALID;\n", "VALID; COMMIT; BEGIN;\n");
+        assert_eq!(rules(USERS, &apart), []);
     }
 
     #[test]
