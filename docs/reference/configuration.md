@@ -115,6 +115,7 @@ A directory with more than one file reads the first of `sqlty.toml`,
 | [`coerce-row-types`](#coerce-row-types) | list of strings | `[]` | `check` | `TypedDict`, `NamedTuple` and dataclass rows, as `module.Name`, the code validates with Pydantic |
 | [`functions`](#functions) | array of tables | `[]` | `check` | Helper functions whose string argument is a query |
 | [`types`](#types) | table of SQL type or `table.column` = Python type | `{}` | `rewrite`, `check` | Python types a converter above the driver gives a SQL type or a column |
+| [`deprecated-columns`](#deprecated-columns) | table of `table.column` = `{ use, remove-after }` | `{}` | `check` | Columns scheduled for removal: `deprecated-column` reports every read |
 | [`format-command`](#format-command) | list of strings | none | `rewrite`, `check --fix` | Formatter run on each file `rewrite` or `check --fix` changes, with the path appended |
 | [`extend`](#extend) | string | none | `rewrite`, `strip`, `check`, magic codec | Another configuration file this one is applied on top of, relative to this file |
 | [`databases`](#databases) | table of tables | `{}` | `rewrite`, `check` | Named databases, each with its own `dialect`, `schema` and the files it applies to |
@@ -401,6 +402,25 @@ with `DATE = "datetime.date"`.
 `app.models.Status`), as they import `datetime`. `strip` leaves that import, since
 it reads no configuration.
 
+## `deprecated-columns`
+
+Columns scheduled for removal, keyed by `table.column`. The
+[`deprecated-column`](rules/deprecated-column.md) rule reports every query that
+reads one; writing it stays allowed until the migration that drops it.
+
+```toml
+[tool.sqlty.deprecated-columns]
+"users.legacy_email" = { use = "email", remove-after = "2027-02-20" }
+"orders.note" = {}
+```
+
+| Key | Value |
+|-----|-------|
+| `use` | The column to read instead, shown in the message |
+| `remove-after` | The date the column goes, shown in the message |
+
+Both are optional. A schema in the key is dropped, as in [`types`](#types).
+
 ## `format-command`
 
 A formatter `rewrite` and `check --fix` run on each file they change, with the
@@ -452,7 +472,7 @@ select-star = "error"
 
 The package's settings are applied on top of the extended file's:
 
-- `rules` and `types` merge key by key, so the package adds or changes single entries.
+- `rules`, `types` and `deprecated-columns` merge key by key, so the package adds or changes single entries.
 - Any other key the package sets replaces the extended one, `functions` and `overrides` included.
 - `schema` and `queries` of the extended file keep pointing at the files it names.
 - `exclude`, `extend-exclude` and `overrides` globs match paths relative to the package's file.
@@ -492,9 +512,9 @@ A file is checked against the first database that names it:
    [`overrides`](#overrides) match.
 3. Any other file uses the default database.
 
-A database takes `dialect`, `schema`, `queries`, `query-format`, `rules`, `types` and
-`functions`. A key it leaves unset is the top-level one; `rules` and `types` merge key by
-key, so a database changes single entries. Every other setting, such as `import-style`,
+A database takes `dialect`, `schema`, `queries`, `query-format`, `rules`, `types`,
+`deprecated-columns` and `functions`. A key it leaves unset is the top-level one; `rules`,
+`types` and `deprecated-columns` merge key by key, so a database changes single entries. Every other setting, such as `import-style`,
 applies to all databases. Its paths and globs are relative to the configuration file.
 
 `--dialect` and `--schema` apply to the default database and to a database that names

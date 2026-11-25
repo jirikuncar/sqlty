@@ -381,7 +381,9 @@ fn merged(table: &Table, database: &Table) -> Table {
     merged.remove("databases");
     for (key, value) in database {
         match (merged.get_mut(key), value) {
-            (Some(Value::Table(own)), Value::Table(value)) if key == "rules" || key == "types" => {
+            (Some(Value::Table(own)), Value::Table(value))
+                if matches!(key.as_str(), "rules" | "types" | "deprecated-columns") =>
+            {
                 match key == "rules" {
                     true => config::merge_rules(own, value.clone()),
                     false => own.extend(value.clone()),
@@ -421,6 +423,7 @@ fn own_types(table: &Table, dialect: &str) -> Vec<(String, String)> {
         types.retain(|(known, _)| known != key);
         types.push((key.clone(), value.to_string()));
     }
+    types.extend(config::deprecated_types(table));
     types
 }
 

@@ -7,6 +7,7 @@ export const MAX_LINK = 8000;
 
 /** The keys the playground's config takes; `dialect` has its own control. */
 const KEYS = [
+  "deprecated-columns",
   "driver",
   "import-style",
   "param-types",

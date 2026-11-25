@@ -102,6 +102,17 @@ pub fn types(section: &Section, defaults: Vec<(String, String)>) -> Vec<(String,
             None => types.push((key.clone(), value)),
         }
     }
+    let deprecated = section
+        .setting("deprecated-columns")
+        .and_then(toml::Value::as_table);
+    for (column, options) in deprecated.into_iter().flatten() {
+        let part = |name: &str| options.get(name).and_then(toml::Value::as_str);
+        types.push(analyzer::deprecated_type(
+            column,
+            part("use"),
+            part("remove-after"),
+        ));
+    }
     types
 }
 

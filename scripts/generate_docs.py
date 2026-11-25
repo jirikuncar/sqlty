@@ -151,6 +151,12 @@ KEY_DOCS: dict[str, KeyDoc] = {
         "`rewrite`, `check`",
         "Python types a converter above the driver gives a SQL type or a column",
     ),
+    "deprecated-columns": KeyDoc(
+        "table of `table.column` = `{ use, remove-after }`",
+        "`{}`",
+        "`check`",
+        "Columns scheduled for removal: `deprecated-column` reports every read",
+    ),
     "format-command": KeyDoc(
         "list of strings",
         "none",

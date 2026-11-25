@@ -47,6 +47,7 @@ impl Analyzer<'_> {
                     | Rule::UnknownFunction
                     | Rule::ForeignKeyMismatch
                     | Rule::EntityMismatch
+                    | Rule::DeprecatedColumn
             )
         });
     }
