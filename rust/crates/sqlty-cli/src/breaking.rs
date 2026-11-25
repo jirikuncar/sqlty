@@ -1500,6 +1500,54 @@ mod tests {
     }
 
     #[test]
+    fn a_backfill_is_judged_against_the_queries_of_the_head() {
+        let root = project(
+            "writers",
+            &[
+                (
+                    "pyproject.toml",
+                    "[tool.sqlty]\nschema = \"migrations/\"\nqueries = \"sql/\"\n",
+                ),
+                ("migrations/0001.sql", USERS),
+                (
+                    "migrations/0002.sql",
+                    "UPDATE users SET bio = '' WHERE id BETWEEN 1 AND 9;\n",
+                ),
+                (
+                    "app/q.py",
+                    "q = \"--sql\\nINSERT INTO users (id, bio) VALUES (1, '')\"\n",
+                ),
+                (
+                    "sql/users.sql",
+                    "-- name: add!\r\nINSERT INTO users (id) VALUES (:id);\r\n",
+                ),
+                ("other/pyproject.toml", "[tool.sqlty]\n"),
+                (
+                    "other/q.py",
+                    "q = \"--sql\\nINSERT INTO users (id) VALUES (1)\"\n",
+                ),
+            ],
+        );
+        let sets = migration_sets(&mut open(&root)).expect("reads");
+        let labels: Vec<&str> = sets[0]
+            .writers
+            .iter()
+            .map(|(label, _)| label.as_str())
+            .collect();
+        assert_eq!(labels, ["app/q.py:1", "sql/users.sql:2"]);
+        let found = migrations("b", &sets, &mut schema_files(USERS)).expect("judges");
+        let messages: Vec<&str> = found
+            .iter()
+            .map(|f| f.diagnostic.message.as_str())
+            .collect();
+        let [message] = messages.as_slice() else {
+            panic!("{messages:?}");
+        };
+        assert!(message.contains("`sql/users.sql:2`"), "{message}");
+        std::fs::remove_dir_all(&root).expect("removes");
+    }
+
+    #[test]
     fn names_each_query_format() {
         use sqlty_python::queries::Format;
         let names = [
