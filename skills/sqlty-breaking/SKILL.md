@@ -71,6 +71,7 @@ migrations/0042_index.sql:2: [missing-concurrently] `CREATE INDEX` blocks writes
 | `unbatched-backfill` | update in batches: `WHERE id IN (SELECT id ... LIMIT 5000)` |
 | `drop-primary-key` | add the new key in the same transaction, or `REPLICA IDENTITY USING INDEX` first |
 | `rerun-backfill` | `ON CONFLICT (key) DO NOTHING`, or skip copied rows with `NOT EXISTS` |
+| `dropped-delete-action` | add a key with the same `ON DELETE` action first, or delete the rows in the application |
 
 Every `schema` of the configuration is judged, each `[tool.sqlty.databases]` entry
 included, with the severities of `rules` and of the `[[tool.sqlty.overrides]]` that
@@ -179,7 +180,7 @@ Before you drop anything:
   stay. Drop it once no deployed version reads it, self-hosted releases
   included: check `--against` a directory with one snapshot per release.
 - **Replace a foreign key's `ON DELETE` action** before you drop the column or
-  constraint that carries it ([#1258](https://github.com/jirikuncar/sqlty/issues/1258)).
+  constraint that carries it; `dropped-delete-action` reports the drop.
 - **Keep a SQL function that the previous release calls**, and drop it in the
   next one. `sqlty breaking` reports each call to a dropped function as
   `unknown-function`, a warning by default.

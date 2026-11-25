@@ -84,6 +84,7 @@ transaction:
 | [`disable-trigger-all`](reference/rules/disable-trigger-all.md) | `DISABLE TRIGGER ALL`, which turns off foreign key checks |
 | [`drop-primary-key`](reference/rules/drop-primary-key.md) | a dropped primary key or `REPLICA IDENTITY NOTHING`, leaving a table without a replica identity |
 | [`rerun-backfill`](reference/rules/rerun-backfill.md) | an `INSERT ... SELECT` without `ON CONFLICT`, which fails or duplicates rows when run again |
+| [`dropped-delete-action`](reference/rules/dropped-delete-action.md) | a dropped foreign key with `ON DELETE` or `ON UPDATE` `CASCADE`, `SET NULL` or `SET DEFAULT` |
 
 A dropped or renamed column is not a rule of its own: `sqlty breaking` reports it
 where a query of the other revision still reads it. See
