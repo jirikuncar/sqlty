@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -64,6 +65,8 @@ def hit(*changed: str) -> set[str]:
     (["rust/crates/sqlty-cli/src/lib.rs"], {"sqlty-cli", "sqlty-ext", "python", "docs", *ENGINE, "vscode", "site"}),
     (["rust/crates/sqlty-sql/src/lib.rs"], EVERYTHING - {"sqlty-rules", "compat"}),
     (["rust/Cargo.lock"], EVERYTHING),
+    (["rust/Cargo.toml"], EVERYTHING),
+    (["uv.lock"], {"python", "docs", *ENGINE, "site"}),
     (["somewhere/new.txt"], EVERYTHING),
     (["editors/vscode/syntaxes/sqlty.tmLanguage.json"], EVERYTHING - {"sqlty-rules", "compat"}),
     (["docs/reference/rules/narrow-type.md"], EVERYTHING - {"compat"}),
@@ -91,3 +94,88 @@ def test_the_extension_crate_runs_with_the_python_package(
     assert [crate["dir"] for crate in crates] == [name for name in CRATES if name != "sqlty-ext"]
     assert {"dir": "sqlty-sql", "package": "sqlty-sql"} in crates
     assert lines == dict.fromkeys(ci_changes.PACKAGES, "true")
+
+
+LOCK = """\
+[[package]]
+name = "sqlty-sql"
+version = "0.8.0"
+dependencies = ["sqlparser"]
+
+[[package]]
+name = "sqlty-lsp"
+version = "0.8.0"
+dependencies = ["sqlty-sql", "lsp-types 0.97.0"]
+
+[[package]]
+name = "sqlparser"
+version = "0.64.0"
+
+[[package]]
+name = "lsp-types"
+version = "0.97.0"
+dependencies = ["fluent-uri"]
+
+[[package]]
+name = "fluent-uri"
+version = "0.1.4"
+"""
+
+
+def test_a_lock_change_runs_the_crates_that_lock_what_changed() -> None:
+    bumped = LOCK.replace('"0.1.4"', '"0.1.5"')
+    assert ci_changes.locked_crates(LOCK, bumped) == {"sqlty-lsp"}
+    removed = LOCK.replace('[[package]]\nname = "fluent-uri"\nversion = "0.1.4"\n', "")
+    assert ci_changes.locked_crates(LOCK, removed) == {"sqlty-lsp"}
+    assert ci_changes.locked_crates(LOCK, LOCK.replace('"0.64.0"', '"0.65.0"')) == {
+        "sqlty-sql",
+        "sqlty-lsp",
+    }
+    assert ci_changes.locked_crates(LOCK, LOCK) == set()
+    found = ci_changes.affected(["rust/Cargo.lock"], {"sqlty-lsp"})
+    assert {name for name, hit in found.items() if hit} == {
+        "sqlty-lsp",
+        "sqlty-cli",
+        "sqlty-ext",
+        "python",
+        "docs",
+        *ENGINE,
+        "vscode",
+        "site",
+        "playground",
+    }
+    assert not any(ci_changes.affected(["rust/Cargo.lock"], set()).values())
+
+
+def test_a_lock_change_is_read_against_the_base(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def git(*args: str) -> None:
+        subprocess.run(["git", *args], cwd=tmp_path, check=True, capture_output=True)
+
+    lock = tmp_path / "rust" / "Cargo.lock"
+    lock.parent.mkdir()
+    lock.write_text(LOCK)
+    git("init", "-q")
+    git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "base", "--allow-empty")
+    git("add", "-A")
+    git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "lock")
+    lock.write_text(LOCK.replace('"0.1.4"', '"0.1.5"'))
+    git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qam", "bump")
+    monkeypatch.setattr(ci_changes, "ROOT", tmp_path)
+    output = tmp_path / "output"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+
+    def ran(base: str) -> dict[str, str]:
+        output.write_text("")
+        ci_changes.main([base])
+        return dict(line.split("=", 1) for line in output.read_text().splitlines())
+
+    lines = ran("HEAD~1")
+    assert [crate["dir"] for crate in json.loads(lines["crates"])] == ["sqlty-cli", "sqlty-lsp"]
+    assert (lines["vscode"], lines["compat"]) == ("true", "false")
+    # Without the lock at the base, every crate runs.
+    lines = ran("HEAD~2")
+    assert [crate["dir"] for crate in json.loads(lines["crates"])] == [
+        name for name in CRATES if name != "sqlty-ext"
+    ]
