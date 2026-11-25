@@ -204,8 +204,10 @@ const CASES: &[Case] = &[
 /// `(dialect, query, columns as "name: python (SQL)")`, against `SCHEMA`.
 #[rustfmt::skip]
 const COLUMNS: &[Case] = &[
-    ("postgres", "SELECT t.a, (SELECT a FROM tagged WHERE kind = 'a' LIMIT 1) AS b FROM tagged t, generate_series(1, 2) WHERE t.kind = 'a'", &["a: str (TEXT)", "b: str | None (TEXT)"]),
+    ("postgres", "SELECT t.a, (SELECT a FROM tagged WHERE kind = 'a' LIMIT 1) AS b FROM tagged t, generate_series(1, 2) AS g WHERE t.kind = 'a'", &["a: str (TEXT)", "b: str | None (TEXT)"]),
     ("postgres", "SELECT a FROM tagged_view WHERE kind = 'a'", &["a: str | None (TEXT)"]),
+    ("postgres", "SELECT t.a FROM tagged t, (SELECT 1) WHERE t.kind = 'a'", &["a: str (TEXT)"]),
+    ("postgres", "SELECT t.a FROM tagged t, nowhere n WHERE t.kind = 'a' AND n.x = 1", &["a: str (TEXT)"]),
     ("clickhouse", "SELECT CAST(1 AS Nullable(Int32)) AS a, CAST('x' AS LowCardinality(String)) AS b, CAST(tuple(1, 'a') AS Tuple(a Int32, b String)) AS t, CAST(map('a', 1) AS Map(String, Int32)) AS m, CAST([1] AS Array(Int32)) AS arr", &["a: int (INT)", "b: str (TEXT)", "t: tuple[int, str] (ROW(a INT, b TEXT))", "m: dict[str, int] (MAP(TEXT, INT))", "arr: list[int] (ARRAY<INT>)"]),
     ("mysql", "SELECT CAST(1 AS UNSIGNED) AS u, CAST('x' AS CHAR) COLLATE utf8mb4_bin AS c", &["u: int (UBIGINT)", "c: str (CHAR)"]),
     ("duckdb", "SELECT [1, 2]::INTEGER[2] AS fixed, []::INTEGER[] AS l, {'a': 1}::STRUCT(a INTEGER) AS s, MAP {'a': 1}::MAP(VARCHAR, INTEGER) AS m, 1::UNION(n INTEGER, s VARCHAR) AS u", &["fixed: tuple[int, ...] (ARRAY<INT>[2])", "l: list[int] (ARRAY<INT>)", "s: dict[str, int] (STRUCT(a INT))", "m: dict[str, int] (MAP(VARCHAR, INT))", "u: int | str (UNION(n INT, s VARCHAR))"]),
