@@ -142,7 +142,8 @@ receivers, `execute_fetchall` and `execute_insert` on aiosqlite ones, and
 row) on asyncpg ones. The receiver must be evident in the file: bound to
 `psycopg.connect(...)`, `sqlite3.connect(...)`, `aiosqlite.connect(...)`,
 `asyncpg.connect(...)`, `<connection>.cursor()` (also as `with ... as name` and
-awaited), or annotated with a driver class. The `execute` and `scalar` helpers
+awaited), or annotated with a driver class, directly or through an alias or a
+`NewType` the file binds once. The `execute` and `scalar` helpers
 of `sqlty.drivers.psycopg` are checked the same way, with no receiver to see.
 The query is a literal, `SQL[T]("...")` of one, or a name assigned once to one.
 A call with no parameters is a `param-count-mismatch` when the query has
