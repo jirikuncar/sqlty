@@ -9,7 +9,7 @@ on:
         description: Examples per property
         default: "2000"
       seed:
-        description: Seed (PROPTEST_RNG_SEED, empty for a random one)
+        description: Seed (PROPTEST_RNG_SEED and --hypothesis-seed, empty for a random one)
         default: ""
 
 permissions:
@@ -83,4 +83,8 @@ jobs:
         run: uv run maturin develop --release --manifest-path rust/crates/sqlty-ext/Cargo.toml
 
       - name: Fuzz
-        run: uv run pytest --hypothesis-profile=fuzz --no-cov -m "not timing and not pg"
+        env:
+          SEED: ${{ inputs.seed }}
+        run: >-
+          uv run pytest --hypothesis-profile=fuzz --no-cov -m "hypothesis and not pg"
+          ${SEED:+--hypothesis-seed="$SEED"}

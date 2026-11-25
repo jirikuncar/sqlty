@@ -1,7 +1,8 @@
 """``ast.unparse`` written in Rust (``sqlty_python::unparse``) against the one of Python.
 
 Expressions of the package, fixed spellings and generated ones must unparse alike. Raise
-the number of generated examples with ``SQLTY_FUZZ_EXAMPLES``.
+the number of generated examples with ``SQLTY_FUZZ_EXAMPLES``
+under ``--hypothesis-profile=fuzz``.
 """
 
 from __future__ import annotations
