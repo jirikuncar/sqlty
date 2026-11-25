@@ -145,6 +145,14 @@ What makes a column nullable or not:
   an assignment, parameter or type parameter (an import, `for`, `def`), or a star import
   that binds it, is not seen.
 
+!!! note "A checked module is one in the same run"
+    A type imported from another module is read only when that module is checked
+    too. With `OwnerId = NewType("OwnerId", int)` in `ids.py`, `sqlty check .` reads an
+    argument `x: OwnerId` of `app.py` as an `int`; `sqlty check app.py` alone does not
+    read `ids.py`, so `x` is of unknown type there and gets no `param-type-mismatch`.
+    Check the whole project, `sqlty check .`, to get the same diagnostics for each
+    file.
+
 [`nullable-mismatch`](../reference/rules/nullable-mismatch.md) reports a row type field
 that is not optional for a nullable column;
 [`redundant-optional`](../reference/rules/redundant-optional.md) (off by default) reports
