@@ -27,7 +27,11 @@ jobs:
     outputs:
       crates: ${{ steps.changes.outputs.crates }}
       python: ${{ steps.changes.outputs.python }}
-      engine: ${{ steps.changes.outputs.engine }}
+      free-threaded: ${{ steps.changes.outputs.free-threaded }}
+      pg-fidelity: ${{ steps.changes.outputs.pg-fidelity }}
+      mysql-fidelity: ${{ steps.changes.outputs.mysql-fidelity }}
+      bench: ${{ steps.changes.outputs.bench }}
+      package: ${{ steps.changes.outputs.package }}
       vscode: ${{ steps.changes.outputs.vscode }}
       playground: ${{ steps.changes.outputs.playground }}
     steps:
@@ -193,7 +197,7 @@ jobs:
   free-threaded:
     name: Threads on free-threaded Python ${{ matrix.python }}
     needs: changes
-    if: needs.changes.outputs.engine == 'true'
+    if: needs.changes.outputs.free-threaded == 'true'
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -261,7 +265,7 @@ jobs:
   pg-fidelity:
     name: PostgreSQL column names, types and nullability
     needs: changes
-    if: needs.changes.outputs.engine == 'true'
+    if: needs.changes.outputs.pg-fidelity == 'true'
     runs-on: ubuntu-latest
 
     services:
@@ -302,7 +306,7 @@ jobs:
   mysql-fidelity:
     name: MySQL column names and types
     needs: changes
-    if: needs.changes.outputs.engine == 'true'
+    if: needs.changes.outputs.mysql-fidelity == 'true'
     runs-on: ubuntu-latest
 
     services:
@@ -344,7 +348,7 @@ jobs:
   bench:
     name: Performance budget
     needs: changes
-    if: needs.changes.outputs.engine == 'true'
+    if: needs.changes.outputs.bench == 'true'
     runs-on: ubuntu-latest
 
     steps:
@@ -378,7 +382,7 @@ jobs:
   codspeed:
     name: CodSpeed
     needs: changes
-    if: needs.changes.outputs.engine == 'true'
+    if: needs.changes.outputs.bench == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -417,7 +421,7 @@ jobs:
   package:
     name: Package (wheel + sdist, Python ${{ matrix.python-version }})
     needs: changes
-    if: needs.changes.outputs.engine == 'true'
+    if: needs.changes.outputs.package == 'true'
     runs-on: ubuntu-latest
     strategy:
       matrix:

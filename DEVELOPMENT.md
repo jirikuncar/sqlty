@@ -121,7 +121,10 @@ Each Rust crate under `rust/crates/` is a package, and so is the Python package
 [`scripts/ci_changes.py`](scripts/ci_changes.py) picks the packages the changed files
 belong to, with every package that depends on one of them, and the Tests workflow runs
 only those; a push to `main` runs all of them. A change to a file no package owns runs
-everything, unless the script ignores it, as it does `plans/`.
+everything, unless the script ignores it, as it does `plans/`. The jobs that run the
+built extension (free-threaded Python, the database tests, the benchmarks and the
+package) are packages of their own, each owning the files it reads: a change to
+`tests/test_cli.py` runs none of them.
 The required check is `CI`, which passes when every job the change needed passed.
 
 A package's coverage counts its own tests only: a crate's Rust tests, or for the Python
