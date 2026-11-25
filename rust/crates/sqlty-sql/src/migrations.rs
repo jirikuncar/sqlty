@@ -25,8 +25,9 @@ use sqlparser::ast::{
     AlterTableOperation, AlterType, AlterTypeOperation, BinaryOperator, CascadeOption,
     CharacterLength, CheckConstraint, ColumnDef, ColumnOption, CopySource, CreateTable, DataType,
     Delete, DetachPartitionMode, ExactNumberInfo, Expr, ForValues, ForeignKeyConstraint, FromTable,
-    Ident, InTarget, Insert, LockTableMode, Merge, ObjectName, ObjectType, RenameTableNameKind,
-    ReplicaIdentity, SetExpr, Statement, TableConstraint, TableFactor, TableObject,
+    Ident, InTarget, Insert, LockTableMode, Merge, ObjectName, ObjectType, ReferentialAction,
+    RenameTableNameKind, ReplicaIdentity, SetExpr, Statement, TableConstraint, TableFactor,
+    TableObject,
 };
 
 use crate::analyzer::{parse_ddl, SqlDialect};
@@ -140,6 +141,9 @@ struct ForeignKey {
     name: String,
     columns: Vec<String>,
     referenced: String,
+    /// What deleting or updating a referenced row does besides failing, as
+    /// `ON DELETE CASCADE`; empty for `NO ACTION` and `RESTRICT`.
+    actions: String,
 }
 
 struct PrimaryKey {
@@ -191,6 +195,7 @@ impl Model {
             return found;
         }
         let mut session = Session::default();
+        let mut dropped_actions = Vec::new();
         let spanned = ddl::statements(sql, false);
         for (span, stmt) in spanned.filter_map(|s| Some((s.range_in(sql)?, s))) {
             let tokens: Vec<String> = stmt.tokens().iter().map(|t| t.to_lowercase()).collect();
@@ -402,9 +407,42 @@ impl Model {
                         }
                     }
                 }
+                let actions = matches!(
+                    parsed,
+                    Statement::AlterTable(_)
+                        | Statement::Drop {
+                            object_type: ObjectType::Table,
+                            ..
+                        }
+                )
+                .then(|| self.delete_actions());
                 self.apply(parsed, &likes.unwrap_or_default());
+                if let Some(before) = actions.filter(|_| new) {
+                    let after = self.delete_actions();
+                    let gone: Vec<String> = match parsed {
+                        Statement::Drop { names, .. } => names.iter().map(key).collect(),
+                        _ => Vec::new(),
+                    };
+                    let lost = before
+                        .into_iter()
+                        .filter(|fk| !after.contains(fk) && !gone.contains(&fk.0));
+                    dropped_actions.extend(lost.map(|fk| (fk, span.clone())));
+                }
             }
         }
+        let kept = self.delete_actions();
+        found.extend(
+            dropped_actions
+                .into_iter()
+                .filter(|(fk, _)| !kept.contains(fk))
+                .map(|((owner, columns, referenced, actions), span)| Finding {
+                    rule: Rule::DroppedDeleteAction,
+                    message: format!(
+                        "drops the foreign key of `{owner}` ({columns}) to `{referenced}` with `{actions}`: changing a row of `{referenced}` no longer changes its rows of `{owner}`; add a key with the same action first, or do it in the application"
+                    ),
+                    span,
+                }),
+        );
         found.extend(session.dropped_keys.into_iter().map(|(_, finding)| finding));
         found.sort_by_key(|finding| finding.span.start);
         found
@@ -574,6 +612,25 @@ impl Model {
             self.referenced.insert(fk.referenced.clone());
             self.foreign_keys.entry(owner.clone()).or_default().push(fk);
         }
+    }
+
+    /// The foreign keys that act on a delete or update of the rows they reference: owner,
+    /// columns, referenced table and actions, in that order.
+    fn delete_actions(&self) -> FxHashSet<(String, String, String, String)> {
+        self.foreign_keys
+            .iter()
+            .flat_map(|(owner, fks)| fks.iter().map(move |fk| (owner, fk)))
+            .filter(|(_, fk)| !fk.actions.is_empty())
+            .map(|(owner, fk)| {
+                let columns = fk.columns.join(", ");
+                (
+                    owner.clone(),
+                    columns,
+                    fk.referenced.clone(),
+                    fk.actions.clone(),
+                )
+            })
+            .collect()
     }
 
     /// Keeps the foreign keys of `table` that `keep` accepts, and the tables they reference
@@ -2157,6 +2214,14 @@ fn added_foreign_keys(stmt: &Statement) -> Vec<ForeignKey> {
             name: name.map_or_else(|| format!("{short}_{}_fkey", columns.join("_")), self::name),
             columns,
             referenced: key(&fk.foreign_table),
+            actions: [("DELETE", fk.on_delete), ("UPDATE", fk.on_update)]
+                .into_iter()
+                .filter_map(|(event, action)| match action? {
+                    ReferentialAction::NoAction | ReferentialAction::Restrict => None,
+                    action => Some(format!("ON {event} {action}")),
+                })
+                .collect::<Vec<_>>()
+                .join(" "),
         };
     let (columns, constraints): (Vec<&ColumnDef>, Vec<&TableConstraint>) = match stmt {
         Statement::CreateTable(create) => (
@@ -3678,6 +3743,32 @@ mod tests {
         assert_eq!(rules(USERS, together), [Rule::ConstraintScan]);
         let apart = together.replace("VALID;\n", "VALID; COMMIT; BEGIN;\n");
         assert_eq!(rules(USERS, &apart), []);
+    }
+
+    #[test]
+    fn dropping_a_foreign_key_with_an_action_loses_it() {
+        let baseline = format!(
+            "{USERS}\nCREATE TABLE orders (id BIGINT PRIMARY KEY, \
+             user_id BIGINT REFERENCES users (id) ON DELETE CASCADE, \
+             team_id BIGINT REFERENCES teams (id) ON DELETE RESTRICT ON UPDATE NO ACTION);"
+        );
+        let found = check(&baseline, &["ALTER TABLE orders DROP COLUMN user_id;"]);
+        assert_eq!(
+            found[0].iter().map(|f| f.rule).collect::<Vec<_>>(),
+            [Rule::MissingLockTimeout, Rule::DroppedDeleteAction]
+        );
+        assert!(found[0][1].message.starts_with(
+            "drops the foreign key of `orders` (user_id) to `users` with `ON DELETE CASCADE`"
+        ));
+        for kept in [
+            "ALTER TABLE orders DROP COLUMN team_id;",
+            "DROP TABLE orders;",
+            "ALTER TABLE orders DROP COLUMN user_id; \
+             ALTER TABLE orders ADD COLUMN user_id BIGINT REFERENCES users (id) ON DELETE CASCADE;",
+        ] {
+            let rules = rules(&baseline, &format!("SET lock_timeout = '1s'; {kept}"));
+            assert!(!rules.contains(&Rule::DroppedDeleteAction), "{kept}");
+        }
     }
 
     #[test]
