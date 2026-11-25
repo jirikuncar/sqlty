@@ -65,3 +65,47 @@ e = fetch_all("SELECT id FROM orders WHERE priority = ANY(%s)", ([None],), int)
 f = fetch_all("SELECT id FROM orders WHERE priority = %(p)s", {1: 2}, int)
 # error:
 ```
+
+## A `Literal` parameter type outside the column's values
+
+`P` of `SQL[R, P]` that annotates a parameter `Literal[...]` with a value its column never
+holds is reported: the database rejects the write, or the comparison matches no row. A
+`Literal` that keeps one value of the column, and a `str`, are accepted.
+
+```python
+from typing import Literal, TypedDict
+from sqlty import SQL
+
+class Refund(TypedDict):
+    status: Literal["paid", "refunded"]
+
+# error: [params-type-mismatch] "tuple[Literal['refunded'], int] item 1 is Literal['refunded'] but query parameter 1 is never 'refunded'"
+a = SQL[tuple[int], tuple[Literal["refunded"], int]]("--sql\nSELECT id FROM orders WHERE status = %s AND priority = %s")
+# error: [params-type-mismatch] "tuple[str, Literal[3, 4] | None] item 2 is Literal[3, 4] | None but query parameter 2 is never 4"
+b = SQL[tuple[()], tuple[str, Literal[3, 4] | None]]("--sql\nUPDATE orders SET status = %s, priority = %s WHERE id = 1")
+# error: [params-type-mismatch] "Refund.status is Literal['paid', 'refunded'] but query parameter 'status' is never 'refunded'"
+c = SQL[tuple[int], Refund]("--sql\nSELECT id FROM orders WHERE status = %(status)s")
+d = SQL[tuple[int], tuple[Literal["paid", "pending"], Literal[1] | None, str]]("--sql\nSELECT id FROM orders WHERE status = %s AND priority = %s AND status = %s")
+```
+
+### MySQL is not judged
+
+```toml
+[tool.sqlty]
+dialect = "mysql"
+schema = "mysql.sql"
+```
+
+`mysql.sql`:
+
+```sql
+CREATE TABLE orders (id INT PRIMARY KEY, status ENUM('pending', 'paid') NOT NULL);
+```
+
+```python
+from typing import Literal
+from sqlty import SQL
+
+# error:
+a = SQL[tuple[int], tuple[Literal["PAID"]]]("-- sql\nSELECT id FROM orders WHERE status = %s")
+```

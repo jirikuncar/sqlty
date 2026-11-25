@@ -22,6 +22,10 @@ call passes:
 - A `TypedDict` needs a required key per named placeholder, and no other key.
 - An item or key whose type can't be the type of its parameter is reported. So
   is one that allows `None` for a parameter stored in a `NOT NULL` column.
+- A `Literal[...]` item or key with a value the column of its parameter never
+  holds (an enum or a `CHECK` list) is reported: the database rejects the
+  write, or the comparison matches no row. PostgreSQL and SQLite only, as MySQL
+  compares without case.
 
 A type alias (`X = T`, `X: TypeAlias = T` or `type X = T`, in the module or
 imported) is checked as the type `T` it names.

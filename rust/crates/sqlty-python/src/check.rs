@@ -30,10 +30,13 @@ use crate::rows::{
 use crate::rules::{Rule, RuleConfig, SQL_RULES};
 use crate::scan::Scan;
 use crate::scopes::{class_of, dotted, Key, Node, Param, Scope};
+use crate::types::compat::{column_literal_values, declared_literal_values, set_member};
 use crate::types::generic::is_word;
 use crate::types::info::{Dict, Kind, TypeInfo};
-use crate::types::resolve::slice_items;
+use crate::types::pydantic::Known;
+use crate::types::resolve::{slice_items, NoNames, Resolver};
 use crate::types::symbols::{bound_names, Source};
+use crate::types::ty::Lit;
 use crate::unparse::unparse;
 use crate::{drivers, module, templates};
 
@@ -861,7 +864,35 @@ impl<'a> Module<'a, '_> {
         let typed = dialect != "sqlite";
         let postgres = dialect == "postgres" || dialect == "postgresql";
         let mut found = Vec::new();
+        let resolver = Resolver {
+            aliases: &source.aliases,
+            imports: None,
+            known: Known::Imported,
+            version: source.version,
+        };
         for (label, annotation, param, key) in pairs {
+            // MySQL compares with case-insensitive collations by default.
+            let exact = postgres || dialect == "sqlite";
+            let column = param.literal.as_deref().filter(|_| exact);
+            let column = column.and_then(column_literal_values);
+            let declared = resolver.resolve(annotation, text, &NoNames);
+            if let (Some(column), Some(declared)) = (column, declared) {
+                let admitted = declared_literal_values(&declared, &column).unwrap_or_default();
+                let holds = |value: &Lit| column.iter().any(|v| set_member(v) == set_member(value));
+                let extra: Vec<String> = admitted
+                    .iter()
+                    .filter(|value| !holds(value))
+                    .map(Lit::repr)
+                    .collect();
+                if !extra.is_empty() {
+                    let spelled = unparse(annotation, text);
+                    found.push(format!(
+                        "{label} is {spelled} but query parameter {key} is never {}",
+                        extra.join(", ")
+                    ));
+                    continue;
+                }
+            }
             for member in union_members(annotation) {
                 let actual = annotation_type(member, &source.imports);
                 if actual.as_deref() != Some("None") && !(typed && !param.cast) {

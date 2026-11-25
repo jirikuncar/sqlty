@@ -352,6 +352,7 @@ const SCHEMAS: &[Case] = &[
 /// `(dialect, query, parameters as "index name: python (SQL) nullability")`, against `SCHEMA`.
 #[rustfmt::skip]
 const PARAMS: &[Case] = &[
+    ("postgres", "UPDATE states SET level = %s WHERE status = %s", &["1: int (INT) Nullable of typing.Literal[1]", "2: str (TEXT) Unknown of typing.Literal['open', 'shut']"]),
     ("postgres", "UPDATE orders o SET note = %s FROM customers c WHERE c.id = o.customer_id AND c.name = %s", &["1: str (TEXT) Nullable", "2: str (TEXT) Unknown"]),
     ("mysql", "UPDATE orders, customers SET orders.note = ? WHERE customers.name = ?", &["1: str (TEXT) Nullable", "2: str (TEXT) Unknown"]),
     ("postgres", "SELECT %s UNION SELECT id FROM orders WHERE id = %s", &["1: None (None) Unknown", "2: int (INT) Unknown"]),
@@ -470,8 +471,9 @@ fn params(dialect: &str, sql: &str) -> Vec<String> {
                 .untyped_sql_type
                 .map(|t| format!(" untyped {t}"))
                 .unwrap_or_default();
+            let literal = p.literal.map(|t| format!(" of {t}")).unwrap_or_default();
             format!(
-                "{}{name}: {python} ({sql}) {:?}{cast}{untyped}",
+                "{}{name}: {python} ({sql}) {:?}{cast}{untyped}{literal}",
                 p.index, p.nullability
             )
         })

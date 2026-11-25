@@ -62,6 +62,9 @@ pub struct Param {
     /// `$1 + INTERVAL '1 day'` has only this type: a driver that sends its type may pass
     /// any date or time.
     pub untyped_sql_type: Option<String>,
+    /// The `typing.Literal[...]` of the values the column it is compared with or stored in
+    /// holds (an enum, a `CHECK` list), which `python_type` widens to `str` or `int`.
+    pub literal: Option<String>,
 }
 
 /// What a parameter's uses say about it. The first use that types it wins, and so does the
@@ -69,6 +72,7 @@ pub struct Param {
 #[derive(Default)]
 struct Hint {
     typed: Typed,
+    literal: Option<Rc<str>>,
     nullability: Nullability,
     cast: bool,
     untyped: Option<&'static str>,
@@ -148,6 +152,10 @@ impl Hints {
         let hint = self.0.entry(index).or_default();
         if hint.typed.python.is_none() && typed.python.is_some() {
             // A parameter is compared with a value set, not limited to it: `str`, not `Literal`.
+            hint.literal = typed
+                .python
+                .clone()
+                .filter(|python| crate::values::base(python).is_some());
             typed.python = typed.python.map(|python| Rc::from(widen(&python)));
             hint.typed = typed;
         }
@@ -245,6 +253,7 @@ pub(super) fn params_of(
                     nullability: hint.nullability,
                     cast: hint.cast,
                     untyped_sql_type: hint.untyped.map(str::to_string),
+                    literal: hint.literal.map(|ty| ty.to_string()),
                 }
             })
             .collect(),
