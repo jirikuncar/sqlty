@@ -43,7 +43,8 @@ DOCS_TESTS = [
 # The Markdown whose queries the database tests run.
 CORPUS = ["tests/mdtest/**", "docs/**.md"]
 
-# Paths a package owns, and the packages it depends on beyond its own crates.
+# Paths a package owns, and the packages it depends on beyond its own crates. Each is an
+# output the jobs of tests.yml, docs.yml, vscode.yml or compat.yml are gated on.
 PACKAGES: dict[str, tuple[list[str], list[str]]] = {
     # The extension is tested through the Python package, which reads most of the repository.
     "python": (
@@ -117,8 +118,11 @@ PACKAGES: dict[str, tuple[list[str], list[str]]] = {
     ),
     # The guides: the tests that read them (links, rule pages, examples) and their mdtests.
     "docs": ([*DOCS, *PYTEST, *DOCS_TESTS], ["sqlty-ext"]),
-    # The desktop test runs the sqlty of the virtual environment.
-    "vscode": (["editors/vscode/**", "src/sqlty/**", "npm/wasm/**"], ["sqlty-wasm", "sqlty-ext"]),
+    # The desktop test runs the sqlty of the virtual environment; vscode.yml packages it.
+    "vscode": (
+        ["editors/vscode/**", "src/sqlty/**", "npm/wasm/**", ".github/workflows/vscode.yml"],
+        ["sqlty-wasm", "sqlty-ext"],
+    ),
     # The engine on WebAssembly: the docs playground and @sqlty/wasm, checking each example.
     "playground": (
         [
@@ -132,6 +136,37 @@ PACKAGES: dict[str, tuple[list[str], list[str]]] = {
         ],
         ["sqlty-wasm", "sqlty-lsp"],
     ),
+    # Workflows of their own (docs.yml, compat.yml), gated on these outputs too.
+    # The site: the docs with the playground, built by zensical and colored by the lexer.
+    "site": (
+        [
+            "docs/**",
+            "examples/**",
+            "npm/wasm/**",
+            "overrides/**",
+            "zensical.toml",
+            "wrangler.jsonc",
+            "Makefile",
+            "pyproject.toml",
+            "uv.lock",
+            # The lexer imports the package's core.
+            "src/sqlty/lexer.py",
+            "src/sqlty/core.py",
+            "src/sqlty/__init__.py",
+            "tests/_mdtest/parser.py",
+            "scripts/generate_playground_examples.py",
+            "scripts/vendor_assets.py",
+            "scripts/offline.py",
+            "scripts/playground_links.py",
+            "scripts/structured_data.py",
+            "scripts/check_playground.py",
+            ".github/workflows/docs.yml",
+            ".github/workflows/docs-preview-cleanup.yml",
+        ],
+        ["sqlty-wasm", "sqlty-ext"],
+    ),
+    # The comparisons with drivers and ORMs, at the versions scripts/compat/ pins.
+    "compat": (["scripts/compat/**", ".github/workflows/compat.yml"], []),
 }
 
 # Files outside a crate's directory that its build or tests read.

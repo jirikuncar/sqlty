@@ -5,10 +5,6 @@ name: Compatibility
 # for engine changes, and on demand. The job summary shows how the reports changed.
 on:
   pull_request:
-    paths:
-      - "scripts/compat/**"
-      - ".github/workflows/compat.yml"
-      - ".github/actions/setup/**"
   schedule:
     - cron: "0 6 * * 1"
   workflow_dispatch:
@@ -21,8 +17,27 @@ env:
   UV_NO_SYNC: "1"
 
 jobs:
+  # Whether the change reaches the comparisons (scripts/ci_changes.py); any other event runs it.
+  affected:
+    name: Affected packages
+    runs-on: ubuntu-latest
+    outputs:
+      compat: ${{ steps.changes.outputs.compat }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - id: changes
+        env:
+          BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || '' }}
+        run: python3 scripts/ci_changes.py $BASE
+
   compare:
     name: Compare with drivers and ORMs
+    needs: affected
+    if: needs.affected.outputs.compat == 'true'
     runs-on: ubuntu-latest
 
     services:

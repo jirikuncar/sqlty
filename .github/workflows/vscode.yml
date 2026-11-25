@@ -10,12 +10,6 @@ on:
         required: true
         type: string
   pull_request:
-    paths:
-      - .github/workflows/vscode.yml
-      - editors/vscode/**
-      - npm/wasm/**
-      - rust/crates/sqlty-wasm/**
-      - rust-toolchain.toml
 
 permissions:
   contents: read
@@ -27,8 +21,27 @@ concurrency:
 # The extension's version is the release's: it runs the project's own sqlty, so it
 # publishes with every release or manual run (which names its version), as a dry run on a pull request that changes it.
 jobs:
+  # Whether the change reaches the extension (scripts/ci_changes.py); any other event runs it.
+  affected:
+    name: Affected packages
+    runs-on: ubuntu-latest
+    outputs:
+      vscode: ${{ steps.changes.outputs.vscode }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - id: changes
+        env:
+          BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || '' }}
+        run: python3 scripts/ci_changes.py $BASE
+
   package:
     name: Package
+    needs: affected
+    if: needs.affected.outputs.vscode == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
