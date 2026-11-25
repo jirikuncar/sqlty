@@ -16,7 +16,7 @@ use sqlty_sql::analyzer::{self, Nullability};
 
 use crate::analyses::Analyses;
 use crate::arg_types::Project;
-use crate::calls::{helper_calls_in, is_marked, Call};
+use crate::calls::{defines_helpers, helper_calls_in, is_marked, mentions_helpers, Call};
 use crate::checker::{self, Diagnostic};
 use crate::facts::ModuleFacts;
 use crate::frozen::Table;
@@ -169,6 +169,20 @@ pub(crate) fn may_wrap(text: &str, import_line: &str) -> bool {
         .strip_prefix("from sqlty import SQL as ")
         .map_or("SQL", str::trim);
     text.contains(name)
+        && (text.contains("sqlty")
+            || [name, "SQL", &crate::tokens::template_wrapper(name)]
+                .iter()
+                .any(|name| subscripted(text, name)))
+}
+
+/// Whether `name` may be subscripted in `text`: followed by `[` past what can sit between
+/// the two in a subscript (blanks, line continuations, closing parentheses), or by a comment.
+fn subscripted(text: &str, name: &str) -> bool {
+    text.match_indices(name).any(|(at, _)| {
+        let rest =
+            text[at + name.len()..].trim_start_matches([' ', '\t', '\r', '\x0c', '\n', '\\', ')']);
+        rest.starts_with(['[', '#'])
+    })
 }
 
 /// Whether `text` subscripts `wrapper` with two arguments.
@@ -1210,12 +1224,47 @@ pub fn sites(
 
 /// [`diagnostics`] of `parsed`, else [`unparsed`] of `text`; a panic becomes one
 /// `internal-error` in their place, so one module cannot stop a whole check.
+static MARKED_TEMPLATE: LazyLock<Regex> = LazyLock::new(|| {
+    sqlty_sql::regex(
+        r#"(?:^|[^\w])(?:[tT][rR]?|[rR][tT])(?:'|")+[\s\x1c-\x1f]*--[\s\x1c-\x1f]?sql"#,
+    )
+});
+
+/// Whether a check may report anything in `text`: the union of the text conditions every
+/// pass of [`module`] starts with. A module without any is neither parsed nor checked.
+pub fn may_report(
+    text: &str,
+    style: &ImportStyle,
+    rules: &RuleConfig,
+    helpers: Option<&HelperIndex>,
+) -> bool {
+    rules.is_enabled(Rule::Sqruff)
+        || text.contains("sqlty:")
+        || may_need_lexing(text, &style.wrapper_name)
+        || may_wrap(text, &style.import_line)
+        || drivers::may_hold(text)
+        || MARKED_TEMPLATE.is_match(text)
+        || defines_helpers(text)
+        || mentions_helpers(text, helpers)
+}
+
 pub fn module(text: &str, parsed: Option<&Arc<Source>>, run: &Run<'_>) -> Found {
-    catch_unwind(AssertUnwindSafe(|| match parsed {
+    let found = catch_unwind(AssertUnwindSafe(|| match parsed {
         Some(parsed) => diagnostics(parsed, run),
         None => unparsed(text, run),
     }))
-    .unwrap_or_else(|payload| crashed(crate::report::cause(&*payload), run.settings.rules))
+    .unwrap_or_else(|payload| crashed(crate::report::cause(&*payload), run.settings.rules));
+    debug_assert!(
+        found.diagnostics.is_empty() && found.needed.is_empty()
+            || may_report(
+                text,
+                &run.settings.options.style,
+                run.settings.rules,
+                run.helpers
+            ),
+        "may_report misses a check that reports in {text:?}"
+    );
+    found
 }
 
 /// The `internal-error` of a check that panicked with `cause`.
@@ -1315,11 +1364,6 @@ fn named_as_wrapper(calls: Vec<(usize, String)>, wrapper: &str) -> Vec<usize> {
 /// `sqlty.core.check_source`: every diagnostic of `source` before inline suppression, by
 /// line.
 pub fn diagnostics(source: &Arc<Source>, run: &Run<'_>) -> Found {
-    static MARKED_TEMPLATE: LazyLock<Regex> = LazyLock::new(|| {
-        sqlty_sql::regex(
-            r#"(?:^|[^\w])(?:[tT][rR]?|[rR][tT])(?:'|")+[\s\x1c-\x1f]*--[\s\x1c-\x1f]?sql"#,
-        )
-    });
     let settings = run.settings;
     let analyses = Analyses::new(settings.options);
     let (options, rules) = (settings.options, settings.rules);
@@ -1452,6 +1496,17 @@ pub fn diagnostics(source: &Arc<Source>, run: &Run<'_>) -> Found {
             fix: Vec::new(),
         }));
     }
+    debug_assert!(
+        may_wrap(text, import_line)
+            || !text.contains(wrapper)
+            || scanned().calls.is_empty()
+                && named_as_wrapper(
+                    module::any_calls_among(facts.calls(), &source.aliases),
+                    wrapper
+                )
+                .is_empty(),
+        "may_wrap misses a wrapper call in {text:?}"
+    );
     let queries: Vec<RowQuery> = if may_wrap(text, import_line) {
         row_queries(scanned())
     } else {

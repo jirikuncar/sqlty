@@ -664,6 +664,9 @@ impl Workspace {
                     stacker::maybe_grow(STACK_RED_ZONE, STACK_SEGMENT, || {
                         let module = &self.modules[path];
                         let checker = Checker::of(settings, Some(helpers));
+                        if !checker.may_report(&module.text) {
+                            return Ok(sqlty_python::rows::Found::default());
+                        }
                         let parsed = module.parsed();
                         let name = parsed.as_ref().and_then(|parsed| parsed.module.clone());
                         Ok(check_module(
@@ -814,6 +817,9 @@ impl Workspace {
         let helpers = self.helpers(&settings);
         let module = &self.modules[path];
         let checker = Checker::of(&settings, Some(&helpers));
+        if !checker.may_report(text) {
+            return Ok(Vec::new());
+        }
         let parsed = module.parsed();
         let name = parsed.as_ref().and_then(|parsed| parsed.module.clone());
         let found = check_module(text, parsed.as_ref(), name.as_deref(), &checker);

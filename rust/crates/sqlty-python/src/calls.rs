@@ -472,6 +472,16 @@ fn wanted(call: &ExprCall) -> bool {
 /// modules of `helpers`, by line, their arguments typed by `types`, asked only when the
 /// module has some. A query built in a way that is not modelled (see [`compose`]) is left
 /// unchecked.
+/// Whether `text` may define a marked helper: `Annotated[..., SQL]` from sqlty.
+pub(crate) fn defines_helpers(text: &str) -> bool {
+    text.contains("Annotated") && text.contains("sqlty") && text.contains("SQL")
+}
+
+/// Whether `text` names a helper of `helpers`, so it may call one.
+pub(crate) fn mentions_helpers(text: &str, helpers: Option<&HelperIndex>) -> bool {
+    helpers.is_some_and(|helpers| !helpers.modules.is_empty() && helpers.mentions(text))
+}
+
 pub fn helper_calls_in<'a, 't>(
     facts: &ModuleFacts<'a>,
     helpers: Option<&'a HelperIndex>,
@@ -481,9 +491,8 @@ pub fn helper_calls_in<'a, 't>(
 ) -> Vec<Call<'a>> {
     let source = facts.source;
     let text = &*source.text;
-    let local = text.contains("Annotated") && text.contains("sqlty") && text.contains("SQL");
-    let imported =
-        helpers.is_some_and(|helpers| !helpers.modules.is_empty() && helpers.mentions(text));
+    let local = defines_helpers(text);
+    let imported = mentions_helpers(text, helpers);
     if !(local || imported) {
         return Vec::new();
     }

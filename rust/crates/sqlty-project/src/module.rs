@@ -78,6 +78,11 @@ impl<'a> Checker<'a> {
         )
         .expect("the settings check the import style")
     }
+
+    /// Whether [`check_module`] may find anything in `text`; when not, it needs no parse.
+    pub fn may_report(&self, text: &str) -> bool {
+        check::may_report(text, &self.options.style, &self.rules, self.helpers)
+    }
 }
 
 /// The diagnostics of `text`, parsed as `parsed` when it parses, as the module `module`,
