@@ -372,6 +372,55 @@ UPDATE users SET email = '' WHERE id BETWEEN 1 AND 9;
 COMMIT;
 ```
 
+## Validating in the transaction that added the constraint
+
+The `ADD CONSTRAINT` lock is held until `COMMIT`, through the scan.
+
+```sql migration
+SET lock_timeout = '1s';
+BEGIN;
+ALTER TABLE users ADD CONSTRAINT users_email CHECK (email <> '') NOT VALID;
+-- error: [constraint-scan] "validating `users_email` in the transaction that locked `users`"
+ALTER TABLE users VALIDATE CONSTRAINT users_email;
+COMMIT;
+```
+
+### Not after `COMMIT`
+
+```sql migration
+SET lock_timeout = '1s';
+BEGIN;
+ALTER TABLE users ADD CONSTRAINT users_email CHECK (email <> '') NOT VALID;
+COMMIT;
+-- error:
+ALTER TABLE users VALIDATE CONSTRAINT users_email;
+```
+
+### Not without a transaction, nor for another table
+
+```sql migration
+SET lock_timeout = '1s';
+ALTER TABLE users ADD CONSTRAINT users_email CHECK (email <> '') NOT VALID;
+-- error:
+ALTER TABLE users VALIDATE CONSTRAINT users_email;
+BEGIN;
+ALTER TABLE users ADD CONSTRAINT users_id CHECK (id > 0) NOT VALID;
+ALTER TABLE teams VALIDATE CONSTRAINT teams_name;
+COMMIT;
+```
+
+### Not for a table the migration creates
+
+```sql migration
+SET lock_timeout = '1s';
+BEGIN;
+CREATE TABLE accounts (id BIGINT PRIMARY KEY);
+ALTER TABLE accounts ADD CONSTRAINT accounts_id CHECK (id > 0) NOT VALID;
+-- error:
+ALTER TABLE accounts VALIDATE CONSTRAINT accounts_id;
+COMMIT;
+```
+
 ## Indexes of keys a pg_dump schema adds
 
 `against.sql`:
