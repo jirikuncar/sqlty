@@ -136,6 +136,10 @@ The Docs, VS Code extension and Compatibility workflows have no `paths:` filter:
 first job runs the same script and gates the rest on its `site`, `vscode` or `compat`
 output, so one list says what each reads.
 The required check is `CI`, which passes when every job the change needed passed.
+Jobs that share their setup share a job: one `Rust` job runs the gate of each affected
+crate in a row on one target dir, with the doctests building beside it; the PostgreSQL
+and MySQL comparisons share a job and run at once; the performance budget and CodSpeed
+share a release build. A push to `main` runs 15 jobs.
 
 A package's coverage counts its own tests only: a crate's Rust tests, or for the Python
 package pytest and the extension crate's Rust tests. Each must run every line of its
@@ -242,7 +246,7 @@ make bench-ci         # CI-size project; exits 1 when over benchmarks/baseline.j
 make bench-baseline   # re-record the baseline after an intended change
 make bench-project    # full-size synthetic project (10k files): CLI wall time and peak RSS
 make bench-rust       # Criterion benches in rust/crates/sqlty-bench; extra args via ARGS=
-make bench-codspeed   # benchmarks/test_benchmarks.py, as CI's CodSpeed job measures them
+make bench-codspeed   # benchmarks/test_benchmarks.py, as CI's bench job measures them
 make bench-corpus     # sqlty check on pinned real repositories (benchmarks/corpus.py)
 ```
 
