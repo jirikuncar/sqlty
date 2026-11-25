@@ -11,6 +11,7 @@ CREATE TABLE customers (id INTEGER PRIMARY KEY, email TEXT UNIQUE, name TEXT NOT
 CREATE TABLE tags (order_id INTEGER, label TEXT);
 CREATE TABLE docs (id INTEGER PRIMARY KEY, body JSONB NOT NULL CHECK (jsonb_typeof(body) = 'object'), meta JSON);
 CREATE TABLE shapes (id INTEGER PRIMARY KEY, area CIRCLE);
+CREATE TABLE states (id INTEGER PRIMARY KEY, status TEXT CHECK (status IN ('open', 'shut')), level INT CHECK (level IN (1)));
 CREATE FUNCTION order_count() RETURNS INT LANGUAGE sql AS 'SELECT 1';
 CREATE TABLE pairs (a INTEGER REFERENCES orders, b INTEGER REFERENCES customers, PRIMARY KEY (a, b));
 CREATE FUNCTION tag_count(x INT, y nope) RETURNS INT LANGUAGE sql AS 'SELECT 1';
@@ -24,6 +25,11 @@ type Case = (&'static str, &'static str, &'static [&'static str]);
 
 #[rustfmt::skip]
 const CASES: &[Case] = &[
+    ("postgres", "UPDATE states SET status = 'gone', level = 2 WHERE id = 1", &["[literal-write] `states.status` is 'open' or 'shut', not 'gone'", "[literal-write] `states.level` is 1, not 2"]),
+    ("sqlite", "INSERT INTO states VALUES (1, 'gone', 1)", &["[literal-write] `states.status` is 'open' or 'shut', not 'gone'"]),
+    ("postgres", "INSERT INTO states (id, status) VALUES (1, 'open') ON CONFLICT (id) DO UPDATE SET status = 'gone', (level) = (2)", &["[literal-write] `states.status` is 'open' or 'shut', not 'gone'"]),
+    ("postgres", "UPDATE states SET status = 'shut', level = level, id = 2 WHERE id = 1", &[]),
+    ("mysql", "UPDATE states SET status = 'gone' WHERE id = 1", &[]),
     ("postgres", "SELECT o.id, SUM(i.amount), SUM(p.amount) FROM orders o JOIN order_items i ON i.order_id = o.id JOIN payments p ON p.order_id = o.id GROUP BY o.id", &["[fanout-aggregate] SUM(i.amount) aggregates order_items, whose rows repeat once per payments row", "[fanout-aggregate] SUM(p.amount) aggregates payments, whose rows repeat once per order_items row", "[chasm-join] orders joins order_items and payments one-to-many, so each row of one repeats once per row of the other"]),
     ("postgres", "SELECT SUM(LENGTH(t.label)) FROM orders o JOIN tags t ON t.order_id = o.id JOIN tags u ON u.label = t.label", &["[unproven-join] the join of t and u matches no primary or unique key, so how often it repeats their rows is unknown"]),
     ("postgres", "SELECT COUNT(*) FROM orders o JOIN order_items i USING (id) GROUP BY ALL", &["[entity-mismatch] orders.id holds orders keys, order_items.id holds order_items keys"]),
