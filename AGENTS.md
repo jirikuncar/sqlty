@@ -31,7 +31,8 @@ Tests go through the public API of the package they test: a Rust crate's from it
 `tests/` against its `pub` items, sqlty's from `sqlty`, `sqlty.core`, the CLI or
 `sqlty._core` (sqlty-ext's API), never a private `sqlty._*` module. Keep a test in `src/`
 only for what no public call can observe, such as an allocation or a catalog-entry count.
-`scripts/internal-tests.txt` holds how many tests do not yet, per package;
+`scripts/internal-tests.txt` counts what does not yet, per package (`#[test]`s in `src/`,
+private uses in pytest files);
 `tests/test_public_api_tests.py` fails when one rises and asks to lower it when one falls.
 
 Tests run in parallel and in random order. A test must not depend on another

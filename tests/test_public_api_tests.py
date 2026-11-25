@@ -1,26 +1,52 @@
 """Tests go through each package's public API: the counts of the rest only go down."""
 
+import ast
 import re
 from pathlib import Path
 
 ROOT = Path(__file__).parent.parent
 LIMITS = ROOT / "scripts" / "internal-tests.txt"
-PRIVATE = re.compile(
-    r"^\s*(?:from|import)\s+sqlty(?:\.\w+)*\._(?!core\b)\w+"
-    r"|[\"']sqlty(?:\.\w+)*\._(?!core\b)\w+"  # a module named in a string: patch, import_module
-    r"|^\s*from\s+sqlty(?:\.\w+)*\s+import\s+[^#\n]*\b_(?!core\b)\w+",
-    re.MULTILINE,
-)
+RUST_TEST = re.compile(r"^\s*#\[(?:\w+::)*test(?:_case)?\b", re.MULTILINE)
+
+
+def private(name: str) -> bool:
+    """A private `sqlty._*` module or name: `sqlty._core` is sqlty-ext's public API."""
+    return any(part.startswith("_") and part != "_core" for part in name.split("."))
+
+
+def private_uses(source: str) -> int:
+    """Imports, attributes and module strings in `source` that reach a private part of sqlty."""
+    modules: set[str] = set()
+    attributes: list[ast.Attribute] = []
+    uses = 0
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Attribute):
+            attributes.append(node)
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name.split(".")[0] == "sqlty":
+                    uses += private(alias.name)
+                    modules.add(alias.asname or "sqlty")
+        elif isinstance(node, ast.ImportFrom) and (node.module or "").split(".")[0] == "sqlty":
+            uses += sum(private(f"{node.module}.{alias.name}") for alias in node.names)
+            modules.update(alias.asname or alias.name for alias in node.names)
+        elif isinstance(node, ast.Constant) and isinstance(node.value, str):
+            uses += bool(re.fullmatch(r"sqlty(\.\w+)+", node.value) and private(node.value))
+    return uses + sum(
+        ast.unparse(a.value).split(".")[0] in modules and private(a.attr) for a in attributes
+    )
 
 
 def counts() -> dict[str, int]:
     found = {
-        crate.name: sum(path.read_text().count("#[test]") for path in (crate / "src").rglob("*.rs"))
+        crate.name: sum(
+            len(RUST_TEST.findall(path.read_text())) for path in (crate / "src").rglob("*.rs")
+        )
         for crate in (ROOT / "rust" / "crates").iterdir()
         if (crate / "src").is_dir()
     }
     found["python"] = sum(
-        bool(PRIVATE.search(path.read_text())) for path in (ROOT / "tests").rglob("*.py")
+        private_uses(path.read_text()) for path in (ROOT / "tests").rglob("test_*.py")
     )
     return found
 
@@ -37,4 +63,4 @@ def test_no_new_tests_past_the_public_api() -> None:
 
 
 def test_limits_are_current() -> None:
-    assert limits() == counts(), f"lower {LIMITS.name} to the current counts"
+    assert limits() == counts(), f"set {LIMITS.name} to the current counts"
