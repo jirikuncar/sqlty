@@ -23,6 +23,15 @@ impl Analyzer<'_> {
         self.check_references_besides(expr, scope, &[]);
     }
 
+    /// [`Analyzer::check_references`] of a column a statement writes, which reads nothing
+    /// deprecated: a target of a multi-table `UPDATE`, or `EXCLUDED`, the row an upsert writes.
+    pub(super) fn check_written(&self, expr: &Expr, scope: &Scope) {
+        let mark = self.diag.mark();
+        self.check_references(expr, scope);
+        self.diag
+            .retain_since(mark, |rule| rule != Rule::DeprecatedColumn);
+    }
+
     /// [`Analyzer::check_references`], reading a bare name among `aliases` as the result
     /// column it names, as SQLite does in `WHERE` and MySQL in `GROUP BY` and `ORDER BY`.
     pub(super) fn check_references_besides(&self, expr: &Expr, scope: &Scope, aliases: &[&str]) {
@@ -47,6 +56,7 @@ impl Analyzer<'_> {
                     | Rule::UnknownFunction
                     | Rule::ForeignKeyMismatch
                     | Rule::EntityMismatch
+                    | Rule::DeprecatedColumn
             )
         });
     }

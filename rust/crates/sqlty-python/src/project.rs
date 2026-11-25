@@ -247,7 +247,7 @@ fn extended(
                 crate::config::merge_rules(under, over);
             }
             (Some(Value::Table(under)), Value::Table(over))
-                if matches!(key.as_str(), "types" | "databases") =>
+                if matches!(key.as_str(), "types" | "deprecated-columns" | "databases") =>
             {
                 under.extend(over);
             }

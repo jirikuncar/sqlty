@@ -39,6 +39,7 @@ stale-type = "error"
 | [`unknown-database`](rules/unknown-database.md) | Query | error | no | Query marker names a database the project does not configure |
 | [`unknown-table`](rules/unknown-table.md) | Names | error | no | Table the schema does not define |
 | [`unknown-column`](rules/unknown-column.md) | Names | error | yes | Column the table does not have |
+| [`deprecated-column`](rules/deprecated-column.md) | Names | warn | no | Query reads a column scheduled for removal |
 | [`ambiguous-column`](rules/ambiguous-column.md) | Names | error | no | Unqualified column that more than one table of the query has |
 | [`duplicate-alias`](rules/duplicate-alias.md) | Names | error | no | Two tables of a FROM clause read by the same name |
 | [`unknown-function`](rules/unknown-function.md) | Names | warn | no | Function whose result sqlty cannot type |

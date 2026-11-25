@@ -343,6 +343,12 @@ impl<'a> Analyzer<'a> {
         }
         match self.resolve_reference(expr, scope) {
             Some(resolved) => {
+                // `EXCLUDED` of an upsert is the row being written, not a read.
+                if matches!(resolved.found, ColumnRef::Schema(_))
+                    && resolved.reference != "excluded"
+                {
+                    self.check_deprecated(&resolved.table, &resolved.column);
+                }
                 let typed = resolved.found.typed(self.dialect);
                 let typed = self.narrowed_values(&resolved.reference, &resolved.column, typed);
                 if typed.python.is_none() && self.diag.enabled() {
@@ -376,6 +382,30 @@ impl<'a> Analyzer<'a> {
                 }
             },
         }
+    }
+
+    /// Report a read of `column` of the schema table `table` when the project deprecates it.
+    fn check_deprecated(&self, table: &str, column: &str) {
+        let Some(deprecation) = self.schema.deprecation(table, column) else {
+            return;
+        };
+        let name = table.rsplit('.').next().unwrap_or(table);
+        let mut message = format!("`{name}.{column}` is deprecated");
+        if let Some(replacement) = &deprecation.replacement {
+            message.push_str(&format!(": read `{replacement}` instead"));
+        }
+        if let Some(date) = &deprecation.remove_after {
+            message.push_str(&format!(", it is removed after {date}"));
+        }
+        self.diag.warn(NameDiagnostic {
+            rule: Rule::DeprecatedColumn,
+            message,
+            span: None,
+            replacement: None,
+            table: Some(name.to_string()),
+            column: Some(column.to_string()),
+            shadowed_by: None,
+        });
     }
 
     /// The schema table of a PostgreSQL whole-row reference (`SELECT u FROM users u`),

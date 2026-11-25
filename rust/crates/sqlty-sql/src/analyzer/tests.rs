@@ -897,3 +897,40 @@ fn update_narrowing_folds_unquoted_set_columns() {
         Some("tuple[str]")
     );
 }
+
+#[test]
+fn reads_of_a_deprecated_column_are_reported_writes_are_not() {
+    let types = [
+        deprecated_type("a.n", Some("id"), Some("2027-01-01")),
+        deprecated_type("public.b.t", None, None),
+    ];
+    let overrides = TypeOverrides::new(&types, "postgres").unwrap();
+    let schema = "CREATE TABLE a (id INT, n INT, g GEOMETRY); CREATE TABLE b (id INT, t TEXT);";
+    let (schema, _) = load_schema_with_overrides(schema, "postgres", overrides);
+    let found = |sql: &str| -> Vec<(String, Option<String>)> {
+        analyze_with_diagnostics(sql, "postgres", Some(&schema))
+            .1
+            .into_iter()
+            .map(|found| (found.message, found.table))
+            .collect()
+    };
+    let n = "`a.n` is deprecated: read `id` instead, it is removed after 2027-01-01";
+    assert_eq!(
+        found("SELECT n FROM a"),
+        [(n.to_string(), Some("a".into()))]
+    );
+    assert_eq!(
+        found("SELECT b.t, g FROM a JOIN b USING (id) WHERE n > 0"),
+        [
+            (n.to_string(), Some("a".into())),
+            ("`b.t` is deprecated".to_string(), Some("b".into())),
+            (
+                "column `a.g` has type `GEOMETRY`, which has no Python type".to_string(),
+                None
+            ),
+        ]
+    );
+    assert_eq!(found("UPDATE a SET n = 1 RETURNING id"), []);
+    assert_eq!(found("INSERT INTO b (id, t) VALUES (1, 'x')"), []);
+    assert!(!TypeOverrides::new(&types, "postgres").unwrap().is_empty());
+}
