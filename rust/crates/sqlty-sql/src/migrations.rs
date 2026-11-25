@@ -77,6 +77,13 @@ const SERIAL: [&str; 6] = [
 /// The findings of each of `files`, the migrations of the new schema in the order they run,
 /// for the statements `baseline` does not have.
 pub fn check(baseline: &str, files: &[&str]) -> Vec<Vec<Finding>> {
+    let files: Vec<(&str, Option<&str>)> = files.iter().map(|sql| (*sql, None)).collect();
+    check_with(baseline, &files)
+}
+
+/// [`check`] with the longest `lock_timeout` each file may set, such as `"2s"`: a longer one
+/// counts as unset.
+pub fn check_with(baseline: &str, files: &[(&str, Option<&str>)]) -> Vec<Vec<Finding>> {
     let mut model = Model::default();
     for stmt in ddl::statements(baseline, false) {
         *model.applied.entry(stmt.normalized()).or_default() += 1;
@@ -86,7 +93,10 @@ pub fn check(baseline: &str, files: &[&str]) -> Vec<Vec<Finding>> {
             model.apply(&parsed, &likes);
         }
     }
-    files.iter().map(|sql| model.file(sql)).collect()
+    files
+        .iter()
+        .map(|(sql, max)| model.file(sql, *max))
+        .collect()
 }
 
 #[derive(Default)]
@@ -169,11 +179,14 @@ struct Check {
 
 /// What the statements of one file so far have set.
 #[derive(Default)]
-struct Session {
+struct Session<'a> {
+    /// The longest `lock_timeout` that counts as set, as configured.
+    max_timeout: Option<&'a str>,
     transaction: bool,
-    lock_timeout: bool,
+    /// The `lock_timeout` value set, `0` and `DEFAULT` excluded.
+    lock_timeout: Option<String>,
     /// Set by `SET LOCAL`, until the transaction ends.
-    local_timeout: bool,
+    local_timeout: Option<String>,
     reported_timeout: bool,
     /// The enum values `ALTER TYPE ... ADD VALUE` added in the open transaction, by string
     /// literal, with the order they were added in and their type.
@@ -189,12 +202,15 @@ struct Session {
 }
 
 impl Model {
-    fn file(&mut self, sql: &str) -> Vec<Finding> {
+    fn file(&mut self, sql: &str, max_timeout: Option<&str>) -> Vec<Finding> {
         let mut found = Vec::new();
         if is_dump(sql) {
             return found;
         }
-        let mut session = Session::default();
+        let mut session = Session {
+            max_timeout,
+            ..Session::default()
+        };
         let mut dropped_actions = Vec::new();
         let spanned = ddl::statements(sql, false);
         for (span, stmt) in spanned.filter_map(|s| Some((s.range_in(sql)?, s))) {
@@ -259,12 +275,11 @@ impl Model {
                         ),
                     );
                 }
-                if judged.strong_lock && !session.has_timeout() && !session.reported_timeout {
-                    session.reported_timeout = true;
-                    report(
-                        Rule::MissingLockTimeout,
-                        "takes a lock that blocks writes without `SET lock_timeout` first: while it waits for the lock, the queries it blocks wait behind it".to_string(),
-                    );
+                if judged.strong_lock && !session.reported_timeout {
+                    if let Some(message) = session.missing_timeout() {
+                        session.reported_timeout = true;
+                        report(Rule::MissingLockTimeout, message);
+                    }
                 }
                 if let Some((table, constraint)) = parsed
                     .as_ref()
@@ -1754,9 +1769,16 @@ impl Model {
     }
 }
 
-impl Session {
-    fn has_timeout(&self) -> bool {
-        self.lock_timeout || self.local_timeout
+impl Session<'_> {
+    /// Why the `lock_timeout` in effect does not bound the wait for a lock, if it does not.
+    fn missing_timeout(&self) -> Option<String> {
+        let Some(set) = self.local_timeout.as_ref().or(self.lock_timeout.as_ref()) else {
+            return Some("takes a lock that blocks writes without `SET lock_timeout` first: while it waits for the lock, the queries it blocks wait behind it".to_string());
+        };
+        let max = self.max_timeout?;
+        (lock_timeout_ms(set)? > lock_timeout_ms(max)?).then(|| format!(
+            "takes a lock that blocks writes with `lock_timeout` {set}, above the configured maximum of {max}: while it waits for the lock, the queries it blocks wait behind it"
+        ))
     }
 
     /// Follow a transaction or `lock_timeout` statement; whether `tokens` was one.
@@ -1766,18 +1788,18 @@ impl Session {
             ["begin", ..] | ["start", "transaction", ..] => self.transaction = true,
             ["rollback", "to", ..] | ["release" | "savepoint", ..] => {}
             ["commit" | "end" | "rollback" | "abort", ..] => {
-                (self.transaction, self.local_timeout) = (false, false);
+                (self.transaction, self.local_timeout) = (false, None);
                 self.added_values.clear();
                 self.locked.clear();
                 self.locking.clear();
                 (self.reported_tables, self.reported_backfill) = (false, false);
             }
             ["reset", "lock_timeout" | "all"] => {
-                (self.lock_timeout, self.local_timeout) = (false, false);
+                (self.lock_timeout, self.local_timeout) = (None, None);
             }
-            ["set", "local", "lock_timeout", _, value] => self.local_timeout = !is_zero(value),
+            ["set", "local", "lock_timeout", _, value] => self.local_timeout = timeout(value),
             ["set", "session", "lock_timeout", _, value] | ["set", "lock_timeout", _, value] => {
-                self.lock_timeout = !is_zero(value);
+                self.lock_timeout = timeout(value);
             }
             _ => return false,
         }
@@ -2617,10 +2639,43 @@ fn name(ident: &Ident) -> String {
     fold(ident, SqlDialect::Postgres)
 }
 
-/// Whether a `lock_timeout` value turns the timeout off: `0`, `'0'`, `'0s'` or `DEFAULT`.
-fn is_zero(value: &str) -> bool {
+/// The `lock_timeout` a `SET` value turns on, unquoted: `None` for `0`, `'0s'` or `DEFAULT`,
+/// which turn it off.
+fn timeout(value: &str) -> Option<String> {
     let value = value.trim_matches('\'');
-    value == "default" || value.trim_end_matches(|c: char| c.is_ascii_alphabetic()) == "0"
+    let off =
+        value == "default" || value.trim_end_matches(|c: char| c.is_ascii_alphabetic()) == "0";
+    (!off).then(|| value.to_string())
+}
+
+/// The milliseconds of a `lock_timeout` value as PostgreSQL reads it: a number of `ms`, `s`,
+/// `min`, `h` or `d`, milliseconds without a unit; `None` for anything else.
+///
+/// Example:
+///
+/// ```
+/// use sqlty_sql::migrations::lock_timeout_ms;
+///
+/// assert_eq!(lock_timeout_ms("1.5s"), Some(1500.0));
+/// assert_eq!(lock_timeout_ms("2000"), Some(2000.0));
+/// assert_eq!(lock_timeout_ms("soon"), None);
+/// ```
+pub fn lock_timeout_ms(value: &str) -> Option<f64> {
+    let value = value.trim();
+    let unit_at = value
+        .find(|c: char| c.is_ascii_alphabetic())
+        .unwrap_or(value.len());
+    let (number, unit) = value.split_at(unit_at);
+    let scale = match unit.to_ascii_lowercase().as_str() {
+        "" | "ms" => 1.0,
+        "s" => 1e3,
+        "min" => 60e3,
+        "h" => 3600e3,
+        "d" => 86400e3,
+        _ => return None,
+    };
+    let number: f64 = number.trim().parse().ok()?;
+    (number.is_finite() && number >= 0.0).then_some(number * scale)
 }
 
 #[cfg(test)]
@@ -3813,6 +3868,35 @@ mod tests {
         );
         let off = "SET lock_timeout = '1s'; BEGIN; REINDEX (CONCURRENTLY 'off') INDEX a; COMMIT;";
         assert_eq!(rules(USERS, off), [Rule::MissingConcurrently]);
+    }
+
+    #[test]
+    fn lock_timeout_values_read_as_postgres_reads_them() {
+        for (value, ms) in [
+            ("250", Some(250.0)),
+            ("250ms", Some(250.0)),
+            ("1.5 s", Some(1500.0)),
+            ("2min", Some(120_000.0)),
+            ("1h", Some(3_600_000.0)),
+            ("1D", Some(86_400_000.0)),
+            ("2w", None),
+            ("-1s", None),
+            ("s", None),
+            ("", None),
+        ] {
+            assert_eq!(lock_timeout_ms(value), ms, "{value}");
+        }
+        let max = |set: &str| {
+            let migration = format!("SET lock_timeout = {set}; LOCK TABLE users;");
+            let found = check_with(USERS, &[(&migration, Some("2s"))]).remove(0);
+            found.into_iter().map(|f| f.message).collect::<Vec<_>>()
+        };
+        assert_eq!(
+            max("'1min'"),
+            ["takes a lock that blocks writes with `lock_timeout` 1min, above the configured maximum of 2s: while it waits for the lock, the queries it blocks wait behind it"]
+        );
+        assert_eq!(max("2000"), Vec::<String>::new());
+        assert_eq!(max("'soon'"), Vec::<String>::new());
     }
 
     #[test]

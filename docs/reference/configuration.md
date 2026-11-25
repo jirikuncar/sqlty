@@ -104,7 +104,7 @@ A directory with more than one file reads the first of `sqlty.toml`,
 | [`schema`](#schema) | string or list of strings | none | `rewrite`, `check` | Schema `.sql` files, directories or globs, relative to the configuration file |
 | [`queries`](#queries) | string or list of strings | none | `check` | `.sql` files of named queries (aiosql, sqlc, PugSQL), directories or globs, relative to the configuration file |
 | [`query-format`](#query-format) | `"auto"`, `"aiosql"`, `"sqlc"`, `"pugsql"`, `"file"` | `"auto"` | `check` | How `queries` files name their queries; `auto` reads each file's first header |
-| [`rules`](#rules) | table of rule = severity | per-rule defaults | `check` | Severity per lint rule: `"error"`, `"warn"` or `"ignore"` |
+| [`rules`](#rules) | table of rule = severity or options | per-rule defaults | `check` | Severity per lint rule: `"error"`, `"warn"` or `"ignore"`, or a table with `severity` and the rule's options |
 | [`overrides`](#overrides) | array of tables | `[]` | `check` | Rule severities for the files `include` matches and `exclude` does not, on top of `rules` |
 | [`import-style`](#import-style) | string | `"from sqlty import SQL"` | `rewrite`, `strip`, `check`, magic codec | How rewritten code imports and spells the wrapper |
 | [`untyped`](#untyped) | `"skip"`, `"sentinel"` | `"skip"` | `rewrite` | Whether queries of unknown row type are wrapped as `SQL[UNTYPED]` |
@@ -198,6 +198,18 @@ An unknown rule name or severity is an error.
 select-star = "ignore"
 column-name-mismatch = "error"
 ```
+
+A rule with options takes a table, its severity in `severity`:
+
+```toml
+[tool.sqlty.rules.missing-lock-timeout]
+severity = "error"
+max = "2s"
+```
+
+| Rule | Option | Value |
+|------|--------|-------|
+| [`missing-lock-timeout`](rules/missing-lock-timeout.md#max) | `max` | The longest `lock_timeout` that counts as set, such as `"2s"` |
 
 ## `overrides`
 

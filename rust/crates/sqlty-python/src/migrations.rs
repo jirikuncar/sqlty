@@ -23,8 +23,11 @@ pub fn check_migrations_with(
     baseline: &str,
     files: &[(&str, &RuleConfig)],
 ) -> Vec<Vec<Diagnostic>> {
-    let sources: Vec<&str> = files.iter().map(|(sql, _)| *sql).collect();
-    sqlty_sql::migrations::check(baseline, &sources)
+    let sources: Vec<(&str, Option<&str>)> = files
+        .iter()
+        .map(|(sql, rules)| (*sql, rules.lock_timeout_max.as_deref()))
+        .collect();
+    sqlty_sql::migrations::check_with(baseline, &sources)
         .into_iter()
         .zip(files)
         .map(|(found, (sql, rules))| {

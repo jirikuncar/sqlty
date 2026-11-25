@@ -172,11 +172,9 @@ impl<'s> Run<'s> {
                 .and_then(toml::Value::as_bool)
                 .unwrap_or(default)
         };
-        let rules = section.setting("rules").and_then(toml::Value::as_table);
-        let rules = rules.map(|rules| {
-            rules
-                .iter()
-                .map(|(rule, severity)| (rule.clone(), severity.as_str().unwrap().to_string()))
+        let rules = section.setting("rules").map(|rules| {
+            config::rule_entries(Some(rules))
+                .into_iter()
                 .collect::<HashMap<_, _>>()
         });
         let requires = section

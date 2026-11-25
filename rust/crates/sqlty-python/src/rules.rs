@@ -20,6 +20,10 @@ pub const SQL_RULES: RuleSet = {
     set
 };
 
+/// The override key of the longest `lock_timeout` that `missing-lock-timeout` accepts, as
+/// `[tool.sqlty.rules.missing-lock-timeout] max` is passed along.
+pub const LOCK_TIMEOUT_MAX: &str = "missing-lock-timeout.max";
+
 /// A rule name or severity in the overrides that sqlty does not know.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum RuleConfigError {
@@ -34,6 +38,9 @@ pub enum RuleConfigError {
         /// The severity as written.
         severity: String,
     },
+    /// `missing-lock-timeout.max` is not a duration.
+    #[error("invalid max for rule missing-lock-timeout: {0} (expected a duration such as '2s')")]
+    InvalidMax(String),
 }
 
 /// Rule severity configuration: the defaults plus the user's overrides.
@@ -41,6 +48,8 @@ pub enum RuleConfigError {
 pub struct RuleConfig {
     enabled: RuleSet,
     severity: [Severity; Rule::COUNT],
+    /// The longest `lock_timeout` a migration may set, such as `2s`.
+    pub lock_timeout_max: Option<String>,
 }
 
 impl Default for RuleConfig {
@@ -51,6 +60,7 @@ impl Default for RuleConfig {
                 .filter(|rule| rule.default_severity() != Severity::Ignore)
                 .collect(),
             severity: Rule::ALL.map(Rule::default_severity),
+            lock_timeout_max: None,
         }
     }
 }
@@ -74,6 +84,13 @@ impl RuleConfig {
         entries.sort();
         let mut config = RuleConfig::default();
         for (rule_name, severity_name) in entries {
+            if rule_name == LOCK_TIMEOUT_MAX {
+                if sqlty_sql::migrations::lock_timeout_ms(&severity_name).is_none() {
+                    return Err(RuleConfigError::InvalidMax(severity_name));
+                }
+                config.lock_timeout_max = Some(severity_name);
+                continue;
+            }
             let rule = Rule::parse(&rule_name)
                 .ok_or_else(|| RuleConfigError::UnknownRule(rule_name.clone()))?;
             let severity = Severity::parse(&severity_name).ok_or({
@@ -104,6 +121,16 @@ impl RuleConfig {
             Severity::Ignore => 0,
         };
         let mut merged = self.clone();
+        let ms = |max: &String| sqlty_sql::migrations::lock_timeout_ms(max);
+        merged.lock_timeout_max = [&self.lock_timeout_max, &other.lock_timeout_max]
+            .into_iter()
+            .flatten()
+            .min_by(|a, b| {
+                ms(a)
+                    .partial_cmp(&ms(b))
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .cloned();
         for rule in Rule::ALL {
             let (own, theirs) = (self.severity(rule), other.severity(rule));
             merged.set(
@@ -155,6 +182,32 @@ impl RuleConfig {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_shortest_lock_timeout_max_wins() {
+        let config = |max: Option<&str>| {
+            let overrides = max.map(|max| [(LOCK_TIMEOUT_MAX.to_string(), max.to_string())].into());
+            RuleConfig::from_overrides(overrides).unwrap()
+        };
+        for (left, right, expected) in [
+            (Some("1min"), Some("2s"), Some("2s")),
+            (Some("500"), Some("1s"), Some("500")),
+            (None, Some("2s"), Some("2s")),
+            (None, None, None),
+        ] {
+            for merged in [
+                config(left).strictest(&config(right)),
+                config(right).strictest(&config(left)),
+            ] {
+                assert_eq!(merged.lock_timeout_max.as_deref(), expected);
+            }
+        }
+        let overrides = [(LOCK_TIMEOUT_MAX.to_string(), "soon".to_string())].into();
+        assert_eq!(
+            RuleConfig::from_overrides(Some(overrides)).unwrap_err(),
+            RuleConfigError::InvalidMax("soon".to_string())
+        );
+    }
 
     #[test]
     fn the_strictest_severity_of_two_configurations_wins_in_either_order() {

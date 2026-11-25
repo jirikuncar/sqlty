@@ -610,6 +610,24 @@ def test_a_migration_is_reported_once_with_its_own_severity(cli: Cli, migrations
     ]
 
 
+@pytest.mark.parametrize(("max", "found"), [("1s", ["missing-lock-timeout"]), ("2s", [])])
+def test_a_lock_timeout_above_the_maximum_of_an_override_counts_as_unset(
+    cli: Cli, migrations: Path, max: str, found: list[str]
+) -> None:
+    (migrations / "pyproject.toml").write_text(
+        '[tool.sqlty]\nschema = "migrations/"\n'
+        'rules.missing-concurrently = "ignore"\n'
+        '[[tool.sqlty.overrides]]\ninclude = ["migrations/**"]\n'
+        f'rules.missing-lock-timeout = {{ severity = "error", max = "{max}" }}\n'
+    )
+
+    result = cli(["breaking", "--against", "HEAD", "--output-format", "json"], {"cwd": migrations})
+
+    assert [(row["rule"], row["severity"]) for row in json.loads(result.stdout)] == [
+        (rule, "error") for rule in found
+    ], result.stderr
+
+
 @pytest.mark.parametrize("baseline", ["HEAD", "baseline.sql"])
 def test_migrations_of_a_database_without_files_are_judged(
     cli: Cli, migrations: Path, baseline: str
