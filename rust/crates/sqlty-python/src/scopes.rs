@@ -5,7 +5,7 @@ use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 
 use crate::frozen::Table;
-use ruff_python_ast::visitor::{walk_expr, walk_stmt, Visitor};
+use ruff_python_ast::visitor::{walk_except_handler, walk_expr, walk_pattern, walk_stmt, Visitor};
 use ruff_python_ast::{
     self as ast, Expr, ExprCall, ExprTString, Number, Operator, Stmt, StmtClassDef,
     StmtFunctionDef, UnaryOp,
@@ -144,6 +144,19 @@ fn note<'a>(
 }
 
 impl<'a> Scan<'a> {
+    /// Records that the innermost function or class binds `names` to what no annotation
+    /// says: an import, `for`, `with`, `def`, `class`, `except`, `match` or `:=`. The module
+    /// counts its own bindings ([`Source::bound`](crate::types::symbols::Source::bound)).
+    fn bind_unknown(&mut self, names: impl IntoIterator<Item = &'a str>) {
+        let Some(&scope) = self.stack.last() else {
+            return;
+        };
+        for name in names {
+            self.parameters.remove(&(scope, name));
+            self.types.insert((scope, name), None);
+        }
+    }
+
     fn generic(&mut self, scope: Scope, params: Option<&'a ast::TypeParams>) {
         for param in params.iter().flat_map(|params| &params.type_params) {
             self.generics.insert((scope, param.name().as_str()));
@@ -198,6 +211,7 @@ impl<'a> Visitor<'a> for Walker<'a> {
     fn visit_stmt(&mut self, stmt: &'a Stmt) {
         match stmt {
             Stmt::FunctionDef(node) => {
+                self.scan.bind_unknown([node.name.as_str()]);
                 let scope = self.scan.scopes.len();
                 self.scan.scopes.push(Node::Function(node));
                 let parameters = &node.parameters;
@@ -220,6 +234,7 @@ impl<'a> Visitor<'a> for Walker<'a> {
                 return;
             }
             Stmt::ClassDef(node) => {
+                self.scan.bind_unknown([node.name.as_str()]);
                 let scope = self.scan.scopes.len();
                 self.scan.scopes.push(Node::Class(node));
                 self.scan.generic(scope, node.type_params.as_deref());
@@ -237,6 +252,22 @@ impl<'a> Visitor<'a> for Walker<'a> {
                 let targets: Vec<&Expr> = node.targets.iter().collect();
                 self.scan.typed(&targets, &kind);
             }
+            Stmt::Import(node) => self.scan.bind_unknown(node.names.iter().map(|alias| {
+                let name = alias.asname.as_ref().unwrap_or(&alias.name).as_str();
+                name.split('.').next().unwrap_or(name)
+            })),
+            Stmt::ImportFrom(node) => self.scan.bind_unknown(
+                node.names
+                    .iter()
+                    .map(|alias| alias.asname.as_ref().unwrap_or(&alias.name).as_str()),
+            ),
+            Stmt::For(node) => self.scan.bind_unknown(stored(&node.target)),
+            Stmt::With(node) => self.scan.bind_unknown(
+                node.items
+                    .iter()
+                    .filter_map(|item| item.optional_vars.as_deref())
+                    .flat_map(stored),
+            ),
             Stmt::AnnAssign(node) => {
                 let annotation = match node.annotation.as_ref() {
                     Expr::Subscript(subscript) => subscript.value.as_ref(),
@@ -265,10 +296,34 @@ impl<'a> Visitor<'a> for Walker<'a> {
         walk_stmt(self, stmt);
     }
 
+    fn visit_except_handler(&mut self, handler: &'a ast::ExceptHandler) {
+        let ast::ExceptHandler::ExceptHandler(node) = handler;
+        self.scan
+            .bind_unknown(node.name.as_ref().map(ruff_python_ast::Identifier::as_str));
+        walk_except_handler(self, handler);
+    }
+
+    fn visit_pattern(&mut self, pattern: &'a ast::Pattern) {
+        if let ast::Pattern::MatchAs(ast::PatternMatchAs {
+            name: Some(name), ..
+        })
+        | ast::Pattern::MatchStar(ast::PatternMatchStar {
+            name: Some(name), ..
+        })
+        | ast::Pattern::MatchMapping(ast::PatternMatchMapping {
+            rest: Some(name), ..
+        }) = pattern
+        {
+            self.scan.bind_unknown([name.as_str()]);
+        }
+        walk_pattern(self, pattern);
+    }
+
     #[recursive::recursive]
     fn visit_expr(&mut self, expr: &'a Expr) {
         let scope = self.scan.stack.last().copied().unwrap_or(0);
         match expr {
+            Expr::Named(named) => self.scan.bind_unknown(stored(&named.target)),
             Expr::Call(call) => self.scan.calls.push((call, scope)),
             Expr::TString(template) => {
                 self.scan.templates.push((template, scope));
@@ -282,6 +337,18 @@ impl<'a> Visitor<'a> for Walker<'a> {
             _ => {}
         }
         walk_expr(self, expr);
+    }
+}
+
+/// The names a target binds: `a`, `(a, *b)` or `[a, b]`.
+fn stored(target: &Expr) -> Vec<&str> {
+    match target {
+        Expr::Name(name) => vec![name.id.as_str()],
+        Expr::Tuple(ast::ExprTuple { elts, .. }) | Expr::List(ast::ExprList { elts, .. }) => {
+            elts.iter().flat_map(stored).collect()
+        }
+        Expr::Starred(starred) => stored(&starred.value),
+        _ => Vec::new(),
     }
 }
 
@@ -451,6 +518,25 @@ mod tests {
         assert_eq!(strings, [true, true, false, false]);
         assert!(matches!(scan.strings[2].0, Expr::TString(_)));
         assert!(matches!(scan.strings[3].0, Expr::StringLiteral(_)));
+    }
+
+    #[test]
+    fn a_function_binds_imports_and_loop_targets_to_no_class() {
+        let text = "import os\ndef f(a: int):\n    import os.path, json as a\n    \
+                    for (b, *c), d.e in []:\n        pass\n    g: int = 1\n";
+        let parsed = parse_module(text).unwrap();
+        let scan = Scan::new(&parsed.syntax().body);
+        let mut bound: Vec<&str> = scan
+            .types
+            .iter()
+            .filter(|(&(scope, _), kind)| scope == 1 && kind.is_none())
+            .map(|(&(_, name), _)| name)
+            .collect();
+        bound.sort_unstable();
+        assert_eq!(bound, ["a", "b", "c", "os"]);
+        assert!(!scan.parameters.contains(&(1, "a")));
+        assert_eq!(scan.types[&(1, "g")].as_deref(), Some("int"));
+        assert!(!scan.types.contains_key(&(0, "os")));
     }
 
     #[test]

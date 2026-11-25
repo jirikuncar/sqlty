@@ -27,13 +27,20 @@ const SPELLINGS: [(&str, &str, bool); 8] = [
         false,
     ),
 ];
-/// Bindings of `{head}` in a block that never runs.
-const NESTED: [&str; 5] = [
+/// Bindings of `{head}` in a block that never runs, through `global` in a function that is
+/// never called, or by a star import that may bind it.
+const NESTED: [&str; 11] = [
     "if False:\n    {head} = {other}\n",
     "if False:\n    def {head}(value):\n        return None\n",
     "if False:\n    from decimal import Decimal as {head}\n",
     "try:\n    pass\nexcept Exception as {head}:\n    pass\n",
     "match 0:\n    case [{head}]:\n        pass\n",
+    "def _reset():\n    global {head}\n    {head} = {other}\n",
+    "from decimal import *\n",
+    "for {head} in []:\n    pass\n",
+    "if False:\n    with open(\"x\") as {head}:\n        pass\n",
+    "if False:\n    class {head}:\n        pass\n",
+    "if False and ({head} := None):\n    pass\n",
 ];
 const IMPORTS: &str = "import datetime\nfrom decimal import Decimal\nfrom uuid import UUID";
 const BASES: [&str; 8] = [
