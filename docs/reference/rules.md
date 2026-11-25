@@ -82,6 +82,7 @@ stale-type = "error"
 | [`drop-primary-key`](rules/drop-primary-key.md) | Migration | warn | no | Migration leaves a table without a replica identity |
 | [`rerun-backfill`](rules/rerun-backfill.md) | Migration | warn | no | Migration copies rows in a way that fails or duplicates when run again |
 | [`dropped-delete-action`](rules/dropped-delete-action.md) | Migration | warn | no | Migration drops a foreign key with an ON DELETE or ON UPDATE action |
+| [`backfill-without-writer`](rules/backfill-without-writer.md) | Migration | warn | no | Migration backfills a column that the new code does not write |
 | [`unused-ignore`](rules/unused-ignore.md) | Suppression | warn | no | # sqlty: ignore comment that suppresses nothing |
 | [`internal-error`](rules/internal-error.md) | Internal | error | no | sqlty crashed checking the file |
 <!-- /generated:rules -->
