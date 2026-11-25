@@ -254,26 +254,24 @@ fn checked(columns: &[RawColumn], expr: &Expr, dialect: SqlDialect) -> Vec<(usiz
 /// `OR` of `AND`s of `col = constant`, `col IN (constants)` and `col IS [NOT] NULL`, with
 /// both a value and a NULL test.
 pub(super) fn discriminates(check: &Expr) -> bool {
-    fn leaves<'e>(expr: &'e Expr, into: &mut Vec<&'e Expr>) -> bool {
+    fn leaves<'e>(expr: &'e Expr, into: &mut Vec<&'e Expr>) {
         match expr {
             Expr::Nested(inner) => leaves(inner, into),
             Expr::BinaryOp {
                 left,
                 op: BinaryOperator::And | BinaryOperator::Or,
                 right,
-            } => leaves(left, into) && leaves(right, into),
-            leaf => {
-                into.push(leaf);
-                true
+            } => {
+                leaves(left, into);
+                leaves(right, into);
             }
+            leaf => into.push(leaf),
         }
     }
     let column = |expr: &Expr| matches!(expr, Expr::Identifier(_));
     let constant = |expr: &Expr| values::constant(expr).is_some();
     let mut found = Vec::new();
-    if !leaves(check, &mut found) {
-        return false;
-    }
+    leaves(check, &mut found);
     let (mut values, mut nulls) = (false, false);
     for leaf in found {
         match leaf {
