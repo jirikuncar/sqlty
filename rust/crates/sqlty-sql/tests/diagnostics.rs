@@ -35,7 +35,7 @@ const CASES: &[Case] = &[
     ("postgres", "UPDATE states SET id = 2 WHERE status = 'gone' OR status IN ('open', 'lost') OR level = '2'", &[]),
     ("mysql", "SELECT id FROM states WHERE status = 'gone'", &[]),
     ("postgres", "UPDATE states SET (status, level) = (SELECT 'gone', 2) WHERE id = 1", &[]),
-    ("postgres", "INSERT INTO states TABLE states", &[]),
+    ("postgres", "INSERT INTO states SELECT 1, 'gone', 1 UNION TABLE states", &["[literal-write] `states.status` is 'open' or 'shut', not 'gone'"]),
     ("postgres", "INSERT INTO states (id, status) (SELECT 1, 'gone')", &["[literal-write] `states.status` is 'open' or 'shut', not 'gone'"]),
     ("postgres", "WITH RECURSIVE t(id, s) AS (SELECT 1, 'open' UNION ALL SELECT 2, 'shut' UNION ALL SELECT id + 1, s FROM t WHERE s = 'shut' AND id < 9) SELECT id FROM t", &[]),
     ("sqlite", "SELECT id FROM states WHERE status = 'gone' AND level IN ()", &["[unmatched-literal] `states.status` is never 'gone', so this WHERE matches no row"]),
