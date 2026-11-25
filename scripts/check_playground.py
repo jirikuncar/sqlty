@@ -788,7 +788,10 @@ class Coverage:
 
 def count(ranges: list[dict[str, int]], at: int) -> int:
     """How often the innermost range around offset `at` ran."""
+    # Pages that share a renderer share its counts: a take may hold only some functions.
     holding = [r for r in ranges if r["startOffset"] <= at < r["endOffset"]]
+    if not holding:
+        return 0
     return min(holding, key=lambda r: r["endOffset"] - r["startOffset"])["count"]
 
 
