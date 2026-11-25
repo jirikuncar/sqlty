@@ -720,23 +720,10 @@ fn assigned_columns(assignments: &[Assignment]) -> Vec<ObjectName> {
 
 /// The expressions of each row `body`, an INSERT source, writes: the rows of `VALUES` and
 /// the items of a `SELECT`, of each side of `UNION` and the left of `EXCEPT` or `INTERSECT`.
-/// A `SELECT` with a `*` or a `TABLE` gives an empty row.
+/// A `SELECT` with a `*` gives none; `TABLE t` is read as `SELECT * FROM t`.
 fn written_rows<'q>(body: &'q SetExpr, into: &mut Vec<Vec<&'q Expr>>) {
     match body {
         SetExpr::Values(values) => into.extend(values.rows.iter().map(|row| row.iter().collect())),
-        SetExpr::Select(select) => {
-            let items: Option<Vec<&Expr>> = select
-                .projection
-                .iter()
-                .map(|item| match item {
-                    SelectItem::UnnamedExpr(expr) | SelectItem::ExprWithAlias { expr, .. } => {
-                        Some(expr)
-                    }
-                    _ => None,
-                })
-                .collect();
-            into.push(items.unwrap_or_default());
-        }
         SetExpr::SetOperation {
             op, left, right, ..
         } => {
@@ -746,7 +733,21 @@ fn written_rows<'q>(body: &'q SetExpr, into: &mut Vec<Vec<&'q Expr>>) {
             }
         }
         SetExpr::Query(query) => written_rows(&query.body, into),
-        _ => into.push(Vec::new()),
+        body => {
+            if let SetExpr::Select(select) = body {
+                let items: Option<Vec<&Expr>> = select
+                    .projection
+                    .iter()
+                    .map(|item| match item {
+                        SelectItem::UnnamedExpr(expr) | SelectItem::ExprWithAlias { expr, .. } => {
+                            Some(expr)
+                        }
+                        _ => None,
+                    })
+                    .collect();
+                into.extend(items);
+            }
+        }
     }
 }
 
