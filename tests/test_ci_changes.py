@@ -179,3 +179,22 @@ def test_a_lock_change_is_read_against_the_base(
     assert [crate["dir"] for crate in json.loads(lines["crates"])] == [
         name for name in CRATES if name != "sqlty-ext"
     ]
+
+
+def test_lint_builds_what_the_hooks_of_the_changed_files_need() -> None:
+    """The patterns of the Lint job's `needs` step are the `files` of the hooks of prek.toml
+    that need the extension or Node."""
+    import tomllib
+
+    import yaml
+
+    hooks = {
+        hook["id"]: hook
+        for repo in tomllib.loads((ROOT / "prek.toml").read_text())["repos"]
+        for hook in repo["hooks"]
+    }
+    lint = yaml.safe_load((ROOT / ".github" / "workflows" / "tests.yml").read_text())["jobs"]["lint"]
+    [step] = [step for step in lint["steps"] if step.get("id") == "needs"]
+    assert f"extension=$(has '{hooks['sqlty-check-examples']['files']}')" in step["run"]
+    assert f"extension=$(has '{hooks['sqlty-rewrite-examples']['files']}')" in step["run"]
+    assert f"node=$(has '{hooks['vscode-check']['files']}')" in step["run"]

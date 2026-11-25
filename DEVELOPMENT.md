@@ -45,7 +45,10 @@ runs only it). Each runs when the files it depends on change:
 | file checks (whitespace, line endings, YAML/TOML/JSON syntax, ...) | any file |
 
 Hooks that edit files run one at a time; the read-only checks run in
-parallel. CI's Lint job runs the commit hooks on all files.
+parallel. CI's Lint job runs the commit hooks on the files a pull request changes,
+and on all files on a push to `main`. It builds the extension and installs Node only
+when a changed file matches a hook that needs them, and validates the plugin manifests
+only when they or `skills/` change.
 
 ## Running tests
 

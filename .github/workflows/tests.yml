@@ -535,6 +535,8 @@ jobs:
           npx playwright install --with-deps chromium
           npm run test-web
 
+  # A pull request runs each hook on the files it changes, and builds only what those hooks
+  # need; a push to main runs every hook on every file.
   lint:
     name: Lint
     runs-on: ubuntu-latest
@@ -543,6 +545,27 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: ${{ github.event_name == 'pull_request' && '0' || '1' }}
+
+      # The `files` patterns of the hooks in prek.toml that need the extension or Node.
+      - name: Find what the changed files need
+        id: needs
+        env:
+          BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || '' }}
+        run: |
+          if [ -n "$BASE" ]; then
+            changed=$(git diff --name-only --no-renames "$BASE...HEAD")
+            echo "range=--from-ref $BASE --to-ref HEAD" >> "$GITHUB_OUTPUT"
+          else
+            changed=$(git ls-files)
+            echo "range=--all-files" >> "$GITHUB_OUTPUT"
+          fi
+          has() { grep -qE "$1" <<<"$changed" && echo true || echo false; }
+          {
+            echo "extension=$(has '^(examples|src/sqlty|rust/crates)/')"
+            echo "node=$(has '^editors/vscode/')"
+            echo "plugins=$(has '^(\.claude-plugin|\.codex-plugin|\.cursor-plugin|skills)/')"
+          } >> "$GITHUB_OUTPUT"
 
       - uses: $/.github/actions/setup
         with:
@@ -553,19 +576,24 @@ jobs:
 
       # The hooks check examples with sqlty, so they need the extension.
       - name: Build Rust extension
+        if: steps.needs.outputs.extension == 'true'
         run: uv run maturin develop --manifest-path rust/crates/sqlty-ext/Cargo.toml
 
-      # The hook of editors/vscode runs tsc, oxlint and oxfmt.
+      # The hook of editors/vscode runs tsc, oxlint and oxfmt; the plugin check runs on Node.
       - name: Install Node
+        if: steps.needs.outputs.node == 'true' || steps.needs.outputs.plugins == 'true'
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22.23.4
 
       # Type checker tests of SQL[T] run with pytest in the test jobs
       - name: Run prek
-        run: uv run prek run --all-files --show-diff-on-failure
+        env:
+          RANGE: ${{ steps.needs.outputs.range }}
+        run: uv run prek run $RANGE --show-diff-on-failure
 
       - name: Validate the plugin manifests
+        if: steps.needs.outputs.plugins == 'true'
         run: npx --yes @anthropic-ai/claude-code@2.1.311 plugin validate --strict --profile directory .
 
       # Show diff ONLY if previous step failed
