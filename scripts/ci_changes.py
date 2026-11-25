@@ -22,6 +22,18 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 CRATES = ROOT / "rust" / "crates"
 
+# What every pytest run loads: the package, the configuration and its plugins.
+PYTEST = [
+    "src/**",
+    "pyproject.toml",
+    "uv.lock",
+    "tests/conftest.py",
+    "tests/_mdtest/**",
+    "tests/_no_exec.py",
+]
+# The Markdown whose queries the database tests run.
+CORPUS = ["tests/mdtest/**", "docs/**.md"]
+
 # Paths a package owns, and the packages it depends on beyond its own crates.
 PACKAGES: dict[str, tuple[list[str], list[str]]] = {
     # The extension is tested through the Python package, which reads most of the repository.
@@ -51,16 +63,46 @@ PACKAGES: dict[str, tuple[list[str], list[str]]] = {
         ],
         ["sqlty-ext"],
     ),
-    # The jobs that build and run the engine itself: a change to the docs alone skips them.
-    "engine": (
+    # The jobs that build and run the engine itself, each on the files it reads besides the
+    # extension: a change to another test or to the docs alone skips them.
+    "free-threaded": ([*PYTEST, "tests/test_threads.py"], ["sqlty-ext"]),
+    "pg-fidelity": (
+        [
+            *PYTEST,
+            *CORPUS,
+            "tests/test_pg_describe.py",
+            "tests/test_pg_common_types.py",
+            "tests/test_driver_values.py",
+            "tests/_pg_seed.py",
+            "tests/_value_types.py",
+            "tests/fixtures/pg_common_types.toml",
+            "tests/fixtures/driver_values.toml",
+        ],
+        ["sqlty-ext"],
+    ),
+    "mysql-fidelity": (
+        [
+            *PYTEST,
+            *CORPUS,
+            "tests/test_server_describe.py",
+            "tests/test_driver_values.py",
+            "tests/_value_types.py",
+            "tests/fixtures/driver_values.toml",
+        ],
+        ["sqlty-ext"],
+    ),
+    # The performance budget and CodSpeed.
+    "bench": ([*PYTEST, "benchmarks/**", "Makefile"], ["sqlty-ext"]),
+    # The wheel and sdist, which carry the Agent Skills.
+    "package": (
         [
             "src/**",
-            "tests/**",
-            "benchmarks/**",
-            # The package job checks that the sdist carries them.
             "skills/**",
             "pyproject.toml",
             "uv.lock",
+            "README.md",
+            "LICENSE",
+            "tests/check_dist.py",
             ".github/workflows/pypi.yml",
         ],
         ["sqlty-ext"],
