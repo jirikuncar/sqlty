@@ -79,6 +79,7 @@ stale-type = "error"
 | [`locked-backfill`](rules/locked-backfill.md) | Migration | warn | no | Migration backfills a table its transaction has locked |
 | [`unbatched-backfill`](rules/unbatched-backfill.md) | Migration | warn | no | Migration updates or deletes the rows of a table in one statement |
 | [`drop-primary-key`](rules/drop-primary-key.md) | Migration | warn | no | Migration leaves a table without a replica identity |
+| [`rerun-backfill`](rules/rerun-backfill.md) | Migration | warn | no | Migration copies rows in a way that fails or duplicates when run again |
 | [`dropped-delete-action`](rules/dropped-delete-action.md) | Migration | warn | no | Migration drops a foreign key with an ON DELETE or ON UPDATE action |
 | [`unused-ignore`](rules/unused-ignore.md) | Suppression | warn | no | # sqlty: ignore comment that suppresses nothing |
 | [`internal-error`](rules/internal-error.md) | Internal | error | no | sqlty crashed checking the file |
