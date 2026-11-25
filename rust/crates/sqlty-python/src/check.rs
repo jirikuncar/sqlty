@@ -444,10 +444,19 @@ struct Module<'a, 'r> {
     /// Helper calls.
     found: Vec<Call<'a>>,
     driver_calls: Vec<Call<'a>>,
+    first_rows: Vec<FirstRow>,
     declared: Vec<Declared<'a>>,
     /// The row type of each helper call with a query, as written.
     rows: Vec<Option<String>>,
     literals: Option<HashSet<String>>,
+}
+
+/// A driver call that reads only the first row of its query.
+struct FirstRow {
+    line: usize,
+    query: String,
+    span: (usize, usize),
+    method: &'static str,
 }
 
 impl<'a> Module<'a, '_> {
@@ -561,6 +570,29 @@ impl<'a> Module<'a, '_> {
         }
         for (rule, message, line, span) in reports {
             self.ctx.report(rule, message, line, span);
+        }
+    }
+
+    fn first_rows(&mut self) {
+        if !self.enabled(Rule::FirstRowOfMany) {
+            return;
+        }
+        let mut reports = Vec::new();
+        for call in &self.first_rows {
+            if self.ctx.analyses.rows(&call.query) == analyzer::Rows::Many {
+                reports.push((
+                    format!(
+                        "{}() reads the first row of a query that can return many",
+                        call.method
+                    ),
+                    call.line,
+                    call.span,
+                ));
+            }
+        }
+        for (message, line, span) in reports {
+            self.ctx
+                .report(Rule::FirstRowOfMany, message, line, Some(span));
         }
     }
 
@@ -1330,8 +1362,22 @@ pub fn diagnostics(source: &Arc<Source>, run: &Run<'_>) -> Found {
         &types,
     );
     let mut driver_calls: Vec<Call<'_>> = Vec::new();
+    let mut first_rows: Vec<FirstRow> = Vec::new();
     if drivers::may_hold(text) {
         for call in drivers::find_in(text, source.body(), &source.imports, facts.scan(), types()) {
+            if let Some(method) = call.first_row {
+                if first_rows
+                    .last()
+                    .is_none_or(|last| last.span != call.query_span)
+                {
+                    first_rows.push(FirstRow {
+                        line: call.line,
+                        query: call.query.clone(),
+                        span: call.query_span,
+                        method,
+                    });
+                }
+            }
             driver_calls.push(Call {
                 line: call.line,
                 query: Some(call.query),
@@ -1480,12 +1526,14 @@ pub fn diagnostics(source: &Arc<Source>, run: &Run<'_>) -> Found {
         facts: &facts,
         found,
         driver_calls,
+        first_rows,
         declared,
         rows,
         literals: None,
     };
     module.unchecked_queries();
     module.check_params();
+    module.first_rows();
     module.declared_params();
     module.ctx.typeddict_inheritance();
     module.select_star();

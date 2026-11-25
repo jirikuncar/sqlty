@@ -267,6 +267,27 @@ impl Parsed {
         params_of(sql, self.dialect, schema, shared)
     }
 
+    /// How many rows the query returns, against `schema` as [`route`](super::route) chose it.
+    ///
+    /// ```
+    /// use sqlty_sql::analyzer::{parse, Rows};
+    ///
+    /// assert_eq!(parse("SELECT count(*) FROM t", "postgres").rows(None), Rows::One);
+    /// assert_eq!(parse("SELECT 1 LIMIT 1", "postgres").rows(None), Rows::AtMostOne);
+    /// assert_eq!(parse("SELECT a FROM t", "postgres").rows(None), Rows::Unknown);
+    /// ```
+    pub fn rows(&self, schema: Option<&SchemaData>) -> super::Rows {
+        let Some(stmt) = self.first() else {
+            return super::Rows::Unknown;
+        };
+        let analyzer = Analyzer::new(
+            schema.unwrap_or_else(|| crate::catalog::empty(self.dialect)),
+            self.dialect,
+        );
+        let Ok(rows) = analyzer.statement_rows(stmt);
+        rows
+    }
+
     /// [`analyze_with_diagnostics`] of the query.
     pub fn analyze_with_diagnostics(
         &self,

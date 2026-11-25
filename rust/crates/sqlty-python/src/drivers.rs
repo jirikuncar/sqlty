@@ -78,6 +78,9 @@ pub struct DriverCall {
     pub single: Option<String>,
     /// The byte offsets of the argument the query comes from.
     pub query_span: (usize, usize),
+    /// The method when the call reads only the first row: `fetchone` of its cursor,
+    /// asyncpg's `fetchrow` or `fetchval`, or the bundled `scalar`.
+    pub first_row: Option<&'static str>,
 }
 
 /// Whether `text` can hold a driver call at all, checked before parsing.
@@ -128,8 +131,26 @@ pub fn find_in<'a>(
         let dotted = format!("{name}.");
         dotted.starts_with(BUNDLED_MODULE) || BUNDLED_MODULE.starts_with(&dotted)
     });
+    let fetched_once = scan
+        .calls
+        .iter()
+        .filter_map(|&(call, _)| {
+            let attr = call
+                .func
+                .as_attribute_expr()
+                .filter(|attr| attr.attr.as_str() == "fetchone" && call.arguments.is_empty())?;
+            let value = match attr.value.as_ref() {
+                Expr::Await(awaited) => awaited.value.as_ref(),
+                value => value,
+            };
+            let inner = value.as_call_expr()?;
+            Some((inner.start().to_usize(), inner.end().to_usize()))
+        })
+        .collect();
     let mut finder = Finder {
         scan,
+        fetched_once,
+        first_row: None,
         types,
         body,
         bindings: HashMap::new(),
@@ -149,9 +170,15 @@ pub fn find_in<'a>(
 }
 
 type Binding<'a> = (Option<&'a Expr>, Option<&'a Expr>);
+/// The queries and parameters of a bundled helper call, and whether it is `scalar`.
+type Bundled<'a> = (Vec<(&'a Expr, Option<&'a Expr>)>, bool);
 
 struct Finder<'a, 's> {
     scan: &'s Scan<'a>,
+    /// The calls whose cursor `fetchone()` reads.
+    fetched_once: HashSet<(usize, usize)>,
+    /// [`DriverCall::first_row`] of the call being read.
+    first_row: Option<&'static str>,
     types: &'s dyn ArgTypes,
     body: &'a [Stmt],
     bindings: HashMap<Scope, HashMap<&'a str, Vec<Binding<'a>>>>,
@@ -166,7 +193,14 @@ impl<'a> Finder<'a, '_> {
         let chain: Vec<Scope> = std::iter::once(0)
             .chain(stack.iter().copied().filter(|&s| !self.scan.is_class(s)))
             .collect();
-        if let Some(bundled) = self.bundled(call) {
+        self.first_row = self
+            .fetched_once
+            .contains(&(call.start().to_usize(), call.end().to_usize()))
+            .then_some("fetchone");
+        if let Some((bundled, scalar)) = self.bundled(call) {
+            if scalar {
+                self.first_row = Some("scalar");
+            }
             for (first, arg) in bundled {
                 let query = self.query_of(first, &chain);
                 self.calls(call, first, arg, "psycopg", query, stack, false);
@@ -185,6 +219,11 @@ impl<'a> Finder<'a, '_> {
         let Some(driver) = self.driver(receiver.id.as_str(), &chain) else {
             return;
         };
+        match (driver, attr) {
+            ("asyncpg", "fetchrow") => self.first_row = Some("fetchrow"),
+            ("asyncpg", "fetchval") => self.first_row = Some("fetchval"),
+            _ => {}
+        }
         let checked = methods(driver).contains(&attr)
             && !args.iter().any(|arg| matches!(arg, Expr::Starred(_)));
         let Some((first, query)) = args
@@ -308,6 +347,7 @@ impl<'a> Finder<'a, '_> {
             driver,
             single,
             query_span: (first.start().to_usize(), first.end().to_usize()),
+            first_row: self.first_row,
         });
     }
 
@@ -318,8 +358,9 @@ impl<'a> Finder<'a, '_> {
             .line(offset)
     }
 
-    /// The query and parameters of a call to a `sqlty.drivers.psycopg` helper.
-    fn bundled(&self, call: &'a ExprCall) -> Option<Vec<(&'a Expr, Option<&'a Expr>)>> {
+    /// The query and parameters of a call to a `sqlty.drivers.psycopg` helper, and whether
+    /// it is `scalar`.
+    fn bundled(&self, call: &'a ExprCall) -> Option<Bundled<'a>> {
         let name = self.types.qualified(&call.func)?;
         let scalar = match name.strip_prefix(BUNDLED_MODULE)? {
             "execute" => false,
@@ -332,18 +373,18 @@ impl<'a> Finder<'a, '_> {
             || args.iter().any(|arg| matches!(arg, Expr::Starred(_)))
             || (params.is_none() && call.arguments.keywords.iter().any(|k| k.arg.is_none()))
         {
-            return Some(Vec::new());
+            return Some((Vec::new(), scalar));
         }
         let mut rest = &args[2..];
         if scalar && rest.len() == 1 {
             if matches!(rest[0], Expr::Name(_)) && params.is_none() {
-                return Some(Vec::new());
+                return Some((Vec::new(), scalar));
             }
             if !matches!(rest[0], Expr::Tuple(_) | Expr::List(_) | Expr::Dict(_)) {
                 rest = &[];
             }
         }
-        Some(vec![(&args[1], rest.last().or(params))])
+        Some((vec![(&args[1], rest.last().or(params))], scalar))
     }
 
     fn of(&mut self, scope: Scope) -> &HashMap<&'a str, Vec<Binding<'a>>> {

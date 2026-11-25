@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use sqlty_sql::analyzer::SchemaData;
-use sqlty_sql::analyzer::{analyze_params, parse, route, row_type, Column, Param, Parsed};
+use sqlty_sql::analyzer::{analyze_params, parse, route, row_type, Column, Param, Parsed, Rows};
 use sqlty_sql::diagnostics::NameDiagnostic;
 
 use crate::options::Options;
@@ -96,6 +96,21 @@ impl<'a> Analyses<'a> {
             .or_default()
             .params = Some(params.clone());
         params
+    }
+
+    /// How many rows `query` returns: the tree of an analyzed query is reused, any other is
+    /// parsed and dropped after use.
+    pub(crate) fn rows(&self, query: &str) -> Rows {
+        let (dialect, schema) = self.routed(query);
+        let analyzed = self
+            .known
+            .borrow()
+            .get(query)
+            .and_then(|s| s.analysis.clone());
+        match analyzed {
+            Some(analysis) => analysis.parsed.rows(schema),
+            None => self.parse(query, dialect).rows(schema),
+        }
     }
 
     fn routed(&self, query: &str) -> (&'a str, Option<&'a SchemaData>) {

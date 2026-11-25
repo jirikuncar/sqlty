@@ -9,6 +9,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 mod api;
+mod cardinality;
 mod complete;
 mod databases;
 mod dialect;
@@ -64,6 +65,7 @@ pub use api::{
     row_type, statement_ranges, Parsed,
 };
 pub(crate) use api::{typed, view_columns};
+pub use cardinality::Rows;
 pub use complete::{complete, Candidate, CandidateKind, Completions};
 pub use databases::{
     database_name, route, route_named, unknown_database, unknown_named, Databases, DEFAULT,

@@ -158,7 +158,7 @@ impl Analyzer<'_> {
     }
 
     /// The keys of a source: `None` when they are not known (a view, a function).
-    fn keys_of(&self, table: Option<&str>) -> Option<Vec<Vec<String>>> {
+    pub(super) fn keys_of(&self, table: Option<&str>) -> Option<Vec<Vec<String>>> {
         let table = table?;
         if self.virtual_columns(table).is_some() {
             return self.virtuals.key(table).map(|key| vec![key.to_vec()]);
@@ -172,7 +172,7 @@ impl Analyzer<'_> {
     }
 
     /// The source in `scope` a column reference reads, and the column.
-    fn column_of(&self, expr: &Expr, scope: &Scope) -> Option<(usize, String)> {
+    pub(super) fn column_of(&self, expr: &Expr, scope: &Scope) -> Option<(usize, String)> {
         let expr = strip(expr);
         if !matches!(expr, Expr::Identifier(_) | Expr::CompoundIdentifier(_)) {
             return None;
@@ -597,7 +597,7 @@ pub(super) fn strip(expr: &Expr) -> &Expr {
 /// Whether `expr` has one value for the whole query: no column, subquery or function.
 /// Whether `expr` has one value for every row of the source `reference`: a constant, or
 /// scalar subqueries whose columns are all qualified, none by `reference`.
-fn pins(expr: &Expr, reference: &str) -> bool {
+pub(super) fn pins(expr: &Expr, reference: &str) -> bool {
     struct Find<'a> {
         reference: &'a str,
         depth: usize,
