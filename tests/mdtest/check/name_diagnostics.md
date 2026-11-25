@@ -361,6 +361,29 @@ c = SQL[tuple[str]]("--sql\nSELECT shape FROM users")
 f = SQL[tuple[object]]("--sql\nSELECT 1 OPERATOR(pg_catalog.+) 1")
 ```
 
+##### Functions outside the select list
+
+A call in `WHERE`, `JOIN ... ON`, `ORDER BY` or a subquery fails at run time just as one
+in the select list does, so it is reported too. A built-in sqlty types, such as `lower`,
+is not.
+
+```python
+from sqlty import SQL
+
+# error: [unknown-function] "function `frobnicate` is not known to sqlty"
+a = SQL[tuple[int]]("--sql\nSELECT id FROM users WHERE frobnicate(id)")
+# error: [unknown-function] "function `frobnicate` is not known to sqlty"
+b = SQL[tuple[int]]("--sql\nSELECT u.id FROM users u JOIN orders o ON o.user_id = u.id AND frobnicate(o.id)")
+# error: [unknown-function] "function `frobnicate` is not known to sqlty"
+c = SQL[tuple[int]]("--sql\nSELECT id FROM users ORDER BY frobnicate(id)")
+# error: [unknown-function] "function `frobnicate` is not known to sqlty"
+d = SQL[tuple[int]]("--sql\nSELECT id FROM users u WHERE EXISTS (SELECT 1 FROM orders o WHERE o.user_id = u.id AND frobnicate(o.id))")
+# error: [unknown-function] "function `frobnicate` is not known to sqlty"
+e = SQL[tuple[int]]("--sql\nSELECT id FROM users WHERE lower(frobnicate(name)) = 'a'")
+# error:
+f = SQL[tuple[int]]("--sql\nSELECT id FROM users WHERE lower(name) = 'a' ORDER BY coalesce(team_id, 0)")
+```
+
 #### Annotated helpers
 
 ```python
