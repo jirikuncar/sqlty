@@ -44,6 +44,8 @@ def hit(*changed: str) -> set[str]:
     (["rust/mdtest/harness.rs"], MDTEST),
     (["plans/2026-11-19-x.md", ".github/workflows/fuzz.yml"], set()),
     (["CONTRIBUTING.md"], {"docs"}),
+    ([".vale/styles/config/vocabularies/SQLTy/accept.txt", ".vale.ini"], {"docs"}),
+    ([".python-version", ".vscode/extensions.json"], set()),
     ([".github/pull_request_template.md"], {"docs"}),
     (["tests/test_docs.py"], {"python", "docs"}),
     (["skills/sqlty/SKILL.md"], {"sqlty-cli", "sqlty-ext", "python", "docs", *ENGINE, "vscode", "site", *MDTEST}),
@@ -75,6 +77,23 @@ def test_a_change_runs_its_packages_and_their_dependents(
     changed: list[str], expected: set[str]
 ) -> None:
     assert hit(*changed) == expected
+
+
+def test_every_tracked_file_has_a_rule() -> None:
+    """A file no package owns runs everything; each must be owned, ignored or listed in
+    EVERYTHING, so a new file is placed on purpose."""
+    tracked = subprocess.run(
+        ["git", "ls-files"], cwd=ROOT, check=True, capture_output=True, text=True
+    ).stdout.split()
+    crates = set(CRATES)
+    unplaced = [
+        path
+        for path in tracked
+        if ci_changes.owners(path, crates) is None
+        and not ci_changes.matches(path, ci_changes.EVERYTHING)
+        and path != ci_changes.LOCK
+    ]
+    assert unplaced == []
 
 
 def test_no_base_runs_every_package() -> None:

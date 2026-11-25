@@ -533,6 +533,7 @@ jobs:
             echo "extension=$(has '^(examples|src/sqlty|rust/crates)/')"
             echo "node=$(has '^editors/vscode/')"
             echo "plugins=$(has '^(\.claude-plugin|\.codex-plugin|\.cursor-plugin|skills)/')"
+            echo "vale=$(has '^\.vale(\.ini$|/)')"
           } >> "$GITHUB_OUTPUT"
 
       - uses: $/.github/actions/setup
@@ -559,6 +560,11 @@ jobs:
         env:
           RANGE: ${{ steps.needs.outputs.range }}
         run: uv run prek run $RANGE --show-diff-on-failure
+
+      # The styles judge every page, not only the changed ones.
+      - name: Run Vale on every page
+        if: steps.needs.outputs.vale == 'true' && github.event_name == 'pull_request'
+        run: uv run prek run vale --all-files
 
       - name: Validate the plugin manifests
         if: steps.needs.outputs.plugins == 'true'

@@ -31,8 +31,8 @@ PYTEST = [
     "tests/_mdtest/**",
     "tests/_no_exec.py",
 ]
-# The Markdown of the guides, at the root and in docs/.
-DOCS = ["docs/**.md", "*.md", ".github/*.md"]
+# The Markdown of the guides, at the root and in docs/, and the Vale styles that judge it.
+DOCS = ["docs/**.md", "*.md", ".github/*.md", ".vale.ini", ".vale/**"]
 # The tests of the docs job besides the mdtests of docs/ and README.md: each reads the guides.
 DOCS_TESTS = [
     "tests/test_docs.py",
@@ -204,6 +204,9 @@ IGNORED = [
     "wrangler.jsonc",
     "context7.json",
     ".gitignore",
+    # The interpreter uv picks locally and the editor's recommendations: CI names its own.
+    ".python-version",
+    ".vscode/**",
 ]
 
 
