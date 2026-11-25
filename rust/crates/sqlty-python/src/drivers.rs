@@ -415,6 +415,47 @@ impl<'a> Finder<'a, '_> {
         }
     }
 
+    /// The qualified class the annotation `expr` names, through the aliases and `NewType`s
+    /// of `chain` that bind it once: `psycopg.Connection` for `Conn` after
+    /// `Conn = psycopg.Connection` or `Conn = NewType("Conn", psycopg.Connection)`.
+    fn class_of(&mut self, expr: &'a Expr, chain: &[Scope]) -> Option<String> {
+        let mut expr = expr;
+        let mut seen = HashSet::new();
+        loop {
+            let Expr::Name(name) = expr else {
+                return self.types.qualified(expr);
+            };
+            let name = name.id.as_str();
+            if !seen.insert(name) {
+                return None;
+            }
+            let value = match self.lookup(name, chain).as_deref() {
+                Some(&[(Some(value), None)]) => value,
+                Some(&[(Some(value), Some(annotation))])
+                    if matches!(
+                        self.types.qualified(annotation).as_deref(),
+                        Some("typing.TypeAlias" | "typing_extensions.TypeAlias")
+                    ) =>
+                {
+                    value
+                }
+                _ => return self.types.qualified(expr),
+            };
+            expr = match value {
+                Expr::Call(call)
+                    if matches!(
+                        self.types.qualified(&call.func).as_deref(),
+                        Some("typing.NewType" | "typing_extensions.NewType")
+                    ) =>
+                {
+                    call.arguments.args.get(1)?
+                }
+                Expr::Name(_) | Expr::Attribute(_) => value,
+                _ => return None,
+            };
+        }
+    }
+
     fn kind(
         &mut self,
         value: Option<&'a Expr>,
@@ -422,7 +463,7 @@ impl<'a> Finder<'a, '_> {
         chain: &[Scope],
     ) -> Option<&'static str> {
         if let Some(annotation) = annotation {
-            if let Some(name) = self.types.qualified(annotation) {
+            if let Some(name) = self.class_of(annotation, chain) {
                 if let Some((_, driver)) = CONNECTIONS
                     .iter()
                     .chain(&CURSORS)
@@ -661,6 +702,25 @@ mod tests {
                 kind: Some("float".into())
             }])
         );
+    }
+
+    #[test]
+    fn annotations_through_aliases_and_newtypes() {
+        let header = "import psycopg\nfrom typing import NewType, TypeAlias\n";
+        let receiver = |aliases: &str| {
+            let source =
+                format!("{header}{aliases}\ndef f(c: C):\n    c.execute('SELECT %s', (1,))\n");
+            calls(&source).first().map(|call| call.driver)
+        };
+        assert_eq!(
+            receiver("B = psycopg.Connection\nC = NewType('C', B)"),
+            Some("psycopg")
+        );
+        assert_eq!(receiver("C: TypeAlias = psycopg.Cursor"), Some("psycopg"));
+        assert_eq!(receiver("C = D\nD = C"), None);
+        assert_eq!(receiver("C = NewType('C')"), None);
+        assert_eq!(receiver("C = psycopg.Connection | None"), None);
+        assert_eq!(receiver("C: object = psycopg.Connection"), None);
     }
 
     #[test]
