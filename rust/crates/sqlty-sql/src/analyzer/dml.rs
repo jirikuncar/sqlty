@@ -720,7 +720,7 @@ fn assigned_columns(assignments: &[Assignment]) -> Vec<ObjectName> {
 
 /// The expressions of each row `body`, an INSERT source, writes: the rows of `VALUES` and
 /// the items of a `SELECT`, of each side of `UNION` and the left of `EXCEPT` or `INTERSECT`.
-/// A `SELECT` with a `*` gives none.
+/// A `SELECT` with a `*` or a `TABLE` gives an empty row.
 fn written_rows<'q>(body: &'q SetExpr, into: &mut Vec<Vec<&'q Expr>>) {
     match body {
         SetExpr::Values(values) => into.extend(values.rows.iter().map(|row| row.iter().collect())),
@@ -735,7 +735,7 @@ fn written_rows<'q>(body: &'q SetExpr, into: &mut Vec<Vec<&'q Expr>>) {
                     _ => None,
                 })
                 .collect();
-            into.extend(items);
+            into.push(items.unwrap_or_default());
         }
         SetExpr::SetOperation {
             op, left, right, ..
@@ -746,7 +746,7 @@ fn written_rows<'q>(body: &'q SetExpr, into: &mut Vec<Vec<&'q Expr>>) {
             }
         }
         SetExpr::Query(query) => written_rows(&query.body, into),
-        _ => {}
+        _ => into.push(Vec::new()),
     }
 }
 
