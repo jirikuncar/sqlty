@@ -779,6 +779,116 @@ def insert(branch: Branch, decoyed: decoy.Id, block: blocks.Id, defined: defined
     fetch_all("INSERT INTO items (id, owner_id) VALUES (1, %(owner_id)s) RETURNING id, owner_id", Row, owner_id=matched)
 ```
 
+#### Bound in a function, through `global` or a star import
+
+A function that binds the name of the annotation, by `global` from another function, an
+import, `for`, `with`, `def`, `class`, `except`, `match` or `:=`, and a star import that
+may bind it, keep the argument of unknown type too.
+
+`star.py`:
+
+```python
+Starred = int | None
+```
+
+```python
+from typing import NamedTuple, NewType
+
+from db import fetch_all
+
+Starred = NewType("Starred", int)
+
+from star import *
+
+class Row(NamedTuple):
+    id: int
+    owner_id: int
+
+def insert(starred: Starred) -> None:
+    # error: [nullable-mismatch] "Row.owner_id is int but query column 'owner_id' can be NULL"
+    fetch_all("INSERT INTO items (id, owner_id) VALUES (1, %(owner_id)s) RETURNING id, owner_id", Row, owner_id=starred)
+```
+
+```python
+from typing import NamedTuple, NewType
+
+from db import fetch_all
+
+Id = NewType("Id", int)
+Kept = NewType("Kept", int)
+
+class Row(NamedTuple):
+    id: int
+    owner_id: int
+
+def reset() -> None:
+    global Id
+    Id = int | None
+
+def insert(rebound: Id) -> None:
+    # error: [nullable-mismatch] "Row.owner_id is int but query column 'owner_id' can be NULL"
+    fetch_all("INSERT INTO items (id, owner_id) VALUES (1, %(owner_id)s) RETURNING id, owner_id", Row, owner_id=rebound)
+
+def imported() -> None:
+    from decimal import Decimal as Kept
+    x: Kept = Kept(1)
+    # error: [nullable-mismatch] "Row.owner_id is int but query column 'owner_id' can be NULL"
+    fetch_all("INSERT INTO items (id, owner_id) VALUES (1, %(owner_id)s) RETURNING id, owner_id", Row, owner_id=x)
+
+def looped(items: list[int]) -> None:
+    for Kept in items:
+        pass
+    x: Kept = Kept(1)
+    # error: [nullable-mismatch] "Row.owner_id is int but query column 'owner_id' can be NULL"
+    fetch_all("INSERT INTO items (id, owner_id) VALUES (1, %(owner_id)s) RETURNING id, owner_id", Row, owner_id=x)
+
+def managed(manager: object) -> None:
+    with manager as Kept:
+        pass
+    x: Kept = Kept(1)
+    # error: [nullable-mismatch] "Row.owner_id is int but query column 'owner_id' can be NULL"
+    fetch_all("INSERT INTO items (id, owner_id) VALUES (1, %(owner_id)s) RETURNING id, owner_id", Row, owner_id=x)
+
+def defined() -> None:
+    def Kept(value: int) -> None: ...
+    x: Kept = Kept(1)
+    # error: [nullable-mismatch] "Row.owner_id is int but query column 'owner_id' can be NULL"
+    fetch_all("INSERT INTO items (id, owner_id) VALUES (1, %(owner_id)s) RETURNING id, owner_id", Row, owner_id=x)
+
+def classed() -> None:
+    class Kept: ...
+    x: Kept = Kept()
+    # error: [nullable-mismatch] "Row.owner_id is int but query column 'owner_id' can be NULL"
+    fetch_all("INSERT INTO items (id, owner_id) VALUES (1, %(owner_id)s) RETURNING id, owner_id", Row, owner_id=x)
+
+def walrus(value: object) -> None:
+    if (Kept := value):
+        pass
+    x: Kept = Kept(1)
+    # error: [nullable-mismatch] "Row.owner_id is int but query column 'owner_id' can be NULL"
+    fetch_all("INSERT INTO items (id, owner_id) VALUES (1, %(owner_id)s) RETURNING id, owner_id", Row, owner_id=x)
+
+def caught() -> None:
+    try:
+        pass
+    except Exception as Kept:
+        pass
+    x: Kept = Kept(1)
+    # error: [nullable-mismatch] "Row.owner_id is int but query column 'owner_id' can be NULL"
+    fetch_all("INSERT INTO items (id, owner_id) VALUES (1, %(owner_id)s) RETURNING id, owner_id", Row, owner_id=x)
+
+def matched(value: object) -> None:
+    match value:
+        case [Kept]:
+            pass
+    x: Kept = Kept(1)
+    # error: [nullable-mismatch] "Row.owner_id is int but query column 'owner_id' can be NULL"
+    fetch_all("INSERT INTO items (id, owner_id) VALUES (1, %(owner_id)s) RETURNING id, owner_id", Row, owner_id=x)
+
+def kept(x: Kept) -> None:
+    fetch_all("INSERT INTO items (id, owner_id) VALUES (1, %(owner_id)s) RETURNING id, owner_id", Row, owner_id=x)
+```
+
 #### Not bound again
 
 Importing what a name already holds, in `try` and `except` or as another submodule of a

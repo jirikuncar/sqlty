@@ -1,6 +1,6 @@
 //! The names the annotations of a module go through, read from source.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, PoisonError, Weak};
 
 use ruff_python_ast::token::TokenKind;
@@ -42,6 +42,8 @@ pub struct Source {
     pub(crate) constants: std::sync::OnceLock<HashMap<String, crate::compose::Binding>>,
     /// See [`bound_names`].
     bound: std::sync::OnceLock<HashMap<String, usize>>,
+    /// The names a `global` statement of a function names.
+    globals: std::sync::OnceLock<HashSet<String>>,
     /// See [`module_types`].
     local: std::sync::OnceLock<HashMap<String, Local>>,
     /// The classes module-level names hold, see [`crate::arg_types`].
@@ -78,6 +80,7 @@ impl Source {
             targets: std::sync::OnceLock::new(),
             constants: std::sync::OnceLock::new(),
             bound: std::sync::OnceLock::new(),
+            globals: std::sync::OnceLock::new(),
             local: std::sync::OnceLock::new(),
             kinds: std::sync::OnceLock::new(),
             syntax,
@@ -96,6 +99,19 @@ impl Source {
                 .collect()
         });
         bound.get(name).copied().unwrap_or(0)
+    }
+
+    /// Whether the module may bind `name` more than once: [`Source::bound`], with a star
+    /// import binding any name, and a `global` in a function binding it again.
+    pub fn rebound(&self, name: &str) -> bool {
+        let globals = self.globals.get_or_init(|| {
+            let mut globals = Globals::default();
+            for stmt in self.body() {
+                globals.visit_stmt(stmt);
+            }
+            globals.0.into_iter().map(str::to_string).collect()
+        });
+        self.bound(name) + self.bound("*") + usize::from(globals.contains(name)) > 1
     }
 
     /// [`module_types`] of the module, once.
@@ -411,6 +427,23 @@ impl<'a> Visitor<'a> for Bound<'a> {
         }
         walk_pattern(self, pattern);
     }
+}
+
+/// The names the `global` statements of the module's functions name.
+#[derive(Default)]
+struct Globals<'a>(Vec<&'a str>);
+
+impl<'a> Visitor<'a> for Globals<'a> {
+    fn visit_stmt(&mut self, stmt: &'a Stmt) {
+        match stmt {
+            Stmt::Global(node) => self
+                .0
+                .extend(node.names.iter().map(ast::Identifier::as_str)),
+            other => walk_stmt(self, other),
+        }
+    }
+
+    fn visit_expr(&mut self, _: &'a Expr) {}
 }
 
 /// How often each name is bound at module level, nested blocks included; `*` counts star
