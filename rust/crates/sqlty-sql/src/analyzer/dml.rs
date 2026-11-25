@@ -4,8 +4,8 @@ use std::collections::HashSet;
 
 use sqlparser::ast::{
     Assignment, AssignmentTarget, Expr, FromTable, Ident, MergeAction, MergeClauseKind, ObjectName,
-    OnConflict, OnConflictAction, OnInsert, OutputClause, Query, SelectItem, SetExpr, Statement,
-    TableObject, TableWithJoins, UpdateTableFromKind,
+    OnConflict, OnConflictAction, OnInsert, OutputClause, Query, SelectItem, SetExpr, SetOperator,
+    Statement, TableObject, TableWithJoins, UpdateTableFromKind,
 };
 
 use super::dialect::SqlDialect;
@@ -412,6 +412,25 @@ impl Analyzer<'_> {
                         &insert.columns
                     };
                     self.check_target_columns(name, columns);
+                    if let Some(source) = insert.source.as_deref() {
+                        let listed: Vec<Option<String>> = if insert.columns.is_empty() {
+                            let table = self.schema.table(&table_key(name, self.dialect));
+                            let visible = table.into_iter().flatten().filter(|c| !c.invisible);
+                            visible.map(|column| Some(column.name.clone())).collect()
+                        } else {
+                            columns
+                                .iter()
+                                .map(|column| self.target_name(column))
+                                .collect()
+                        };
+                        let mut rows = Vec::new();
+                        written_rows(&source.body, &mut rows);
+                        for row in rows {
+                            for (column, value) in listed.iter().zip(row) {
+                                self.check_written_value(name, column.as_deref(), value);
+                            }
+                        }
+                    }
                     let widths = insert_widths(insert, source_columns.as_ref());
                     if insert.columns.is_empty() && insert.assignments.is_empty() {
                         self.check_implicit_columns(name, widths.as_deref());
@@ -434,6 +453,7 @@ impl Analyzer<'_> {
                         if let OnConflictAction::DoUpdate(update) = &on_conflict.action {
                             let set: Vec<ObjectName> = assigned_columns(&update.assignments);
                             self.check_target_columns(name, &set);
+                            self.check_assigned_values(name, &update.assignments);
                             let mut upsert = scope.clone();
                             upsert.push(Source::named(
                                 "excluded".to_string(),
@@ -462,12 +482,17 @@ impl Analyzer<'_> {
                     &update.table.relation
                 {
                     self.check_target_columns(name, &targets);
+                    self.check_assigned_values(name, &update.assignments);
                 }
                 update.assignments.iter().for_each(|a| check(&a.value));
                 update.selection.iter().for_each(check);
+                let unmatched = |selection| analyzer.check_unmatched(selection, &scope);
+                update.selection.iter().for_each(unmatched);
             }
             Statement::Delete(delete) => {
                 delete.selection.iter().for_each(check);
+                let unmatched = |selection| analyzer.check_unmatched(selection, &scope);
+                delete.selection.iter().for_each(unmatched);
             }
             _ => {}
         }
@@ -554,6 +579,70 @@ impl Analyzer<'_> {
         }
     }
 
+    /// The folded name of the column `column` (`col` or `t.col`) names.
+    fn target_name(&self, column: &ObjectName) -> Option<String> {
+        let ident = column.0.last().and_then(|part| part.as_ident())?;
+        Some(fold(ident, self.dialect))
+    }
+
+    /// [`Analyzer::check_written_value`] of each `SET column = value` and each column of
+    /// `SET (a, b) = (x, y)`.
+    fn check_assigned_values(&self, table: &ObjectName, assignments: &[Assignment]) {
+        for assignment in assignments {
+            let targets = match &assignment.target {
+                AssignmentTarget::ColumnName(column) => std::slice::from_ref(column),
+                AssignmentTarget::Tuple(columns) => columns.as_slice(),
+            };
+            let values = match &assignment.value {
+                Expr::Tuple(values) => values.iter().collect(),
+                Expr::Nested(value) => vec![value.as_ref()],
+                value => vec![value],
+            };
+            if targets.len() == values.len() {
+                for (column, value) in targets.iter().zip(values) {
+                    let column = self.target_name(column);
+                    self.check_written_value(table, column.as_deref(), value);
+                }
+            }
+        }
+    }
+
+    /// Records `literal-write` when `value` is a constant the values of `column` of `table`
+    /// (an enum, or a `CHECK (column IN (...))`) leave out. Comparison is exact only in
+    /// PostgreSQL and SQLite: MySQL compares with case-insensitive collations by default.
+    fn check_written_value(&self, table: &ObjectName, column: Option<&str>, value: &Expr) {
+        if !self.judges_names()
+            || !matches!(self.dialect, SqlDialect::Postgres | SqlDialect::Sqlite)
+        {
+            return;
+        }
+        let key = table_key(table, self.dialect);
+        let Some(schema_column) = column.and_then(|c| self.schema.column(&key, c).flatten()) else {
+            return;
+        };
+        let (Some(allowed), Some(written)) = (
+            schema_column.values.as_deref(),
+            crate::values::constant(value),
+        ) else {
+            return;
+        };
+        if !crate::values::excludes(allowed, std::slice::from_ref(&written)) {
+            return;
+        }
+        self.diag.record_about(
+            Rule::LiteralWrite,
+            format!(
+                "`{}.{}` is {}, not {}",
+                object_name(table),
+                schema_column.ident,
+                crate::values::spell(allowed, "or"),
+                crate::values::spell(std::slice::from_ref(&written), "or")
+            ),
+            Some(&key),
+            Some(&schema_column.ident),
+        );
+    }
+
     /// Records `unknown-column` for each of `columns` (`col` or `t.col`) that the schema
     /// table `table` does not have.
     fn check_target_columns(&self, table: &ObjectName, columns: &[ObjectName]) {
@@ -627,6 +716,38 @@ fn assigned_columns(assignments: &[Assignment]) -> Vec<ObjectName> {
             AssignmentTarget::Tuple(columns) => columns.clone(),
         })
         .collect()
+}
+
+/// The expressions of each row `body`, an INSERT source, writes: the rows of `VALUES` and
+/// the items of a `SELECT`, of each side of `UNION` and the left of `EXCEPT` or `INTERSECT`.
+/// A `SELECT` with a `*` gives none; `TABLE t` is read as `SELECT * FROM t`.
+fn written_rows<'q>(body: &'q SetExpr, into: &mut Vec<Vec<&'q Expr>>) {
+    match body {
+        SetExpr::Values(values) => into.extend(values.rows.iter().map(|row| row.iter().collect())),
+        SetExpr::SetOperation {
+            op, left, right, ..
+        } => {
+            written_rows(left, into);
+            if *op == SetOperator::Union {
+                written_rows(right, into);
+            }
+        }
+        SetExpr::Query(query) => written_rows(&query.body, into),
+        body => {
+            let items: Option<Vec<&Expr>> = body
+                .as_select()
+                .into_iter()
+                .flat_map(|select| &select.projection)
+                .map(|item| match item {
+                    SelectItem::UnnamedExpr(expr) | SelectItem::ExprWithAlias { expr, .. } => {
+                        Some(expr)
+                    }
+                    _ => None,
+                })
+                .collect();
+            into.extend(items);
+        }
+    }
 }
 
 #[cfg(test)]
