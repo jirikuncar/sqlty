@@ -20,7 +20,9 @@ without `NOT VALID`, an `EXCLUDE` constraint, which has no `NOT VALID`,
 `ATTACH PARTITION` of a table without a validated `CHECK` on the partition key
 (more than `IS NOT NULL`) and a `NOT NULL` key, always for a hash or expression
 key, and a new partition of a table whose default partition has no such `CHECK`,
-which PostgreSQL scans for rows of the new one.
+which PostgreSQL scans for rows of the new one. It also reports `VALIDATE
+CONSTRAINT` in a transaction that already locked the table against writes, such
+as the one that added the constraint.
 
 `against.sql`:
 
@@ -51,6 +53,18 @@ ALTER TABLE users VALIDATE CONSTRAINT users_bio;
 ALTER TABLE users ALTER COLUMN bio SET NOT NULL;
 ```
 
+In one transaction, the lock `ADD CONSTRAINT` takes is held until `COMMIT`,
+through the whole validation:
+
+```sql migration
+SET lock_timeout = '2s';
+BEGIN;
+ALTER TABLE users ADD CONSTRAINT users_team FOREIGN KEY (team_id) REFERENCES teams (id) NOT VALID;
+-- error: [constraint-scan] "validating `users_team` in the transaction that locked `users` holds that lock through the scan: `COMMIT` before `VALIDATE CONSTRAINT`"
+ALTER TABLE users VALIDATE CONSTRAINT users_team;
+COMMIT;
+```
+
 ## Why is this bad?
 
 A validated foreign key locks both tables against writes while every row is
@@ -61,7 +75,7 @@ EXCLUSIVE`, which lets reads and writes go on.
 ## How to fix
 
 Add the constraint `NOT VALID`, then `VALIDATE CONSTRAINT` it as a separate
-statement. For `SET NOT NULL`, validate a `CHECK (column IS NOT NULL)` first;
+statement, after the transaction that added it commits. For `SET NOT NULL`, validate a `CHECK (column IS NOT NULL)` first;
 before `ATTACH PARTITION`, make the key `NOT NULL` and validate a `CHECK` that
 matches the partition bounds;
 drop it afterwards if you like.
