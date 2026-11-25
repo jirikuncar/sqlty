@@ -189,6 +189,80 @@ SELECT a FROM other WHERE kind = 'a'
 -- inferred: tuple[str | None]
 ```
 
+### A CASE over every value of a nullable column
+
+A row whose `mood` is NULL matches no `WHEN`: the `CASE` is NULL for it.
+
+`people.sql`:
+
+```sql
+CREATE TYPE mood AS ENUM ('happy', 'sad');
+CREATE TABLE people (id SERIAL PRIMARY KEY, mood mood);
+CREATE TABLE jobs (
+    id INTEGER PRIMARY KEY,
+    status INTEGER NOT NULL,
+    done_at TEXT,
+    CHECK ((status = 0 AND done_at IS NULL) OR (status = 1 AND done_at IS NOT NULL))
+);
+```
+
+```toml
+[tool.sqlty]
+schema = "people.sql"
+```
+
+```sql
+SELECT CASE mood WHEN 'happy' THEN 1 WHEN 'sad' THEN 2 END AS score FROM people
+-- inferred: tuple[typing.Literal[1, 2] | None]
+```
+
+A constant of another kind than the column (`'0'` for an integer) is compared as the
+column's, so it keeps the other arm.
+
+```sql
+SELECT done_at FROM jobs WHERE status IN (1, '0')
+-- inferred: tuple[str | None]
+```
+
+### A CHECK dropped with its column
+
+PostgreSQL drops a `CHECK` with a column it reads, so a column added again, or renamed in
+its place, is not narrowed by it.
+
+`altered.sql`:
+
+```sql
+CREATE TYPE pay_kind AS ENUM ('card', 'iban');
+CREATE TABLE payments (
+    id SERIAL PRIMARY KEY,
+    kind pay_kind NOT NULL,
+    card_last4 TEXT,
+    iban TEXT,
+    CHECK ((kind = 'card' AND card_last4 IS NOT NULL) OR (kind = 'iban' AND iban IS NOT NULL))
+);
+ALTER TABLE payments DROP COLUMN card_last4;
+ALTER TABLE payments ADD COLUMN card_last4 TEXT;
+CREATE TABLE added (id SERIAL PRIMARY KEY, kind TEXT NOT NULL, a TEXT);
+ALTER TABLE added ADD CONSTRAINT tied CHECK ((kind = 'a' AND a IS NOT NULL) OR kind = 'b');
+```
+
+```toml
+[tool.sqlty]
+schema = "altered.sql"
+```
+
+```sql
+SELECT card_last4, iban FROM payments WHERE kind = 'iban'
+-- inferred: tuple[str | None, str | None]
+```
+
+A `CHECK` added by `ALTER TABLE` narrows as one in `CREATE TABLE` does.
+
+```sql
+SELECT a FROM added WHERE kind = 'a'
+-- inferred: tuple[str]
+```
+
 ### In Python
 
 `sqlty rewrite` writes the narrowed type, and `sqlty check` reports a `SQL[tuple[...]]`

@@ -105,10 +105,12 @@ impl Learned {
     }
 
     /// Whether no row can satisfy this: a column is proven both NULL and not NULL, or
-    /// equal to one of no values.
+    /// proven not NULL and limited to no values.
     fn contradicts(&self) -> bool {
         self.null.iter().any(|pair| self.columns.contains(pair))
-            || self.values.iter().any(|(_, _, values)| values.is_empty())
+            || self.values.iter().any(|(r, c, values)| {
+                values.is_empty() && self.columns.contains(&(r.clone(), c.clone()))
+            })
     }
 
     fn union(mut self, other: Learned) -> Learned {
@@ -363,7 +365,7 @@ impl<'a> Analyzer<'a> {
                 let mut check = check.clone();
                 let _ = visit_expressions_mut(&mut check, |expr| {
                     if let Expr::Identifier(ident) = expr {
-                        let qualifier = Ident::new(source.reference.clone());
+                        let qualifier = Ident::with_quote('"', source.reference.clone());
                         *expr = Expr::CompoundIdentifier(vec![qualifier, ident.clone()]);
                     }
                     ControlFlow::<()>::Continue(())
@@ -665,6 +667,15 @@ impl<'a> Analyzer<'a> {
             .sql()
             .is_some_and(|sql| sql.eq_ignore_ascii_case("CITEXT"))
         {
+            return None;
+        }
+        // `status = '1'` compares as `status = 1`: a constant of another kind is not a value.
+        let kind = super::literals::python_kind(&typed);
+        let same = |value: &Value| match value {
+            Value::Str(_) => kind == Some("str"),
+            Value::Int(_) => kind == Some("int"),
+        };
+        if !values.iter().all(same) {
             return None;
         }
         Some((reference, name, values))

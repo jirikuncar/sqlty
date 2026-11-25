@@ -146,10 +146,13 @@ impl Facts {
     }
 
     /// Whether no row can satisfy these facts: a column is proven both NULL and not NULL,
-    /// or equal to one of no values.
+    /// or proven not NULL and limited to no values (a NULL one is left by `CASE` arms).
     pub(super) fn contradicts(&self) -> bool {
         self.null.iter().any(|(r, c)| self.is_non_null(r, c))
-            || self.values.iter().any(|(_, _, values)| values.is_empty())
+            || self
+                .values
+                .iter()
+                .any(|(r, c, values)| values.is_empty() && self.is_non_null(r, c))
     }
 
     /// Nullability of a column of `reference`, given what its source declares. `column` is
@@ -193,6 +196,7 @@ impl Facts {
         });
         forget(&mut self.rolled_up, |(r, _)| shadowed(r));
         forget(&mut self.values, |(r, _, _)| shadowed(r));
+        forget(&mut self.null, |(r, _)| shadowed(r));
         // An expression does not say which relation its names belong to, and the nested
         // SELECT may bind them to its own: none of them carries over.
         self.non_null_exprs = Rc::default();
