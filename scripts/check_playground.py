@@ -268,6 +268,7 @@ def exercise(browser: Browser, url: str, watch: Callable[[Page], None]) -> None:
     resizing(page)
     zoomed(page, url)
     unsupported(context, url, watch)
+    webmcp(context, url, watch)
     asking(page, url)
     assert not errors, errors
 
@@ -673,6 +674,33 @@ def unsupported(context: BrowserContext, url: str, watch: Callable[[Page], None]
         "performance.getEntriesByType('resource').some((r) => r.name.endsWith('/ask.js'))"
     )
     assert not other.is_visible("[data-ask-open]")
+
+
+def webmcp(context: BrowserContext, url: str, watch: Callable[[Page], None]) -> None:
+    """A browser with WebMCP, here a stub of it, gets a tool that leaves the editor alone."""
+    other = context.new_page()
+    watch(other)
+    other.add_init_script(
+        "Object.defineProperty(document, 'modelContext', { value: {"
+        " registerTool: async (tool) => { globalThis.tool = tool; } } })"
+    )
+    other.goto(url)
+    other.wait_for_function("globalThis.tool", timeout=60_000)
+    edited = other.evaluate(f"{SOURCE}.getValue()")
+
+    def call(arguments: dict[str, str]) -> Any:
+        return json.loads(other.evaluate("(given) => globalThis.tool.execute(given)", arguments))
+
+    assert "unknown-column" in {found["rule"] for found in call({})["diagnostics"]}
+    given = {
+        "source": 'q = """--sql\nSELECT nope FROM t"""\n',
+        "schema": "CREATE TABLE t (id int);",
+        "dialect": "sqlite",
+    }
+    assert "unknown-column" in {found["rule"] for found in call(given)["diagnostics"]}
+    assert other.evaluate(f"{SOURCE}.getValue()") == edited
+    other.evaluate(f"{MODEL.format('ini')}.setValue('[')")
+    assert "TOML" in call({})["error"]
 
 
 def asking(page: Page, url: str) -> None:
