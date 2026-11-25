@@ -471,6 +471,7 @@ impl<'a> Resolver<'a> {
                         })
                         .cloned()
                         .collect(),
+                    checks: table.checks.clone(),
                     row_triggers: table.row_triggers.iter().fold(
                         RowEvents::default(),
                         |all, (_, events)| RowEvents {

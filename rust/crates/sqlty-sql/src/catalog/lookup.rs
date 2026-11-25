@@ -65,6 +65,14 @@ impl<'a> Lookup<'a> {
         }
     }
 
+    /// The conditions of the `CHECK` constraints of the table `name`, by bare column names.
+    pub(crate) fn checks(&self, name: &str) -> &'a [sqlparser::ast::Expr] {
+        match self.find(name) {
+            Some(Relation::Table(table)) => &table.checks,
+            _ => &[],
+        }
+    }
+
     /// Output columns of the view `name`.
     pub(crate) fn view(&self, name: &str) -> Option<&'a [Column]> {
         match self.find(name)? {

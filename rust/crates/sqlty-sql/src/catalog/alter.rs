@@ -3,16 +3,19 @@
 //! An operation this module cannot follow gives up the object (see `AlterFail`) rather
 //! than guessing.
 
+use std::ops::ControlFlow;
+
 use sqlparser::ast::{
-    AlterColumnOperation, AlterTable, AlterTableOperation, AlterType, AlterTypeAddValuePosition,
-    AlterTypeOperation, ColumnDef, ColumnOption, ColumnOptionDef, DataType, Ident,
-    MySQLColumnPosition, ObjectName, RenameTableNameKind, TableConstraint,
+    visit_expressions, AlterColumnOperation, AlterTable, AlterTableOperation, AlterType,
+    AlterTypeAddValuePosition, AlterTypeOperation, ColumnDef, ColumnOption, ColumnOptionDef,
+    DataType, Expr, Ident, MySQLColumnPosition, ObjectName, RenameTableNameKind, TableConstraint,
 };
 
 use crate::analyzer::SqlDialect;
 
 use super::columns::{
-    apply_check, check_narrows, mark_primary_key, nonnull_groups, raw_column, unique_key,
+    apply_check, check_narrows, discriminates, mark_primary_key, nonnull_groups, raw_column,
+    unique_key,
 };
 use super::loader::{AlterFail, Loader, RawTable, Rel, Taint, TypeDef, LARGE_ENUM};
 use super::names::{fold, parts};
@@ -199,6 +202,7 @@ impl Loader {
             } => {
                 check_narrows(&table.columns, &check.expr, self.dialect)
                     || !nonnull_groups(&check.expr, self.dialect).is_empty()
+                    || discriminates(&check.expr)
             }
             AlterTableOperation::AddConstraint {
                 constraint: TableConstraint::ForeignKey(constraint),
@@ -396,6 +400,8 @@ pub(super) fn alter_op(
                         table
                             .foreign_keys
                             .retain(|fk| !fk.key.columns.contains(&name));
+                        // PostgreSQL drops the constraints that read the column.
+                        table.checks.retain(|check| !reads(check, &name, dialect));
                     }
                     None if !if_exists => missing()?,
                     None => {}
@@ -410,6 +416,7 @@ pub(super) fn alter_op(
                 let name = fold(new_column_name, dialect);
                 let old = std::mem::replace(&mut table.columns[at].name, name.clone());
                 rename_in_foreign_keys(table, &old, &name);
+                table.checks.retain(|check| !reads(check, &old, dialect));
                 let column = &mut table.columns[at];
                 column.ident = match new_column_name.quote_style {
                     Some(_) => new_column_name.to_string(),
@@ -488,6 +495,9 @@ pub(super) fn alter_op(
             table
                 .nonnull_groups
                 .extend(nonnull_groups(&check.expr, dialect));
+            table
+                .checks
+                .extend(discriminates(&check.expr).then(|| (*check.expr).clone()));
         }
         // The dropped constraint may be a `CHECK`, and constraints are not tracked by name.
         AlterTableOperation::DropConstraint { name, .. } => {
@@ -495,6 +505,7 @@ pub(super) fn alter_op(
                 column.values = None;
             }
             table.nonnull_groups.clear();
+            table.checks.clear();
             let name = fold(name, dialect);
             drop_foreign_key(table, &name);
             drop_unique(table, &name);
@@ -571,6 +582,15 @@ pub(super) fn changes_columns(action: &[String], mentions_type: bool) -> bool {
         "of" => true,
         _ => false,
     }
+}
+
+/// Whether `check` reads the column `name`.
+fn reads(check: &Expr, name: &str, dialect: SqlDialect) -> bool {
+    visit_expressions(check, |expr| match expr {
+        Expr::Identifier(ident) if fold(ident, dialect) == name => ControlFlow::Break(()),
+        _ => ControlFlow::Continue(()),
+    })
+    .is_break()
 }
 
 #[cfg(test)]

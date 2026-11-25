@@ -155,6 +155,8 @@ struct TableRelation {
     columns: Vec<SchemaColumn>,
     /// Groups of columns a `CHECK` keeps at least one of non-null.
     nonnull_groups: Vec<Vec<String>>,
+    /// Its `CHECK` constraints that tie columns to a discriminator.
+    checks: Vec<Expr>,
     /// The statements a `BEFORE` row trigger fires for.
     row_triggers: RowEvents,
     foreign_keys: Vec<ForeignKey>,
