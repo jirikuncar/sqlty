@@ -221,6 +221,14 @@ A crash leaves its input in `artifacts/run/`; `cargo +nightly fuzz fmt -O -a run
 <file>` prints it. The `Fuzz the engine` workflow runs it every night and
 uploads the input when it fails.
 
+The Hypothesis tests of `tests/` (the Rust engine against the Python oracle in
+`tests/type_oracle`, round trips over tricky fragments) run only their `@example`s in the
+suite. The `Fuzz` workflow generates `SQLTY_FUZZ_EXAMPLES` cases for each of them as well:
+
+```bash
+SQLTY_FUZZ_EXAMPLES=2000 uv run pytest --hypothesis-profile=fuzz --no-cov
+```
+
 ## Type checking
 
 ```bash

@@ -1,6 +1,7 @@
 name: Fuzz
 
-# On demand: the property tests of rust/fuzz, the analyzer compared with PostgreSQL among them.
+# On demand: the property tests of rust/fuzz, the analyzer compared with PostgreSQL among them,
+# and the Hypothesis tests of tests/ generating cases (the suite runs their examples only).
 on:
   workflow_dispatch:
     inputs:
@@ -59,3 +60,27 @@ jobs:
         run: >-
           cargo test --release --manifest-path rust/fuzz/Cargo.toml --test properties
           -- --nocapture
+
+  hypothesis:
+    name: Fuzz the Python checks
+    runs-on: ubuntu-latest
+    env:
+      SQLTY_FUZZ_EXAMPLES: ${{ inputs.examples }}
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: $/.github/actions/setup
+        with:
+          python-version: "3.14"
+
+      - name: Install the dependencies
+        run: uv sync --all-groups --no-install-project
+
+      - name: Build Rust extension
+        run: uv run maturin develop --release --manifest-path rust/crates/sqlty-ext/Cargo.toml
+
+      - name: Fuzz
+        run: uv run pytest --hypothesis-profile=fuzz --no-cov -m "not timing and not pg"
