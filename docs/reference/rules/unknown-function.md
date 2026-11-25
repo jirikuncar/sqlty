@@ -13,7 +13,7 @@ Default severity: **warn**
 
 ## What it does
 
-Reports a function call whose result sqlty cannot type because it does not know the function. The column is left untyped.
+Reports a function call whose result sqlty cannot type because it does not know the function. The column is left untyped. A call in `WHERE`, `JOIN ... ON`, `ORDER BY` or a subquery is reported too: it has no column to type, but the function still has to exist when the query runs.
 
 ```toml
 [tool.sqlty]
@@ -38,7 +38,7 @@ q = SQL[tuple[int]]("--sql\nSELECT my_udf(id) FROM users")
 
 ## Why is this bad?
 
-A function sqlty does not know gives the column no type, so the annotation is not checked.
+A function sqlty does not know gives the column no type, so the annotation is not checked. Called anywhere in the query, a function the schema no longer defines fails at run time, and `sqlty breaking` reports the calls a migration that drops it would break.
 
 ## How to fix
 

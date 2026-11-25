@@ -36,6 +36,21 @@ CREATE TABLE users (id INTEGER PRIMARY KEY, bio TEXT);
 slugs = "--sql\nSELECT slug(id) FROM users"
 ```
 
+## A dropped function called in `WHERE`
+
+A call outside the select list is checked against the other schema too.
+
+`against.sql`:
+
+```sql
+CREATE TABLE users (id INTEGER PRIMARY KEY, bio TEXT);
+```
+
+```python
+# error: [unknown-function] "slug"
+filtered = "--sql\nSELECT id FROM users WHERE slug(id) = 'a'"
+```
+
 ## A rule the project ignores stays ignored
 
 The project ignores `unknown-function`; `breaking` reports nothing for it.
