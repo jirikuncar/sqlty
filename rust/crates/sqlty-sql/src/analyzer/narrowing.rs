@@ -36,6 +36,7 @@ use super::query::Analyzer;
 use super::registry::{lookup, Behavior};
 use super::scope::Scope;
 use crate::catalog::fold;
+use crate::diagnostics::Rule;
 use crate::values::Value;
 use rustc_hash::FxHashSet;
 
@@ -533,6 +534,53 @@ impl<'a> Analyzer<'a> {
         };
         let kept = crate::values::difference(&known, &excluded);
         vec![(reference, name, kept)]
+    }
+
+    /// Records `unmatched-literal` for each term of the `AND` of `selection`, a `WHERE`,
+    /// that compares a column of known values with constants it never holds:
+    /// `column = constant` or `column IN (constants)`.
+    pub(super) fn check_unmatched(&self, selection: &Expr, scope: &Scope) {
+        if !self.diag.enabled() {
+            return;
+        }
+        for term in super::fanout::conjuncts(selection) {
+            let (column, constants): (&Expr, Vec<&Expr>) = match term {
+                Expr::BinaryOp {
+                    left,
+                    op: BinaryOperator::Eq,
+                    right,
+                } if crate::values::constant(right).is_some() => (left, vec![right]),
+                Expr::BinaryOp {
+                    left,
+                    op: BinaryOperator::Eq,
+                    right,
+                } => (right, vec![left]),
+                Expr::In {
+                    expr,
+                    target: InTarget::List(list),
+                    negated: false,
+                    ..
+                } => (expr, list.iter().collect()),
+                _ => continue,
+            };
+            let known = self
+                .resolve_column(column, scope)
+                .and_then(|typed| typed.values);
+            let (Some((reference, name, constants)), Some(known)) =
+                (self.column_values(column, &constants, scope), known)
+            else {
+                continue;
+            };
+            if crate::values::excludes(&known, &constants) {
+                self.diag.record(
+                    Rule::UnmatchedLiteral,
+                    format!(
+                        "`{reference}.{name}` is never {}, so this WHERE matches no row",
+                        crate::values::spell(&constants, "or")
+                    ),
+                );
+            }
+        }
     }
 
     /// `column = constant` or `column IN (constants)`: the values the column keeps. Only

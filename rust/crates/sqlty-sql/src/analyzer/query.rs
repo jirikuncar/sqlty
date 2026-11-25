@@ -381,6 +381,9 @@ impl<'a> Analyzer<'a> {
             analyzer.check_grouping(select, &scope);
             analyzer.check_fanout(select, &scope);
             analyzer.check_comparisons(select, &scope);
+            if let Some(selection) = &select.selection {
+                analyzer.check_unmatched(selection, &scope);
+            }
         }
         analyzer.facts = analyzer.select_facts(select, &scope);
         let keyword = select.select_token.0.span.start;

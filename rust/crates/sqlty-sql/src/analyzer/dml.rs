@@ -4,8 +4,8 @@ use std::collections::HashSet;
 
 use sqlparser::ast::{
     Assignment, AssignmentTarget, Expr, FromTable, Ident, MergeAction, MergeClauseKind, ObjectName,
-    OnConflict, OnConflictAction, OnInsert, OutputClause, Query, SelectItem, SetExpr, Statement,
-    TableObject, TableWithJoins, UpdateTableFromKind,
+    OnConflict, OnConflictAction, OnInsert, OutputClause, Query, SelectItem, SetExpr, SetOperator,
+    Statement, TableObject, TableWithJoins, UpdateTableFromKind,
 };
 
 use super::dialect::SqlDialect;
@@ -412,9 +412,7 @@ impl Analyzer<'_> {
                         &insert.columns
                     };
                     self.check_target_columns(name, columns);
-                    if let Some(SetExpr::Values(values)) =
-                        insert.source.as_deref().map(|source| source.body.as_ref())
-                    {
+                    if let Some(source) = insert.source.as_deref() {
                         let listed: Vec<Option<String>> = if insert.columns.is_empty() {
                             let table = self.schema.table(&table_key(name, self.dialect));
                             let visible = table.into_iter().flatten().filter(|c| !c.invisible);
@@ -425,8 +423,10 @@ impl Analyzer<'_> {
                                 .map(|column| self.target_name(column))
                                 .collect()
                         };
-                        for row in &values.rows {
-                            for (column, value) in listed.iter().zip(row.iter()) {
+                        let mut rows = Vec::new();
+                        written_rows(&source.body, &mut rows);
+                        for row in rows {
+                            for (column, value) in listed.iter().zip(row) {
                                 self.check_written_value(name, column.as_deref(), value);
                             }
                         }
@@ -486,9 +486,13 @@ impl Analyzer<'_> {
                 }
                 update.assignments.iter().for_each(|a| check(&a.value));
                 update.selection.iter().for_each(check);
+                let unmatched = |selection| analyzer.check_unmatched(selection, &scope);
+                update.selection.iter().for_each(unmatched);
             }
             Statement::Delete(delete) => {
                 delete.selection.iter().for_each(check);
+                let unmatched = |selection| analyzer.check_unmatched(selection, &scope);
+                delete.selection.iter().for_each(unmatched);
             }
             _ => {}
         }
@@ -581,12 +585,24 @@ impl Analyzer<'_> {
         Some(fold(ident, self.dialect))
     }
 
-    /// [`Analyzer::check_written_value`] of each `SET column = value`; a tuple is skipped.
+    /// [`Analyzer::check_written_value`] of each `SET column = value` and each column of
+    /// `SET (a, b) = (x, y)`.
     fn check_assigned_values(&self, table: &ObjectName, assignments: &[Assignment]) {
         for assignment in assignments {
-            if let AssignmentTarget::ColumnName(column) = &assignment.target {
-                let column = self.target_name(column);
-                self.check_written_value(table, column.as_deref(), &assignment.value);
+            let targets = match &assignment.target {
+                AssignmentTarget::ColumnName(column) => std::slice::from_ref(column),
+                AssignmentTarget::Tuple(columns) => columns.as_slice(),
+            };
+            let values = match &assignment.value {
+                Expr::Tuple(values) => values.iter().collect(),
+                Expr::Nested(value) => vec![value.as_ref()],
+                value => vec![value],
+            };
+            if targets.len() == values.len() {
+                for (column, value) in targets.iter().zip(values) {
+                    let column = self.target_name(column);
+                    self.check_written_value(table, column.as_deref(), value);
+                }
             }
         }
     }
@@ -610,27 +626,17 @@ impl Analyzer<'_> {
         ) else {
             return;
         };
-        if allowed.contains(&written) {
+        if !crate::values::excludes(allowed, std::slice::from_ref(&written)) {
             return;
         }
-        let show = |value: &crate::values::Value| match value {
-            crate::values::Value::Str(text) => format!("'{}'", text.replace('\'', "''")),
-            crate::values::Value::Int(number) => number.to_string(),
-        };
-        let listed: Vec<String> = allowed.iter().map(show).collect();
-        let listed = match listed.as_slice() {
-            [.., last] if listed.len() > 1 => {
-                format!("{} or {last}", listed[..listed.len() - 1].join(", "))
-            }
-            _ => listed.join(""),
-        };
         self.diag.record_about(
             Rule::LiteralWrite,
             format!(
-                "`{}.{}` is {listed}, not {}",
+                "`{}.{}` is {}, not {}",
                 object_name(table),
                 schema_column.ident,
-                show(&written)
+                crate::values::spell(allowed, "or"),
+                crate::values::spell(std::slice::from_ref(&written), "or")
             ),
             Some(&key),
             Some(&schema_column.ident),
@@ -710,6 +716,38 @@ fn assigned_columns(assignments: &[Assignment]) -> Vec<ObjectName> {
             AssignmentTarget::Tuple(columns) => columns.clone(),
         })
         .collect()
+}
+
+/// The expressions of each row `body`, an INSERT source, writes: the rows of `VALUES` and
+/// the items of a `SELECT`, of each side of `UNION` and the left of `EXCEPT` or `INTERSECT`.
+/// A `SELECT` with a `*` gives none.
+fn written_rows<'q>(body: &'q SetExpr, into: &mut Vec<Vec<&'q Expr>>) {
+    match body {
+        SetExpr::Values(values) => into.extend(values.rows.iter().map(|row| row.iter().collect())),
+        SetExpr::Select(select) => {
+            let items: Option<Vec<&Expr>> = select
+                .projection
+                .iter()
+                .map(|item| match item {
+                    SelectItem::UnnamedExpr(expr) | SelectItem::ExprWithAlias { expr, .. } => {
+                        Some(expr)
+                    }
+                    _ => None,
+                })
+                .collect();
+            into.extend(items);
+        }
+        SetExpr::SetOperation {
+            op, left, right, ..
+        } => {
+            written_rows(left, into);
+            if *op == SetOperator::Union {
+                written_rows(right, into);
+            }
+        }
+        SetExpr::Query(query) => written_rows(&query.body, into),
+        _ => {}
+    }
 }
 
 #[cfg(test)]

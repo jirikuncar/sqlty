@@ -13,9 +13,10 @@ Default severity: **error**
 
 ## What it does
 
-Reports a constant that an `INSERT ... VALUES`, an `UPDATE ... SET` or an
-`ON CONFLICT DO UPDATE SET` writes to a column whose values the schema lists, as an
-enum or a `CHECK (column IN (...))`, when the constant is not one of them.
+Reports a constant that an `INSERT ... VALUES`, an `INSERT ... SELECT`, an
+`UPDATE ... SET` (a tuple `SET (a, b) = (x, y)` too) or an `ON CONFLICT DO UPDATE SET`
+writes to a column whose values the schema lists, as an enum or a
+`CHECK (column IN (...))`, when the constant is not one of them.
 
 ```toml
 [tool.sqlty]
@@ -68,4 +69,5 @@ literal-write = "warn"
 
 Needs a [schema](../../guide/schema-inference.md), and is judged in the `postgres`
 and `sqlite` dialects, where comparison is exact. Only constants are checked: a
-parameter, an expression or a value a query selects is not.
+parameter, an expression or a column a query selects is not. A `WHERE` that compares a
+column with a value it never holds is [`unmatched-literal`](unmatched-literal.md).
