@@ -4,15 +4,21 @@
 #   scripts/coverage.sh [PACKAGE...]   # python, or a directory of rust/crates; all by default
 #
 # Python is the package of src/sqlty and the extension crate (rust/crates/sqlty-ext); every
-# other crate counts only its own tests. Writes each package's wall time and test times
-# to rust/target/test-reports, summed up by scripts/slowest.py. Needs a nightly toolchain with llvm-tools (for
+# other crate counts only its own tests. Needs a nightly toolchain with llvm-tools (for
 # `#[coverage(off)]`) and cargo-llvm-cov; the `pg` tests run when SQLTY_PG_DSN is set.
+# On exit, scripts/slowest.py prints the slowest packages and tests (and adds them to the
+# GitHub job summary) from the reports in rust/target/test-reports.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 export RUSTUP_TOOLCHAIN=${RUSTUP_TOOLCHAIN:-nightly}
 crates=$(ls rust/crates)
 reports=$PWD/rust/target/test-reports
 rm -rf "$reports" && mkdir -p "$reports"
+summary() {
+  if [[ -n ${running:-} ]]; then echo "$running $((SECONDS - start))" >>"$reports/times.txt"; fi
+  python3 scripts/slowest.py "$reports" | tee -a "${GITHUB_STEP_SUMMARY:-/dev/null}"
+}
+trap summary EXIT
 # The extension crate is gated with the Python package.
 (($#)) || set -- python $(grep -vx sqlty-ext <<<"$crates")
 runner=test tests=(test)
@@ -69,14 +75,14 @@ python_package() {
 crate() {
   local package
   package=$(sed -n 's/^name = "\(.*\)"/\1/p;T;q' "rust/crates/$1/Cargo.toml")
-  (cd rust && cargo llvm-cov clean --workspace && cargo llvm-cov $runner --no-report -p "$package")
+  (cd rust && cargo llvm-cov clean --profraw-only && cargo llvm-cov $runner --no-report -p "$package")
   report "$1"
   gate "$1"
 }
 
 for package; do
-  start=$SECONDS
+  running=$package start=$SECONDS
   if [[ $package == python ]]; then python_package; else crate "$package"; fi
   echo "$package $((SECONDS - start))" >>"$reports/times.txt"
+  running=
 done
-python3 scripts/slowest.py "$reports" >>"${GITHUB_STEP_SUMMARY:-/dev/stdout}"

@@ -2,8 +2,8 @@
 
     python3 scripts/slowest.py DIR [N]   # N slowest tests, 20 by default
 
-DIR holds one `<package>*.xml` per test run and `times.txt`, `<package> <seconds>` lines
-of each package's wall time, build included (scripts/coverage.sh writes both).
+DIR holds one `<package>*.xml` per test run and `times.txt`, `<package> <seconds>` lines of
+each package's wall time: build, tests and coverage report (scripts/coverage.sh writes both).
 """
 
 import sys
@@ -13,18 +13,16 @@ from pathlib import Path
 
 
 def main(directory: Path, top: int) -> None:
-    wall = {
-        name: int(seconds)
-        for name, seconds in (
-            line.split() for line in (directory / "times.txt").read_text().splitlines()
-        )
-    }
+    times = directory / "times.txt"
+    lines = times.read_text().splitlines() if times.exists() else []
+    wall = {name: int(seconds) for name, seconds in map(str.split, lines)}
     totals: dict[str, float] = defaultdict(float)
     counts: dict[str, int] = defaultdict(int)
     tests = []
     for report in sorted(directory.glob("*.xml")):
         package = next(
-            name for name in sorted(wall, key=len, reverse=True) if report.stem.startswith(name)
+            (name for name in sorted(wall, key=len, reverse=True) if report.stem.startswith(name)),
+            report.stem,
         )
         for case in ET.parse(report).iter("testcase"):
             if case.find("skipped") is not None:
@@ -37,7 +35,7 @@ def main(directory: Path, top: int) -> None:
             )
             tests.append((seconds, package, name))
     print(
-        "### Slowest packages\n\n| Package | Wall (build + tests) | Tests | Test time (summed) |\n|---|--:|--:|--:|"
+        "### Slowest packages\n\n| Package | Wall | Tests | Test time (summed) |\n|---|--:|--:|--:|"
     )
     for name in sorted(wall, key=wall.get, reverse=True):
         print(f"| {name} | {wall[name]}s | {counts[name]} | {totals[name]:.1f}s |")
