@@ -48,6 +48,7 @@ stale-type = "error"
 | [`insert-missing-column`](rules/insert-missing-column.md) | Names | error | no | INSERT that leaves out a NOT NULL column without a default |
 | [`insert-value-count`](rules/insert-value-count.md) | Names | error | no | INSERT that gives a different number of values than the columns it writes |
 | [`literal-write`](rules/literal-write.md) | Names | error | no | INSERT or UPDATE writes a constant an enum or CHECK list does not allow |
+| [`unmatched-literal`](rules/unmatched-literal.md) | Names | warn | no | WHERE compares a column with a constant its enum or CHECK list never holds |
 | [`ungrouped-column`](rules/ungrouped-column.md) | Names | error | no | Grouped query selects a column it neither groups by nor aggregates |
 | [`fanout-aggregate`](rules/fanout-aggregate.md) | Names | warn | no | Aggregate over rows a one-to-many join repeats |
 | [`chasm-join`](rules/chasm-join.md) | Names | warn | no | Aggregating query joins one table one-to-many to two others |
