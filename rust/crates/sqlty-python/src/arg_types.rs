@@ -327,8 +327,7 @@ fn resolve<S: std::ops::Deref<Target = Source>>(names: &ModuleTypes<S>, name: &s
 /// `ty` spelled as [`class_of`] spells a class: a `NewType` as its supertype, nothing for
 /// what is not a builtin or a known imported class.
 fn spell(ty: &Ty) -> Option<String> {
-    match ty {
-        Ty::NewType(newtype) => spell(&newtype.supertype),
+    match ty.base() {
         Ty::Class(class) if class.module == "builtins" => {
             class_of(Some(class.name.clone()), &Table::default())
         }
