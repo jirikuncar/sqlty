@@ -57,7 +57,7 @@ pub fn route(
         let include = strings(entry, "include");
         if (include.is_empty() || matches(&include)) && applies(entry) {
             let rules = entry.get("rules").and_then(Value::as_table).cloned();
-            found.rules.extend(rules.unwrap_or_default());
+            crate::config::merge_rules(&mut found.rules, rules.unwrap_or_default());
         }
     }
     found
@@ -75,8 +75,13 @@ pub fn file_table(table: &Table, route: &Route) -> Table {
     });
     for (key, value) in database.into_iter().flatten() {
         match (merged.get_mut(key), value) {
-            (Some(Value::Table(own)), Value::Table(value)) if key == "rules" || key == "types" => {
-                own.extend(value.clone());
+            (Some(Value::Table(own)), Value::Table(value))
+                if matches!(key.as_str(), "rules" | "types" | "deprecated-columns") =>
+            {
+                match key == "rules" {
+                    true => crate::config::merge_rules(own, value.clone()),
+                    false => own.extend(value.clone()),
+                }
             }
             _ => {
                 merged.insert(key.clone(), value.clone());
@@ -89,7 +94,7 @@ pub fn file_table(table: &Table, route: &Route) -> Table {
             .and_then(Value::as_table)
             .cloned()
             .unwrap_or_default();
-        rules.extend(route.rules.clone());
+        crate::config::merge_rules(&mut rules, route.rules.clone());
         merged.insert("rules".into(), Value::Table(rules));
     }
     merged
@@ -133,9 +138,9 @@ mod tests {
 
     fn routed(path: &str) -> (Route, Table) {
         let table: Table = toml::from_str(
-            "queries = ['own']\nrules = {a = 'warn'}\n\
+            "queries = ['own']\nrules = {a = 'warn'}\ntypes = {DATE = 'str'}\n\
              [databases.logs]\nqueries = 'sql/logs/**/*.sql'\ninclude = ['logs']\nexclude = ['logs/old']\n\
-             rules = {b = 'error'}\ndialect = 'duckdb'\n\
+             rules = {b = 'error'}\ntypes = {TIME = 'str'}\ndialect = 'duckdb'\n\
              [databases.rest]\ninclude = ['**/*.py']\n\
              [[overrides]]\ninclude = ['tests']\nrules = {a = 'ignore'}\n\
              [[overrides]]\ninclude = []\nexclude = ['tests/keep.py']\nrules = {c = 'warn'}\n",
@@ -158,6 +163,10 @@ mod tests {
         let (route, table) = routed("/p/logs/a.py");
         assert_eq!(route.database.as_deref(), Some("logs"));
         assert_eq!(table["dialect"].as_str(), Some("duckdb"));
+        assert_eq!(
+            table["types"].to_string(),
+            "{ DATE = \"str\", TIME = \"str\" }"
+        );
         assert_eq!(
             table["rules"].to_string(),
             "{ a = \"warn\", b = \"error\", c = \"warn\" }"

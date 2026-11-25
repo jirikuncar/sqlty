@@ -237,6 +237,44 @@ pub struct TypeOverrides {
     types: FxHashMap<String, String>,
     /// `table.column`, folded -> Python type.
     columns: FxHashMap<String, String>,
+    /// `table.column`, folded -> the deprecation `[tool.sqlty.deprecated-columns]` gives it.
+    deprecated: FxHashMap<String, Deprecation>,
+}
+
+/// A column scheduled for removal: what replaces it and when it goes, as configured.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Deprecation {
+    /// The column to read instead.
+    pub replacement: Option<String>,
+    /// The date after which it is removed.
+    pub remove_after: Option<String>,
+}
+
+/// The key prefix of a deprecated column among the `types` pairs of
+/// [`TypeOverrides::new`]; the value is `replacement\tremove-after`, either part empty.
+const DEPRECATED: &str = "!";
+
+/// The `types` pair [`TypeOverrides::new`] reads as the deprecation of `table.column`: the
+/// column to use instead and the date it is removed after, as
+/// `[tool.sqlty.deprecated-columns]` gives them.
+///
+/// ```
+/// use sqlty_sql::analyzer::deprecated_type;
+///
+/// let pair = deprecated_type("users.legacy_email", Some("email"), None);
+/// assert_eq!(pair, ("!users.legacy_email".to_string(), "email\t".to_string()));
+/// ```
+pub fn deprecated_type(
+    column: &str,
+    replacement: Option<&str>,
+    remove_after: Option<&str>,
+) -> (String, String) {
+    let value = format!(
+        "{}\t{}",
+        replacement.unwrap_or_default(),
+        remove_after.unwrap_or_default()
+    );
+    (format!("{DEPRECATED}{column}"), value)
 }
 
 impl TypeOverrides {
@@ -247,6 +285,21 @@ impl TypeOverrides {
         let dialect = SqlDialect::from_name(dialect);
         let mut overrides = TypeOverrides::default();
         for (key, python) in entries {
+            if let Some((table, column)) = key
+                .strip_prefix(DEPRECATED)
+                .and_then(|key| key.rsplit_once('.'))
+            {
+                let table = table.rsplit('.').next().unwrap_or(table);
+                let key = format!("{}.{}", table.to_lowercase(), column.to_lowercase());
+                let (replacement, remove_after) = python.split_once('\t').unwrap_or((python, ""));
+                let given = |part: &str| (!part.is_empty()).then(|| part.to_string());
+                let deprecation = Deprecation {
+                    replacement: given(replacement),
+                    remove_after: given(remove_after),
+                };
+                overrides.deprecated.insert(key, deprecation);
+                continue;
+            }
             if let Some((table, column)) = key.rsplit_once('.') {
                 let table = table.rsplit('.').next().unwrap_or(table);
                 let key = format!("{}.{}", table.to_lowercase(), column.to_lowercase());
@@ -271,7 +324,7 @@ impl TypeOverrides {
 
     /// Whether there are none.
     pub fn is_empty(&self) -> bool {
-        self.types.is_empty() && self.columns.is_empty()
+        self.types.is_empty() && self.columns.is_empty() && self.deprecated.is_empty()
     }
 
     /// The modules the Python types name, to import where a row type spells one:
@@ -297,6 +350,14 @@ impl TypeOverrides {
 
     fn for_type(&self, sql_type: &str) -> Option<&str> {
         self.types.get(base_name(sql_type)).map(String::as_str)
+    }
+
+    fn deprecation(&self, relation: &str, column: &str) -> Option<&Deprecation> {
+        if self.deprecated.is_empty() {
+            return None;
+        }
+        let table = relation.rsplit('.').next().unwrap_or(relation);
+        self.deprecated.get(&format!("{table}.{column}"))
     }
 
     fn for_column(&self, relation: &str, column: &str) -> Option<&str> {
@@ -513,6 +574,11 @@ impl Catalog {
     /// type may need.
     pub fn type_modules(&self) -> Vec<String> {
         self.overrides.modules()
+    }
+
+    /// The deprecation of `column` of the table `relation` names, when it has one.
+    pub(crate) fn deprecation(&self, relation: &str, column: &str) -> Option<&Deprecation> {
+        self.overrides.deprecation(relation, column)
     }
 
     /// Whether the schema defines no table or view of its own.

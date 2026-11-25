@@ -23,8 +23,8 @@ use crate::rules::{Rule, RuleConfig};
 use crate::scan::Scan;
 use crate::scopes::{Key, Param};
 use crate::types::compat::{
-    accepts, check_type_compatibility, column_literal_values, declared_literal_values, field_type,
-    set_member,
+    accepts, check_type_compatibility, column_literal_values, declared_literal_values,
+    extra_literals, field_type, set_member,
 };
 use crate::types::extract::extract_type_definitions;
 use crate::types::generic::specialize;
@@ -590,10 +590,12 @@ fn literal_diagnostics(
     if !missing.is_empty() && rules.is_enabled(Rule::LiteralMismatch) {
         return vec![(Rule::LiteralMismatch, message("can be", &missing))];
     }
-    let mut extra: Vec<&Lit> = admitted.iter().filter(|v| !holds(&inferred, v)).collect();
-    extra.sort_by_key(|value| value.repr());
+    let extra = extra_literals(declared, &inferred);
     if missing.is_empty() && !extra.is_empty() && rules.is_enabled(Rule::RedundantLiteral) {
-        return vec![(Rule::RedundantLiteral, message("is never", &extra))];
+        return vec![(
+            Rule::RedundantLiteral,
+            message("is never", &extra.iter().collect::<Vec<_>>()),
+        )];
     }
     Vec::new()
 }

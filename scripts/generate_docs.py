@@ -86,10 +86,10 @@ KEY_DOCS: dict[str, KeyDoc] = {
         "How `queries` files name their queries; `auto` reads each file's first header",
     ),
     "rules": KeyDoc(
-        "table of rule = severity",
+        "table of rule = severity or options",
         "per-rule defaults",
         "`check`",
-        'Severity per lint rule: `"error"`, `"warn"` or `"ignore"`',
+        'Severity per lint rule: `"error"`, `"warn"` or `"ignore"`, or a table with `severity` and the rule\'s options',
     ),
     "overrides": KeyDoc(
         "array of tables",
@@ -150,6 +150,12 @@ KEY_DOCS: dict[str, KeyDoc] = {
         "`{}`",
         "`rewrite`, `check`",
         "Python types a converter above the driver gives a SQL type or a column",
+    ),
+    "deprecated-columns": KeyDoc(
+        "table of `table.column` = `{ use, remove-after }`",
+        "`{}`",
+        "`check`",
+        "Columns scheduled for removal: `deprecated-column` reports every read",
     ),
     "format-command": KeyDoc(
         "list of strings",

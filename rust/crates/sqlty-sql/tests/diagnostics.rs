@@ -11,6 +11,7 @@ CREATE TABLE customers (id INTEGER PRIMARY KEY, email TEXT UNIQUE, name TEXT NOT
 CREATE TABLE tags (order_id INTEGER, label TEXT);
 CREATE TABLE docs (id INTEGER PRIMARY KEY, body JSONB NOT NULL CHECK (jsonb_typeof(body) = 'object'), meta JSON);
 CREATE TABLE shapes (id INTEGER PRIMARY KEY, area CIRCLE);
+CREATE TABLE states (id INTEGER PRIMARY KEY, status TEXT CHECK (status IN ('open', 'shut')), level INT CHECK (level IN (1)));
 CREATE FUNCTION order_count() RETURNS INT LANGUAGE sql AS 'SELECT 1';
 CREATE TABLE pairs (a INTEGER REFERENCES orders, b INTEGER REFERENCES customers, PRIMARY KEY (a, b));
 CREATE FUNCTION tag_count(x INT, y nope) RETURNS INT LANGUAGE sql AS 'SELECT 1';
@@ -24,6 +25,22 @@ type Case = (&'static str, &'static str, &'static [&'static str]);
 
 #[rustfmt::skip]
 const CASES: &[Case] = &[
+    ("postgres", "UPDATE states SET status = 'gone', level = 2 WHERE id = 1", &["[literal-write] `states.status` is 'open' or 'shut', not 'gone'", "[literal-write] `states.level` is 1, not 2"]),
+    ("sqlite", "INSERT INTO states VALUES (1, 'gone', 1)", &["[literal-write] `states.status` is 'open' or 'shut', not 'gone'"]),
+    ("postgres", "INSERT INTO states (id, status) VALUES (1, 'open') ON CONFLICT (id) DO UPDATE SET status = 'gone', (level) = (2)", &["[literal-write] `states.status` is 'open' or 'shut', not 'gone'", "[literal-write] `states.level` is 1, not 2"]),
+    ("postgres", "UPDATE states SET (status, level) = ('gone', '7') WHERE id = 1", &["[literal-write] `states.status` is 'open' or 'shut', not 'gone'"]),
+    ("sqlite", "INSERT INTO states (id, status) SELECT 1, 'gone' UNION ALL SELECT 2, 'open' EXCEPT SELECT 3, 'lost'", &["[literal-write] `states.status` is 'open' or 'shut', not 'gone'"]),
+    ("postgres", "SELECT s.id FROM states s WHERE s.status IN ('gone', 'lost') AND level = 1", &["[unmatched-literal] `s.status` is never 'gone' or 'lost', so this WHERE matches no row"]),
+    ("postgres", "DELETE FROM states WHERE 2 = level", &["[unmatched-literal] `states.level` is never 2, so this WHERE matches no row"]),
+    ("postgres", "UPDATE states SET id = 2 WHERE status = 'gone' OR status IN ('open', 'lost') OR level = '2'", &[]),
+    ("mysql", "SELECT id FROM states WHERE status = 'gone'", &[]),
+    ("postgres", "UPDATE states SET (status, level) = (SELECT 'gone', 2) WHERE id = 1", &[]),
+    ("postgres", "INSERT INTO states SELECT 1, 'gone', 1 UNION TABLE states", &["[literal-write] `states.status` is 'open' or 'shut', not 'gone'"]),
+    ("postgres", "INSERT INTO states (id, status) (SELECT 1, 'gone')", &["[literal-write] `states.status` is 'open' or 'shut', not 'gone'"]),
+    ("postgres", "WITH RECURSIVE t(id, s) AS (SELECT 1, 'open' UNION ALL SELECT 2, 'shut' UNION ALL SELECT id + 1, s FROM t WHERE s = 'shut' AND id < 9) SELECT id FROM t", &[]),
+    ("sqlite", "SELECT id FROM states WHERE status = 'gone' AND level IN ()", &["[unmatched-literal] `states.status` is never 'gone', so this WHERE matches no row"]),
+    ("postgres", "UPDATE states SET status = 'shut', level = level, id = 2 WHERE id = 1", &[]),
+    ("mysql", "UPDATE states SET status = 'gone' WHERE id = 1", &[]),
     ("postgres", "SELECT o.id, SUM(i.amount), SUM(p.amount) FROM orders o JOIN order_items i ON i.order_id = o.id JOIN payments p ON p.order_id = o.id GROUP BY o.id", &["[fanout-aggregate] SUM(i.amount) aggregates order_items, whose rows repeat once per payments row", "[fanout-aggregate] SUM(p.amount) aggregates payments, whose rows repeat once per order_items row", "[chasm-join] orders joins order_items and payments one-to-many, so each row of one repeats once per row of the other"]),
     ("postgres", "SELECT SUM(LENGTH(t.label)) FROM orders o JOIN tags t ON t.order_id = o.id JOIN tags u ON u.label = t.label", &["[unproven-join] the join of t and u matches no primary or unique key, so how often it repeats their rows is unknown"]),
     ("postgres", "SELECT COUNT(*) FROM orders o JOIN order_items i USING (id) GROUP BY ALL", &["[entity-mismatch] orders.id holds orders keys, order_items.id holds order_items keys"]),
@@ -335,6 +352,10 @@ const SCHEMAS: &[Case] = &[
 /// `(dialect, query, parameters as "index name: python (SQL) nullability")`, against `SCHEMA`.
 #[rustfmt::skip]
 const PARAMS: &[Case] = &[
+    ("postgres", "UPDATE states SET level = %s WHERE status = %s", &["1: int (INT) Nullable of typing.Literal[1]", "2: str (TEXT) Unknown of typing.Literal['open', 'shut']"]),
+    ("postgres", "SELECT id FROM states WHERE status IN (%s, 'open') AND (%s = 'all' OR status = %s) AND status > %s AND status NOT IN (%s)", &["1: str (TEXT) Unknown of typing.Literal['open', 'shut']", "2: str (None) Unknown", "3: str (TEXT) Unknown of typing.Literal['open', 'shut']", "4: str (TEXT) Unknown", "5: str (TEXT) Unknown"]),
+    ("postgres", "SELECT id FROM states s JOIN states t ON t.id = s.id WHERE s.status = %(v)s OR t.status = %(v)s OR s.id::text = %(v)s", &["1 v: str (TEXT) Unknown"]),
+    ("postgres", "SELECT COALESCE(status, %s) FROM states WHERE status = %s AND status = %s::text", &["1: str (TEXT) Unknown", "2: str (TEXT) Unknown of typing.Literal['open', 'shut']", "3: str (TEXT) Unknown cast"]),
     ("postgres", "UPDATE orders o SET note = %s FROM customers c WHERE c.id = o.customer_id AND c.name = %s", &["1: str (TEXT) Nullable", "2: str (TEXT) Unknown"]),
     ("mysql", "UPDATE orders, customers SET orders.note = ? WHERE customers.name = ?", &["1: str (TEXT) Nullable", "2: str (TEXT) Unknown"]),
     ("postgres", "SELECT %s UNION SELECT id FROM orders WHERE id = %s", &["1: None (None) Unknown", "2: int (INT) Unknown"]),
@@ -453,8 +474,9 @@ fn params(dialect: &str, sql: &str) -> Vec<String> {
                 .untyped_sql_type
                 .map(|t| format!(" untyped {t}"))
                 .unwrap_or_default();
+            let literal = p.literal.map(|t| format!(" of {t}")).unwrap_or_default();
             format!(
-                "{}{name}: {python} ({sql}) {:?}{cast}{untyped}",
+                "{}{name}: {python} ({sql}) {:?}{cast}{untyped}{literal}",
                 p.index, p.nullability
             )
         })

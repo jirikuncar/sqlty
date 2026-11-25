@@ -141,9 +141,17 @@ What makes a column nullable or not:
   or function around the argument, is of unknown type, and so is a `NewType` made with a
   `NewType` the module binds again. Importing what a name already holds (in `try` and
   `except`, or another submodule of a package) and the `else` of `if TYPE_CHECKING` do not
-  count. A function that rebinds the name through `global`, binds it locally other than by
-  an assignment, parameter or type parameter (an import, `for`, `def`), or a star import
-  that binds it, is not seen.
+  count. A binding counts however it is made: through `global` in another function, by an
+  import, `for`, `with`, `def`, `class`, `except`, `match` or `:=` in a function or class
+  around the argument, and by a star import, which may bind any name.
+
+!!! note "A checked module is one in the same run"
+    A type imported from another module is read only when that module is checked
+    too. With `OwnerId = NewType("OwnerId", int)` in `ids.py`, `sqlty check .` reads an
+    argument `x: OwnerId` of `app.py` as an `int`; `sqlty check app.py` alone does not
+    read `ids.py`, so `x` is of unknown type there and gets no `param-type-mismatch`.
+    Check the whole project, `sqlty check .`, to get the same diagnostics for each
+    file.
 
 [`nullable-mismatch`](../reference/rules/nullable-mismatch.md) reports a row type field
 that is not optional for a nullable column;

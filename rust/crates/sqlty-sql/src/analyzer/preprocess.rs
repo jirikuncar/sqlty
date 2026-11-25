@@ -310,7 +310,7 @@ pub(super) fn sqlite_type_names(sql: &str) -> Option<String> {
 /// Parse a query (not schema DDL) through [`parser_input`]. In PostgreSQL, where
 /// `?` is also a JSONB operator, `?` placeholders become `$1`, `$2`, ... only when
 /// the query doesn't parse as written.
-pub(super) fn parse_query(sql: &str, dialect: SqlDialect) -> Option<Vec<Statement>> {
+pub(crate) fn parse_query(sql: &str, dialect: SqlDialect) -> Option<Vec<Statement>> {
     parse_input(parser_input(sql, dialect).text(), dialect)
 }
 

@@ -142,7 +142,7 @@ fn postgres() -> String {
 /// A request that `crashed` gets the `internal-error` of `sqlty check` in place of a check.
 ///
 /// `config` is a `sqlty.toml` whose `dialect`, `driver`, `import-style`, `param-types`,
-/// `preview`, `max-query-variants`, `rules` and `types` apply; another key, or an invalid one, is an `error`, as `sqlty check` reports
+/// `preview`, `max-query-variants`, `rules`, `types` and `deprecated-columns` apply; another key, or an invalid one, is an `error`, as `sqlty check` reports
 /// it. `settings` replaces it with a table `config` answered, `extend` applied.
 pub fn run(request: &str) -> String {
     let error = |error: String| json!({ "error": error }).to_string();
@@ -334,6 +334,12 @@ fn resolved(table: &serde_json::Map<String, Value>) -> Settings {
         None => Vec::new(),
     };
     types.extend(pairs("types"));
+    let deprecated = table
+        .get("deprecated-columns")
+        .and_then(|columns| serde_json::from_value::<toml::Value>(columns.clone()).ok());
+    types.extend(config::deprecated_types(&toml::Table::from_iter(
+        deprecated.map(|columns| ("deprecated-columns".to_string(), columns)),
+    )));
     Settings {
         dialect,
         import_style: text("import-style"),
@@ -344,13 +350,21 @@ fn resolved(table: &serde_json::Map<String, Value>) -> Settings {
                 usize::try_from(most).unwrap_or(usize::MAX)
             })
         }),
-        rules: pairs("rules").into_iter().collect(),
+        rules: config::rule_entries(
+            table
+                .get("rules")
+                .and_then(|rules| serde_json::from_value::<toml::Value>(rules.clone()).ok())
+                .as_ref(),
+        )
+        .into_iter()
+        .collect(),
         types,
     }
 }
 
 /// The keys the engine reads: the others name files, which the page has none of.
-const READ: [&str; 8] = [
+const READ: [&str; 9] = [
+    "deprecated-columns",
     "dialect",
     "driver",
     "import-style",

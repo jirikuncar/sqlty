@@ -124,6 +124,16 @@ pub fn set_member(value: &Lit) -> Lit {
     }
 }
 
+/// The values of the `Literal` annotation `tp` that `inferred`, the values of a column, leaves
+/// out, sorted; none when `tp` also takes values by class.
+pub fn extra_literals(tp: &Ty, inferred: &[Lit]) -> Vec<Lit> {
+    let admitted = declared_literal_values(tp, inferred).unwrap_or_default();
+    let holds = |value: &Lit| inferred.iter().any(|v| set_member(v) == set_member(value));
+    let mut extra: Vec<Lit> = admitted.into_iter().filter(|v| !holds(v)).collect();
+    extra.sort_by_key(Lit::repr);
+    extra
+}
+
 /// `declared_literal_values`: the values a resolved annotation admits for a column that
 /// takes `inferred`, as a `set` holds them: equal values once (`True` is `1`).
 ///
@@ -139,10 +149,7 @@ pub fn declared_literal_values(tp: &Ty, inferred: &[Lit]) -> Option<Vec<Lit>> {
     };
     let mut admitted: Vec<Lit> = Vec::new();
     for member in tp.members() {
-        let mut member = member;
-        while let Ty::NewType(new) = member {
-            member = &new.supertype;
-        }
+        let member = member.base();
         match member {
             Ty::Literal(values) => {
                 for value in values {

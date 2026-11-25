@@ -118,14 +118,7 @@ impl Flags {
 
     /// The severities of `-c rules.X` and `--error/--warn/--ignore`, which win over every file.
     pub(crate) fn rules(&self) -> Vec<(String, String)> {
-        let mut rules: Vec<(String, String)> = self
-            .overrides
-            .get("rules")
-            .and_then(Value::as_table)
-            .into_iter()
-            .flatten()
-            .filter_map(|(rule, severity)| Some((rule.clone(), severity.as_str()?.to_string())))
-            .collect();
+        let mut rules = config::rule_entries(self.overrides.get("rules"));
         rules.extend(self.severities.iter().cloned());
         rules
     }
@@ -189,8 +182,17 @@ impl Flags {
             Some(Value::Table(own)) => own,
             _ => Table::new(),
         };
-        let flagged = self.rules().into_iter();
-        rules.extend(flagged.map(|(rule, severity)| (rule, Value::String(severity))));
+        for (rule, value) in self.rules() {
+            let value = Value::String(value);
+            let entry = match rule.split_once('.') {
+                Some((rule, key)) => (
+                    rule.to_string(),
+                    Value::Table(Table::from_iter([(key.to_string(), value)])),
+                ),
+                None => (rule, value),
+            };
+            config::merge_rules(&mut rules, Table::from_iter([entry]));
+        }
         if !rules.is_empty() {
             loaded
                 .table
@@ -303,6 +305,58 @@ mod tests {
         assert_eq!(
             table.to_string(),
             "dialect = \"sqlite\"\n\n[rules]\nselect-star = \"warn\"\nunknown-column = \"ignore\"\n"
+        );
+    }
+
+    #[test]
+    fn a_severity_flag_keeps_the_options_of_a_rule() {
+        let table = |rules: &str| -> Table { format!("[rules]\n{rules}").parse().expect("parses") };
+        let flags = |table: Table, severities: &[(&str, &str)]| Flags {
+            configs: Configs::File {
+                table,
+                label: "sqlty.toml".to_string(),
+            },
+            severities: severities
+                .iter()
+                .map(|(rule, severity)| (rule.to_string(), severity.to_string()))
+                .collect(),
+            ..Flags::default()
+        };
+        let discovery = Discovery::new(
+            Box::new(Shared(std::sync::Arc::new(crate::Disk))),
+            Path::new("/"),
+        );
+        let loaded = |flags: Flags| {
+            let loaded = flags.load(Path::new("/"), &discovery, &mut |_| {});
+            config::rule_entries(loaded.expect("loads").table.get("rules"))
+        };
+        let entries = |pairs: &[(&str, &str)]| -> Vec<(String, String)> {
+            pairs
+                .iter()
+                .map(|(key, value)| (key.to_string(), value.to_string()))
+                .collect()
+        };
+        let options = table("missing-lock-timeout = { max = \"2s\" }");
+        assert_eq!(
+            loaded(flags(options, &[("missing-lock-timeout", "error")])),
+            entries(&[
+                ("missing-lock-timeout.max", "2s"),
+                ("missing-lock-timeout", "error")
+            ])
+        );
+        assert_eq!(
+            loaded(flags(
+                table("missing-lock-timeout = \"ignore\""),
+                &[("missing-lock-timeout.max", "1s")]
+            )),
+            entries(&[
+                ("missing-lock-timeout", "ignore"),
+                ("missing-lock-timeout.max", "1s")
+            ])
+        );
+        assert_eq!(
+            loaded(flags(Table::new(), &[("missing-lock-timeout.max", "1s")])),
+            entries(&[("missing-lock-timeout.max", "1s")])
         );
     }
 

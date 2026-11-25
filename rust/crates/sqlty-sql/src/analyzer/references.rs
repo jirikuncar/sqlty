@@ -1,23 +1,35 @@
 //! Column references outside the result columns, those of `WHERE`, `JOIN ... ON` and
 //! the values and conditions of INSERT, UPDATE and DELETE, and those typing a result
 //! column does not need, as in `x IS NULL` or `x::int`. Only whether each name exists
-//! is checked: the types of these columns do not reach the result.
+//! is checked, of columns and of functions: the types of these columns do not reach the
+//! result.
 
 use std::ops::ControlFlow;
 
 use sqlparser::ast::{AccessExpr, Expr, FunctionArg, FunctionArguments, Query, Visit, Visitor};
 
+use super::inference::function_rules;
 use super::memo::Reporting;
+use super::names::table_key;
 use super::query::Analyzer;
 use super::scope::Scope;
 use crate::diagnostics::Rule;
 
 impl Analyzer<'_> {
-    /// Resolves every column `expr` reads in `scope`, recording only `unknown-column`,
-    /// `unknown-table` and `ambiguous-column`. A subquery is
+    /// Resolves every column and function `expr` reads in `scope`, recording only
+    /// `unknown-column`, `unknown-table`, `ambiguous-column` and `unknown-function`. A subquery is
     /// analyzed in its own scope, correlated with `scope`.
     pub(super) fn check_references(&self, expr: &Expr, scope: &Scope) {
         self.check_references_besides(expr, scope, &[]);
+    }
+
+    /// [`Analyzer::check_references`] of a column a statement writes, which reads nothing
+    /// deprecated: a target of a multi-table `UPDATE`, or `EXCLUDED`, the row an upsert writes.
+    pub(super) fn check_written(&self, expr: &Expr, scope: &Scope) {
+        let mark = self.diag.mark();
+        self.check_references(expr, scope);
+        self.diag
+            .retain_since(mark, |rule| rule != Rule::DeprecatedColumn);
     }
 
     /// [`Analyzer::check_references`], reading a bare name among `aliases` as the result
@@ -41,8 +53,10 @@ impl Analyzer<'_> {
                 Rule::UnknownTable
                     | Rule::UnknownColumn
                     | Rule::AmbiguousColumn
+                    | Rule::UnknownFunction
                     | Rule::ForeignKeyMismatch
                     | Rule::EntityMismatch
+                    | Rule::DeprecatedColumn
             )
         });
     }
@@ -104,6 +118,17 @@ impl Visitor for References<'_, '_> {
             .any(|&name| std::ptr::eq(name, expr))
         {
             return ControlFlow::Continue(());
+        }
+        if let (Expr::Function(function), 0) = (expr, self.depth) {
+            let analyzer = self.analyzer;
+            let unknown = function_rules(&analyzer.builtin_name(&function.name)).is_empty()
+                && !analyzer.schema.is_empty()
+                && !analyzer
+                    .schema
+                    .defines_function(&table_key(&function.name, analyzer.dialect));
+            if unknown {
+                let _ = analyzer.expr(expr, self.scope);
+            }
         }
         let column = match expr {
             Expr::Identifier(ident) => {

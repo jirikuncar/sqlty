@@ -26,8 +26,14 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       crates: ${{ steps.changes.outputs.crates }}
+      packages: ${{ steps.changes.outputs.packages }}
       python: ${{ steps.changes.outputs.python }}
-      engine: ${{ steps.changes.outputs.engine }}
+      docs: ${{ steps.changes.outputs.docs }}
+      free-threaded: ${{ steps.changes.outputs.free-threaded }}
+      pg-fidelity: ${{ steps.changes.outputs.pg-fidelity }}
+      mysql-fidelity: ${{ steps.changes.outputs.mysql-fidelity }}
+      bench: ${{ steps.changes.outputs.bench }}
+      package: ${{ steps.changes.outputs.package }}
       vscode: ${{ steps.changes.outputs.vscode }}
       playground: ${{ steps.changes.outputs.playground }}
     steps:
@@ -45,7 +51,7 @@ jobs:
   ci:
     name: CI
     if: always()
-    needs: [changes, no-exec-harness, rust, test, free-threaded, wasm, pg-fidelity, mysql-fidelity, bench, codspeed, package, vscode, lint]
+    needs: [changes, no-exec-harness, rust, test, docs, free-threaded, wasm, fidelity, bench, package, vscode, lint]
     runs-on: ubuntu-latest
     steps:
       - env:
@@ -71,35 +77,33 @@ jobs:
             || cp scripts/check_no_exec_harness.py "$RUNNER_TEMP/harness.py"
           python3 "$RUNNER_TEMP/harness.py" "$BASE"
 
-  # Each crate's own tests, gated on the lines they never run (scripts/coverage.sh).
+  # Each affected crate's own tests, gated on the lines they never run (scripts/coverage.sh),
+  # one after another on one target dir; the doctests build on their own in the background.
   rust:
-    name: Rust ${{ matrix.crate.dir }}
+    name: Rust
     needs: changes
-    if: needs.changes.outputs.crates != '[]'
+    if: needs.changes.outputs.crates != ''
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        crate: ${{ fromJSON(needs.changes.outputs.crates) }}
-      fail-fast: false
     env:
       # Coverage builds on nightly for `#[coverage(off)]`.
       RUSTUP_TOOLCHAIN: nightly-2026-11-01
-      CRATE: ${{ matrix.crate.dir }}
-      PACKAGE: ${{ matrix.crate.package }}
+      CRATES: ${{ needs.changes.outputs.crates }}
+      PACKAGES: ${{ needs.changes.outputs.packages }}
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      - name: Install Rust toolchain
-        run: rustup toolchain install "$RUSTUP_TOOLCHAIN" --profile minimal --component llvm-tools-preview
+      - name: Install Rust toolchains
+        run: |
+          rustup toolchain install "$RUSTUP_TOOLCHAIN" --profile minimal --component llvm-tools-preview
+          env -u RUSTUP_TOOLCHAIN rustup toolchain install --profile minimal
 
       - name: Cache Rust build artifacts
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: rust -> target
-          key: ${{ matrix.crate.dir }}
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install cargo-llvm-cov and cargo-nextest
@@ -107,12 +111,21 @@ jobs:
         with:
           tool: cargo-llvm-cov@0.9.1,nextest@0.9.148
 
-      - name: Run the tests and check coverage
-        run: scripts/coverage.sh "$CRATE"
-
-      # On the toolchain of rust-toolchain.toml.
+      # On the toolchain of rust-toolchain.toml, in a target dir coverage never cleans
+      # (outside rust/target, which rust-cache keeps).
       - name: Run the doctests
-        run: env -u RUSTUP_TOOLCHAIN cargo test --doc -p "$PACKAGE" --manifest-path rust/Cargo.toml
+        id: doctests
+        background: true
+        run: |
+          args=()
+          for package in $PACKAGES; do args+=(-p "$package"); done
+          env -u RUSTUP_TOOLCHAIN cargo test --doc "${args[@]}" --manifest-path rust/Cargo.toml \
+            --target-dir doc-tests
+
+      - name: Run the tests and check coverage
+        run: scripts/coverage.sh $CRATES
+
+      - wait: doctests
 
   test:
     name: Test Python ${{ matrix.python-version }}
@@ -190,10 +203,36 @@ jobs:
         if: ${{ !matrix.coverage }}
         run: uv run cargo nextest run -p sqlty-core --manifest-path rust/Cargo.toml
 
+  # The guides alone: the tests that read them and their mdtests, without the Python matrix.
+  docs:
+    name: Docs
+    needs: changes
+    if: needs.changes.outputs.docs == 'true' && needs.changes.outputs.python != 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: $/.github/actions/setup
+        with:
+          python-version: "3.14"
+          rust-cache-key: python-3.14
+
+      - name: Install the dependencies
+        run: uv sync --all-groups --no-group duckdb --no-install-project
+
+      - name: Build Rust extension
+        run: uv run maturin develop --manifest-path rust/crates/sqlty-ext/Cargo.toml
+
+      - name: Run the tests that read the docs
+        run: uv run pytest tests/test_docs.py tests/test_core_invariants.py tests/test_duplicates.py tests/test_rust_types.py docs README.md
+
   free-threaded:
     name: Threads on free-threaded Python ${{ matrix.python }}
     needs: changes
-    if: needs.changes.outputs.engine == 'true'
+    if: needs.changes.outputs.free-threaded == 'true'
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -258,10 +297,11 @@ jobs:
             --test-coverage-lines=100 --test-coverage-functions=100 --test-coverage-branches=92 \
             tests/playground.test.mjs tests/ask.test.mjs tests/wasm.test.mjs tests/release.test.mjs
 
-  pg-fidelity:
-    name: PostgreSQL column names, types and nullability
+  # The queries of the mdtests on PostgreSQL and MySQL, each compared with sqlty's columns.
+  fidelity:
+    name: Database column names, types and nullability
     needs: changes
-    if: needs.changes.outputs.engine == 'true'
+    if: needs.changes.outputs.pg-fidelity == 'true' || needs.changes.outputs.mysql-fidelity == 'true'
     runs-on: ubuntu-latest
 
     services:
@@ -276,10 +316,18 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
-
-    env:
-      # A disposable database: the test drops every schema between mdtest sections.
-      SQLTY_PG_DSN: postgresql://postgres:postgres@localhost:5432/postgres
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ALLOW_EMPTY_PASSWORD: "yes"
+          MYSQL_DATABASE: probe
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -296,56 +344,32 @@ jobs:
       - name: Build Rust extension
         run: uv run maturin develop --manifest-path rust/crates/sqlty-ext/Cargo.toml
 
-      - name: Compare with the server's column names and types
-        run: uv run pytest tests/test_pg_describe.py tests/test_pg_common_types.py tests/test_driver_values.py -rs -q
+      # Each waits on its server, so the two run at once; each with half the workers.
+      - parallel:
+          - name: Compare with PostgreSQL's column names and types
+            if: needs.changes.outputs.pg-fidelity == 'true'
+            env:
+              # A disposable database: the test drops every schema between mdtest sections.
+              SQLTY_PG_DSN: postgresql://postgres:postgres@localhost:5432/postgres
+            run: uv run pytest tests/test_pg_describe.py tests/test_pg_common_types.py tests/test_driver_values.py -rs -q -n 2
 
-  mysql-fidelity:
-    name: MySQL column names and types
-    needs: changes
-    if: needs.changes.outputs.engine == 'true'
-    runs-on: ubuntu-latest
+          - name: Compare with MySQL's column names and types
+            if: needs.changes.outputs.mysql-fidelity == 'true'
+            env:
+              # A disposable server: the test drops and creates the database sqlty_describe.
+              SQLTY_MYSQL_DSN: mysql://root@127.0.0.1:3306/probe
+            run: uv run --with pymysql pytest tests/test_server_describe.py tests/test_driver_values.py -rs -q -n 2
 
-    services:
-      mysql:
-        image: mysql:8.4
-        env:
-          MYSQL_ALLOW_EMPTY_PASSWORD: "yes"
-          MYSQL_DATABASE: probe
-        ports:
-          - 3306:3306
-        options: >-
-          --health-cmd "mysqladmin ping -h 127.0.0.1"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 20
-
-    env:
-      # A disposable server: the test drops and creates the database sqlty_describe.
-      SQLTY_MYSQL_DSN: mysql://root@127.0.0.1:3306/probe
-
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - uses: $/.github/actions/setup
-        with:
-          python-version: "3.14"
-
-      - name: Install the dependencies
-        run: uv sync --no-install-project
-
-      - name: Build Rust extension
-        run: uv run maturin develop --manifest-path rust/crates/sqlty-ext/Cargo.toml
-
-      - name: Compare with the server's column names and types
-        run: uv run --with pymysql pytest tests/test_server_describe.py tests/test_driver_values.py -rs -q
-
+  # One release build for both; never in parallel, as bench-ci measures wall time.
   bench:
-    name: Performance budget
+    name: Performance budget and CodSpeed
     needs: changes
-    if: needs.changes.outputs.engine == 'true'
+    if: needs.changes.outputs.bench == 'true'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # CodSpeed authenticates over OpenID Connect rather than an upload token.
+      id-token: write
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -375,31 +399,6 @@ jobs:
           path: bench-result.json
           if-no-files-found: ignore
 
-  codspeed:
-    name: CodSpeed
-    needs: changes
-    if: needs.changes.outputs.engine == 'true'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      # CodSpeed authenticates over OpenID Connect rather than an upload token.
-      id-token: write
-
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - uses: $/.github/actions/setup
-        with:
-          python-version: "3.15"
-
-      - name: Install the dependencies
-        run: uv sync --group dev --group bench --no-install-project
-
-      - name: Build the release extension
-        run: uv run maturin develop --release --manifest-path rust/crates/sqlty-ext/Cargo.toml
-
       # The upload needs the repository enabled on codspeed.io; until the CODSPEED
       # variable says so, each benchmark runs once, unmeasured.
       - name: Run the benchmarks once
@@ -417,7 +416,7 @@ jobs:
   package:
     name: Package (wheel + sdist, Python ${{ matrix.python-version }})
     needs: changes
-    if: needs.changes.outputs.engine == 'true'
+    if: needs.changes.outputs.package == 'true'
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -504,6 +503,8 @@ jobs:
           npx playwright install --with-deps chromium
           npm run test-web
 
+  # A pull request runs each hook on the files it changes, and builds only what those hooks
+  # need; a push to main runs every hook on every file.
   lint:
     name: Lint
     runs-on: ubuntu-latest
@@ -512,6 +513,28 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: ${{ github.event_name == 'pull_request' && '0' || '1' }}
+
+      # The `files` patterns of the hooks in prek.toml that need the extension or Node.
+      - name: Find what the changed files need
+        id: needs
+        env:
+          BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || '' }}
+        run: |
+          if [ -n "$BASE" ]; then
+            changed=$(git diff --name-only --no-renames "$BASE...HEAD")
+            echo "range=--from-ref $BASE --to-ref HEAD" >> "$GITHUB_OUTPUT"
+          else
+            changed=$(git ls-files)
+            echo "range=--all-files" >> "$GITHUB_OUTPUT"
+          fi
+          has() { grep -qE "$1" <<<"$changed" && echo true || echo false; }
+          {
+            echo "extension=$(has '^(examples|src/sqlty|rust/crates)/')"
+            echo "node=$(has '^editors/vscode/')"
+            echo "plugins=$(has '^(\.claude-plugin|\.codex-plugin|\.cursor-plugin|skills)/')"
+            echo "vale=$(has '^\.vale(\.ini$|/)')"
+          } >> "$GITHUB_OUTPUT"
 
       - uses: $/.github/actions/setup
         with:
@@ -522,19 +545,29 @@ jobs:
 
       # The hooks check examples with sqlty, so they need the extension.
       - name: Build Rust extension
+        if: steps.needs.outputs.extension == 'true'
         run: uv run maturin develop --manifest-path rust/crates/sqlty-ext/Cargo.toml
 
-      # The hook of editors/vscode runs tsc, oxlint and oxfmt.
+      # The hook of editors/vscode runs tsc, oxlint and oxfmt; the plugin check runs on Node.
       - name: Install Node
+        if: steps.needs.outputs.node == 'true' || steps.needs.outputs.plugins == 'true'
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22.23.4
 
       # Type checker tests of SQL[T] run with pytest in the test jobs
       - name: Run prek
-        run: uv run prek run --all-files --show-diff-on-failure
+        env:
+          RANGE: ${{ steps.needs.outputs.range }}
+        run: uv run prek run $RANGE --show-diff-on-failure
+
+      # The styles judge every page, not only the changed ones.
+      - name: Run Vale on every page
+        if: steps.needs.outputs.vale == 'true' && github.event_name == 'pull_request'
+        run: uv run prek run vale --all-files
 
       - name: Validate the plugin manifests
+        if: steps.needs.outputs.plugins == 'true'
         run: npx --yes @anthropic-ai/claude-code@2.1.311 plugin validate --strict --profile directory .
 
       # Show diff ONLY if previous step failed

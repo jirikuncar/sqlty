@@ -243,8 +243,11 @@ fn extended(
     let mut merged = parent.table;
     for (key, value) in config.table {
         match (merged.get_mut(&key), value) {
+            (Some(Value::Table(under)), Value::Table(over)) if key == "rules" => {
+                crate::config::merge_rules(under, over);
+            }
             (Some(Value::Table(under)), Value::Table(over))
-                if matches!(key.as_str(), "rules" | "types" | "databases") =>
+                if matches!(key.as_str(), "types" | "deprecated-columns" | "databases") =>
             {
                 under.extend(over);
             }

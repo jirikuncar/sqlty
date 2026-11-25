@@ -152,6 +152,23 @@ def test_unknown_keys_raise_config_error_naming_the_file(tmp_path):
         ("[tool.sqlty.rules]\nnope = 'warn'\n", "unknown rule 'nope'"),
         ("[tool.sqlty.rules]\nstale-typ = 'warn'\n", "did you mean 'stale-type'?"),
         ("[tool.sqlty.rules]\nstale-type = 'loud'\n", "invalid severity 'loud'"),
+        (
+            "[tool.sqlty.rules.missing-lock-timeout]\nmax = 'soon'\n",
+            "invalid max 'soon' for rule 'missing-lock-timeout'",
+        ),
+        (
+            "[tool.sqlty.rules.missing-lock-timeout]\nseverity = 'loud'\n",
+            "invalid severity 'loud' for rule 'missing-lock-timeout'",
+        ),
+        (
+            "[tool.sqlty.rules.select-star]\nmax = '2s'\n",
+            r"unknown key 'max' in \[tool\.sqlty\.rules\.select-star\]; expected one of: severity",
+        ),
+        ("[tool.sqlty]\ndeprecated-columns = 1\n", "deprecated-columns] must be a table"),
+        ("[tool.sqlty.deprecated-columns]\nemail = {}\n", "'email' must be table.column"),
+        ("[tool.sqlty.deprecated-columns]\n'u.e' = 'x'\n", "'u.e' must be a table of use"),
+        ("[tool.sqlty.deprecated-columns]\n'u.e' = { uses = 'f' }\n", "did you mean 'use'?"),
+        ("[tool.sqlty.deprecated-columns]\n'u.e' = { use = 1 }\n", "'u.e' use must be a string"),
         ("[[tool.sqlty.functions]]\nimport-path = 'a.b'\nquery = 'q'\n", "unknown key 'query'"),
         (
             "[[tool.sqlty.functions]]\nimport_path = 'a.b'\nquery-param = 'q'\n",

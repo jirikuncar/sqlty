@@ -1,7 +1,8 @@
 //! The migration checks of `sqlty breaking`, with the user's severities and suppressions.
 
-use crate::checker::Diagnostic;
-use crate::rewriter::LineIndex;
+use crate::checker::{query_sites, Diagnostic, SiteKind};
+use crate::queries::{split, Format};
+use crate::rewriter::{ImportStyle, LineIndex};
 use crate::rules::{Rule, RuleConfig};
 use crate::suppress::{apply_sql, sql_ignores};
 
@@ -14,17 +15,22 @@ pub fn check_migrations(
     rules: &RuleConfig,
 ) -> Vec<Vec<Diagnostic>> {
     let files: Vec<(&str, &RuleConfig)> = files.iter().map(|sql| (*sql, rules)).collect();
-    check_migrations_with(baseline, &files)
+    check_migrations_with(baseline, &files, &[])
 }
 
 /// [`check_migrations`] with the rules of each file: `[(sql, rules)]`, the severities of
-/// the overrides its path matches.
+/// the overrides its path matches; and the queries of the code deployed with them,
+/// `[(label, sql)]` as [`queries_of`] gives them.
 pub fn check_migrations_with(
     baseline: &str,
     files: &[(&str, &RuleConfig)],
+    writers: &[(String, String)],
 ) -> Vec<Vec<Diagnostic>> {
-    let sources: Vec<&str> = files.iter().map(|(sql, _)| *sql).collect();
-    sqlty_sql::migrations::check(baseline, &sources)
+    let sources: Vec<(&str, Option<&str>)> = files
+        .iter()
+        .map(|(sql, rules)| (*sql, rules.lock_timeout_max.as_deref()))
+        .collect();
+    sqlty_sql::migrations::check_with(baseline, &sources, writers)
         .into_iter()
         .zip(files)
         .map(|(found, (sql, rules))| {
@@ -47,6 +53,36 @@ pub fn check_migrations_with(
                 .into_iter()
                 .filter(|diagnostic| diagnostic.rule != Rule::UnusedIgnore)
                 .collect()
+        })
+        .collect()
+}
+
+/// The queries of a Python module (`format` `None`) or a `.sql` query file in `format`,
+/// shown as `path`, each as `(path:line, sql)`.
+pub fn queries_of(
+    path: &str,
+    text: &str,
+    style: &ImportStyle,
+    format: Option<Format>,
+) -> Vec<(String, String)> {
+    let Some(format) = format else {
+        let sites = query_sites(text, style, &[]);
+        let queries = sites
+            .into_iter()
+            .filter(|(.., kind, _)| *kind == SiteKind::Query);
+        return queries
+            .map(|(line, _, sql)| (format!("{path}:{line}"), sql))
+            .collect();
+    };
+    let lines = LineIndex::new(text);
+    let stem = path.rsplit('/').next().unwrap_or(path);
+    split(text, format, stem.strip_suffix(".sql").unwrap_or(stem))
+        .into_iter()
+        .map(|query| {
+            (
+                format!("{path}:{}", lines.line_at(query.body.start)),
+                query.sql,
+            )
         })
         .collect()
 }
@@ -90,6 +126,35 @@ mod tests {
     }
 
     #[test]
+    fn a_backfill_names_a_query_of_a_module_or_a_query_file() {
+        let style = ImportStyle::default();
+        let module =
+            "from sqlty import SQL\nq = SQL(\"--sql\\nINSERT INTO users (id) VALUES (1)\")\n";
+        let file = "-- name: rename!\nUPDATE users SET id = :id;\n";
+        let mut writers = queries_of("app/q.py", module, &style, None);
+        writers.extend(queries_of(
+            "sql/users.sql",
+            file,
+            &style,
+            Some(Format::Auto),
+        ));
+        let labels: Vec<&str> = writers.iter().map(|(label, _)| label.as_str()).collect();
+        assert_eq!(labels, ["app/q.py:2", "sql/users.sql:2"]);
+        let migration =
+            "SET lock_timeout = '1s';\nUPDATE users SET bio = '' WHERE id BETWEEN 1 AND 9;";
+        let found = check_migrations_with(BASELINE, &[(migration, &rules(&[]))], &writers);
+        let [diagnostic] = found[0].as_slice() else {
+            panic!("{found:?}");
+        };
+        assert_eq!(diagnostic.rule, Rule::BackfillWithoutWriter);
+        assert!(
+            diagnostic.message.contains("`app/q.py:2`"),
+            "{}",
+            diagnostic.message
+        );
+    }
+
+    #[test]
     fn each_file_has_its_own_severities() {
         let first = "SET lock_timeout = '1s';\nCREATE INDEX a ON users (bio);";
         let second = "SET lock_timeout = '1s';\nCREATE INDEX b ON users (id);";
@@ -97,7 +162,7 @@ mod tests {
             rules(&[("missing-concurrently", "warn")]),
             rules(&[("missing-concurrently", "error")]),
         );
-        let found = check_migrations_with(BASELINE, &[(first, &warn), (second, &error)]);
+        let found = check_migrations_with(BASELINE, &[(first, &warn), (second, &error)], &[]);
         let severities: Vec<Vec<Severity>> = found
             .iter()
             .map(|found| found.iter().map(|d| d.severity).collect())

@@ -149,6 +149,34 @@ pub(crate) fn difference(left: &[Value], right: &[Value]) -> Vec<Value> {
         .collect()
 }
 
+/// Whether a column of the values `allowed` never equals any of `constants`. Only a
+/// constant of their kind is judged: PostgreSQL reads `'1'` as the integer 1.
+pub(crate) fn excludes(allowed: &[Value], constants: &[Value]) -> bool {
+    let (Some(first), false) = (allowed.first(), constants.is_empty()) else {
+        return false;
+    };
+    let kind = std::mem::discriminant(first);
+    let allowed: FxHashSet<&Value> = allowed.iter().collect();
+    constants
+        .iter()
+        .all(|value| std::mem::discriminant(value) == kind && !allowed.contains(value))
+}
+
+/// `values` as SQL constants for a message, the last joined with `last`: `'a', 'b' or 'c'`.
+pub(crate) fn spell(values: &[Value], last: &str) -> String {
+    let spelled: Vec<String> = values
+        .iter()
+        .map(|value| match value {
+            Value::Str(text) => format!("'{}'", text.replace('\'', "''")),
+            Value::Int(number) => number.to_string(),
+        })
+        .collect();
+    match spelled.split_last() {
+        Some((tail, init)) if !init.is_empty() => format!("{} {last} {tail}", init.join(", ")),
+        _ => spelled.join(""),
+    }
+}
+
 /// The values `expr` (a `CHECK` condition) limits the column `is_target` recognizes to.
 ///
 /// Reads `col IN ('a', 'b')`, `col = 'a'`, `col = ANY (ARRAY['a', 'b'])` (also with the

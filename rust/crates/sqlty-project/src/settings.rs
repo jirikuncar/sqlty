@@ -340,11 +340,9 @@ impl Directory {
             return Arc::clone(settings);
         }
         let mut rules = settings.rules.clone();
-        rules.extend(
-            route.rules.iter().filter_map(|(rule, severity)| {
-                Some((rule.clone(), severity.as_str()?.to_string()))
-            }),
-        );
+        rules.extend(config::rule_entries(Some(&Value::Table(
+            route.rules.clone(),
+        ))));
         rules.extend(self.cli_rules.iter().cloned());
         Arc::new(FileSettings {
             rules,
@@ -383,8 +381,13 @@ fn merged(table: &Table, database: &Table) -> Table {
     merged.remove("databases");
     for (key, value) in database {
         match (merged.get_mut(key), value) {
-            (Some(Value::Table(own)), Value::Table(value)) if key == "rules" || key == "types" => {
-                own.extend(value.clone());
+            (Some(Value::Table(own)), Value::Table(value))
+                if matches!(key.as_str(), "rules" | "types" | "deprecated-columns") =>
+            {
+                match key == "rules" {
+                    true => config::merge_rules(own, value.clone()),
+                    false => own.extend(value.clone()),
+                }
             }
             _ => {
                 merged.insert(key.clone(), value.clone());
@@ -420,6 +423,7 @@ fn own_types(table: &Table, dialect: &str) -> Vec<(String, String)> {
         types.retain(|(known, _)| known != key);
         types.push((key.clone(), value.to_string()));
     }
+    types.extend(config::deprecated_types(table));
     types
 }
 
@@ -525,12 +529,8 @@ fn settings(
             .and_then(Value::as_bool)
             .unwrap_or(true),
         closed_params,
-        rules: table
-            .get("rules")
-            .and_then(Value::as_table)
+        rules: config::rule_entries(table.get("rules"))
             .into_iter()
-            .flatten()
-            .filter_map(|(rule, severity)| Some((rule.clone(), severity.as_str()?.to_string())))
             .collect(),
         variants: preview.then(|| {
             variants.map_or(MAX_QUERY_VARIANTS, |most| {

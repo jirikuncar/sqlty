@@ -39,6 +39,7 @@ stale-type = "error"
 | [`unknown-database`](rules/unknown-database.md) | Query | error | no | Query marker names a database the project does not configure |
 | [`unknown-table`](rules/unknown-table.md) | Names | error | no | Table the schema does not define |
 | [`unknown-column`](rules/unknown-column.md) | Names | error | yes | Column the table does not have |
+| [`deprecated-column`](rules/deprecated-column.md) | Names | warn | no | Query reads a column scheduled for removal |
 | [`ambiguous-column`](rules/ambiguous-column.md) | Names | error | no | Unqualified column that more than one table of the query has |
 | [`duplicate-alias`](rules/duplicate-alias.md) | Names | error | no | Two tables of a FROM clause read by the same name |
 | [`unknown-function`](rules/unknown-function.md) | Names | warn | no | Function whose result sqlty cannot type |
@@ -46,6 +47,8 @@ stale-type = "error"
 | [`unsupported-syntax`](rules/unsupported-syntax.md) | Names | warn | no | Construct that parses but is not typed |
 | [`insert-missing-column`](rules/insert-missing-column.md) | Names | error | no | INSERT that leaves out a NOT NULL column without a default |
 | [`insert-value-count`](rules/insert-value-count.md) | Names | error | no | INSERT that gives a different number of values than the columns it writes |
+| [`literal-write`](rules/literal-write.md) | Names | error | no | INSERT or UPDATE writes a constant an enum or CHECK list does not allow |
+| [`unmatched-literal`](rules/unmatched-literal.md) | Names | warn | no | WHERE compares a column with a constant its enum or CHECK list never holds |
 | [`ungrouped-column`](rules/ungrouped-column.md) | Names | error | no | Grouped query selects a column it neither groups by nor aggregates |
 | [`fanout-aggregate`](rules/fanout-aggregate.md) | Names | warn | no | Aggregate over rows a one-to-many join repeats |
 | [`chasm-join`](rules/chasm-join.md) | Names | warn | no | Aggregating query joins one table one-to-many to two others |
@@ -79,6 +82,9 @@ stale-type = "error"
 | [`locked-backfill`](rules/locked-backfill.md) | Migration | warn | no | Migration backfills a table its transaction has locked |
 | [`unbatched-backfill`](rules/unbatched-backfill.md) | Migration | warn | no | Migration updates or deletes the rows of a table in one statement |
 | [`drop-primary-key`](rules/drop-primary-key.md) | Migration | warn | no | Migration leaves a table without a replica identity |
+| [`rerun-backfill`](rules/rerun-backfill.md) | Migration | warn | no | Migration copies rows in a way that fails or duplicates when run again |
+| [`dropped-delete-action`](rules/dropped-delete-action.md) | Migration | warn | no | Migration drops a foreign key with an ON DELETE or ON UPDATE action |
+| [`backfill-without-writer`](rules/backfill-without-writer.md) | Migration | warn | no | Migration backfills a column that the new code does not write |
 | [`unused-ignore`](rules/unused-ignore.md) | Suppression | warn | no | # sqlty: ignore comment that suppresses nothing |
 | [`internal-error`](rules/internal-error.md) | Internal | error | no | sqlty crashed checking the file |
 <!-- /generated:rules -->

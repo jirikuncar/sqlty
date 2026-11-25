@@ -21,17 +21,19 @@ use std::ops::{ControlFlow, Range};
 
 use rustc_hash::{FxHashMap, FxHashSet};
 use sqlparser::ast::{
-    visit_expressions, AlterColumnOperation, AlterIndexOperation, AlterTable, AlterTableOperation,
-    AlterType, AlterTypeOperation, BinaryOperator, CascadeOption, CharacterLength, CheckConstraint,
-    ColumnDef, ColumnOption, CopySource, CreateTable, DataType, Delete, DetachPartitionMode,
-    ExactNumberInfo, Expr, ForValues, ForeignKeyConstraint, FromTable, Ident, InTarget, Insert,
-    LockTableMode, Merge, ObjectName, ObjectType, RenameTableNameKind, ReplicaIdentity, SetExpr,
-    Statement, TableConstraint, TableFactor, TableObject,
+    visit_expressions, visit_relations, AlterColumnOperation, AlterIndexOperation, AlterTable,
+    AlterTableOperation, AlterType, AlterTypeOperation, Assignment, AssignmentTarget,
+    BinaryOperator, CascadeOption, CharacterLength, CheckConstraint, ColumnDef, ColumnOption,
+    CopySource, CreateTable, DataType, Delete, DetachPartitionMode, ExactNumberInfo, Expr,
+    ForValues, ForeignKeyConstraint, FromTable, Ident, InTarget, Insert, LockTableMode, Merge,
+    ObjectName, ObjectType, OnConflict, OnConflictAction, OnInsert, Query, ReferentialAction,
+    RenameTableNameKind, ReplicaIdentity, SetExpr, Statement, TableConstraint, TableFactor,
+    TableObject,
 };
 
 use crate::analyzer::{parse_ddl, SqlDialect};
 use crate::catalog::fold;
-use crate::ddl::{self, Statement as Raw};
+use crate::ddl::{self, RowEvents, Statement as Raw};
 
 pub use sqlty_rules::Rule;
 
@@ -76,8 +78,33 @@ const SERIAL: [&str; 6] = [
 /// The findings of each of `files`, the migrations of the new schema in the order they run,
 /// for the statements `baseline` does not have.
 pub fn check(baseline: &str, files: &[&str]) -> Vec<Vec<Finding>> {
+    let files: Vec<(&str, Option<&str>)> = files.iter().map(|sql| (*sql, None)).collect();
+    check_with(baseline, &files, &[])
+}
+
+/// [`check`] with the longest `lock_timeout` each file may set, such as `"2s"`: a longer one
+/// counts as unset. `writers` are the queries of the code deployed with the migrations, as
+/// `(label, sql)`: a backfill of a column some `INSERT` or `UPDATE` among them does not write
+/// is reported, naming the first by label.
+pub fn check_with(
+    baseline: &str,
+    files: &[(&str, Option<&str>)],
+    writers: &[(String, String)],
+) -> Vec<Vec<Finding>> {
     let mut model = Model::default();
+    for (label, sql) in writers {
+        let stmts = crate::analyzer::parse_query(sql, SqlDialect::Postgres).unwrap_or_default();
+        for write in stmts.iter().filter_map(written) {
+            let writer = Writer {
+                label: label.clone(),
+                inserts: write.inserts,
+                columns: write.columns,
+            };
+            model.writers.entry(write.table).or_default().push(writer);
+        }
+    }
     for stmt in ddl::statements(baseline, false) {
+        model.record_trigger(&stmt);
         *model.applied.entry(stmt.normalized()).or_default() += 1;
         let parsed = model.parse_if_shaping(&stmt);
         model.record_indexes(&stmt, parsed.as_ref().map(|(parsed, _)| parsed));
@@ -85,7 +112,10 @@ pub fn check(baseline: &str, files: &[&str]) -> Vec<Vec<Finding>> {
             model.apply(&parsed, &likes);
         }
     }
-    files.iter().map(|sql| model.file(sql)).collect()
+    files
+        .iter()
+        .map(|(sql, max)| model.file(sql, *max))
+        .collect()
 }
 
 #[derive(Default)]
@@ -134,12 +164,47 @@ struct Model {
     identity_tables: FxHashMap<String, String>,
     /// The columns of each unique index, by schema-qualified name.
     unique_indexes: FxHashMap<String, Vec<String>>,
+    /// The columns given a value when a row leaves them out: a default, generated, identity
+    /// or serial column.
+    defaulted: FxHashSet<(String, String)>,
+    /// The statements a `BEFORE ... FOR EACH ROW` trigger of each table fires for.
+    row_triggers: FxHashMap<String, RowEvents>,
+    /// The `INSERT` and `UPDATE` queries of the code that writes each table: their label and
+    /// the columns they write, `None` for all of them.
+    writers: FxHashMap<String, Vec<Writer>>,
+}
+
+/// An `INSERT` or `UPDATE` of the code deployed with the migrations.
+struct Writer {
+    label: String,
+    /// Whether it inserts rows: an upsert does both.
+    inserts: bool,
+    /// The columns it writes, `None` for all of them.
+    columns: Option<Vec<String>>,
+}
+
+/// What an `INSERT`, `UPDATE` or `MERGE` writes.
+struct Written<'a> {
+    table: String,
+    inserts: bool,
+    /// The columns it writes, `None` for all of them.
+    columns: Option<Vec<String>>,
+    /// The value of each column it writes, an expression or the query it copies from.
+    values: Vec<Value<'a>>,
+}
+
+enum Value<'a> {
+    Expr(&'a Expr),
+    Query(&'a Query),
 }
 
 struct ForeignKey {
     name: String,
     columns: Vec<String>,
     referenced: String,
+    /// What deleting or updating a referenced row does besides failing, as
+    /// `ON DELETE CASCADE`; empty for `NO ACTION` and `RESTRICT`.
+    actions: String,
 }
 
 struct PrimaryKey {
@@ -165,11 +230,14 @@ struct Check {
 
 /// What the statements of one file so far have set.
 #[derive(Default)]
-struct Session {
+struct Session<'a> {
+    /// The longest `lock_timeout` that counts as set, as configured.
+    max_timeout: Option<&'a str>,
     transaction: bool,
-    lock_timeout: bool,
+    /// The `lock_timeout` value set, `0` and `DEFAULT` excluded.
+    lock_timeout: Option<String>,
     /// Set by `SET LOCAL`, until the transaction ends.
-    local_timeout: bool,
+    local_timeout: Option<String>,
     reported_timeout: bool,
     /// The enum values `ALTER TYPE ... ADD VALUE` added in the open transaction, by string
     /// literal, with the order they were added in and their type.
@@ -185,12 +253,16 @@ struct Session {
 }
 
 impl Model {
-    fn file(&mut self, sql: &str) -> Vec<Finding> {
+    fn file(&mut self, sql: &str, max_timeout: Option<&str>) -> Vec<Finding> {
         let mut found = Vec::new();
         if is_dump(sql) {
             return found;
         }
-        let mut session = Session::default();
+        let mut session = Session {
+            max_timeout,
+            ..Session::default()
+        };
+        let mut dropped_actions = Vec::new();
         let spanned = ddl::statements(sql, false);
         for (span, stmt) in spanned.filter_map(|s| Some((s.range_in(sql)?, s))) {
             let tokens: Vec<String> = stmt.tokens().iter().map(|t| t.to_lowercase()).collect();
@@ -214,6 +286,7 @@ impl Model {
                 }
                 _ => true,
             };
+            self.record_trigger(&stmt);
             let (parsed, likes) = parse(&stmt).unzip();
             let dropped = dropped_indexes(parsed.as_ref(), &tokens);
             if new {
@@ -224,6 +297,9 @@ impl Model {
                         span: span.clone(),
                     });
                 };
+                if let Some(message) = parsed.as_ref().and_then(|parsed| self.unwritten(parsed)) {
+                    report(Rule::BackfillWithoutWriter, message);
+                }
                 let judged = match &parsed {
                     Some(parsed) => self.judge(parsed, &mut report),
                     None => self.judge_tokens(&stmt, &tokens, &mut report),
@@ -254,11 +330,22 @@ impl Model {
                         ),
                     );
                 }
-                if judged.strong_lock && !session.has_timeout() && !session.reported_timeout {
-                    session.reported_timeout = true;
+                if judged.strong_lock && !session.reported_timeout {
+                    if let Some(message) = session.missing_timeout() {
+                        session.reported_timeout = true;
+                        report(Rule::MissingLockTimeout, message);
+                    }
+                }
+                if let Some((table, constraint)) = parsed
+                    .as_ref()
+                    .and_then(validated)
+                    .filter(|(table, _)| session.locking.contains(table))
+                {
                     report(
-                        Rule::MissingLockTimeout,
-                        "takes a lock that blocks writes without `SET lock_timeout` first: while it waits for the lock, the queries it blocks wait behind it".to_string(),
+                        Rule::ConstraintScan,
+                        format!(
+                            "validating `{constraint}` in the transaction that locked `{table}` holds that lock through the scan: `COMMIT` before `VALIDATE CONSTRAINT`"
+                        ),
                     );
                 }
                 if session.transaction {
@@ -284,6 +371,18 @@ impl Model {
                             );
                         }
                     }
+                }
+                if let Some(table) = parsed
+                    .as_ref()
+                    .and_then(rerun_insert)
+                    .filter(|table| !self.created.contains(table))
+                {
+                    report(
+                        Rule::RerunBackfill,
+                        format!(
+                            "copies rows into `{table}` without `ON CONFLICT`: run again after a timeout or a restart, it fails on the key or adds the rows twice; add `ON CONFLICT (key) DO NOTHING`, or `DO UPDATE ... WHERE` to keep newer rows"
+                        ),
+                    );
                 }
                 if let Some((target, selection)) = parsed
                     .as_ref()
@@ -378,9 +477,42 @@ impl Model {
                         }
                     }
                 }
+                let actions = matches!(
+                    parsed,
+                    Statement::AlterTable(_)
+                        | Statement::Drop {
+                            object_type: ObjectType::Table,
+                            ..
+                        }
+                )
+                .then(|| self.delete_actions());
                 self.apply(parsed, &likes.unwrap_or_default());
+                if let Some(before) = actions.filter(|_| new) {
+                    let after = self.delete_actions();
+                    let gone: Vec<String> = match parsed {
+                        Statement::Drop { names, .. } => names.iter().map(key).collect(),
+                        _ => Vec::new(),
+                    };
+                    let lost = before
+                        .into_iter()
+                        .filter(|fk| !after.contains(fk) && !gone.contains(&fk.0));
+                    dropped_actions.extend(lost.map(|fk| (fk, span.clone())));
+                }
             }
         }
+        let kept = self.delete_actions();
+        found.extend(
+            dropped_actions
+                .into_iter()
+                .filter(|(fk, _)| !kept.contains(fk))
+                .map(|((owner, columns, referenced, actions), span)| Finding {
+                    rule: Rule::DroppedDeleteAction,
+                    message: format!(
+                        "drops the foreign key of `{owner}` ({columns}) to `{referenced}` with `{actions}`: changing a row of `{referenced}` no longer changes its rows of `{owner}`; add a key with the same action first, or do it in the application"
+                    ),
+                    span,
+                }),
+        );
         found.extend(session.dropped_keys.into_iter().map(|(_, finding)| finding));
         found.sort_by_key(|finding| finding.span.start);
         found
@@ -552,6 +684,91 @@ impl Model {
         }
     }
 
+    /// Record the events of a `BEFORE ... FOR EACH ROW` trigger `stmt` creates.
+    fn record_trigger(&mut self, stmt: &Raw) {
+        let Some(trigger) = stmt.before_row_trigger() else {
+            return;
+        };
+        let events = self
+            .row_triggers
+            .entry(unqualified(&trigger.table))
+            .or_default();
+        events.insert |= trigger.events.insert;
+        events.update |= trigger.events.update;
+    }
+
+    /// Why a backfill `stmt` leaves rows behind: it fills a column of a table that has rows,
+    /// or of rows copied into a new table, and a query of the code inserts into the table
+    /// without the column, or updates a column its value reads without it.
+    fn unwritten(&self, stmt: &Statement) -> Option<String> {
+        let write = written(stmt)?;
+        let table = &write.table;
+        let copies = filled(stmt).is_some_and(|filled| filled == *table);
+        let fills = match self.created.contains(table) {
+            true => copies,
+            false => !copies && backfilled(stmt).is_some(),
+        };
+        if !fills {
+            return None;
+        }
+        let writers = self.writers.get(table)?;
+        let triggers = self.row_triggers.get(table).copied().unwrap_or_default();
+        let columns = match write.columns {
+            Some(columns) => columns,
+            None => {
+                let mut columns: Vec<String> = self.types.get(table)?.keys().cloned().collect();
+                columns.sort();
+                columns
+            }
+        };
+        let values = write.values.iter().map(Some).chain(std::iter::repeat(None));
+        columns
+            .iter()
+            .zip(values)
+            .filter(|(column, _)| !self.defaulted.contains(&(table.clone(), (*column).clone())))
+            .find_map(|(column, value)| {
+                let reads = value.map(read_columns).unwrap_or_default();
+                let skips = |writer: &&Writer| {
+                    writer.columns.as_ref().is_some_and(|written| !written.contains(column))
+                };
+                let inserted = |writer: &&Writer| writer.inserts && !triggers.insert && skips(writer);
+                if let Some(writer) = writers.iter().find(inserted) {
+                    return Some(format!(
+                        "fills `{table}.{column}`, which `{}` inserts into `{table}` without: rows it writes after the backfill have no `{column}`; deploy code that writes `{column}` first, then backfill",
+                        writer.label
+                    ));
+                }
+                let updates = writers.iter().filter(|writer| !writer.inserts && !triggers.update);
+                let (writer, read) = updates.filter(skips).find_map(|writer| {
+                    let set = writer.columns.as_ref()?;
+                    Some((writer, set.iter().find(|column| reads.contains(*column))?))
+                })?;
+                Some(format!(
+                    "fills `{table}.{column}` from `{read}`, which `{}` updates without `{column}`: rows it changes after the backfill keep the old `{column}`; deploy code that writes `{column}` first, then backfill",
+                    writer.label
+                ))
+            })
+    }
+
+    /// The foreign keys that act on a delete or update of the rows they reference: owner,
+    /// columns, referenced table and actions, in that order.
+    fn delete_actions(&self) -> FxHashSet<(String, String, String, String)> {
+        self.foreign_keys
+            .iter()
+            .flat_map(|(owner, fks)| fks.iter().map(move |fk| (owner, fk)))
+            .filter(|(_, fk)| !fk.actions.is_empty())
+            .map(|(owner, fk)| {
+                let columns = fk.columns.join(", ");
+                (
+                    owner.clone(),
+                    columns,
+                    fk.referenced.clone(),
+                    fk.actions.clone(),
+                )
+            })
+            .collect()
+    }
+
     /// Keeps the foreign keys of `table` that `keep` accepts, and the tables they reference
     /// in step.
     fn retain_foreign_keys(&mut self, table: &str, keep: impl Fn(&ForeignKey) -> bool) {
@@ -611,6 +828,21 @@ impl Model {
                 op: AlterColumnOperation::DropNotNull,
             } => {
                 self.required
+                    .remove(&(table.to_string(), name(column_name)));
+            }
+            AlterTableOperation::AlterColumn {
+                column_name,
+                op:
+                    AlterColumnOperation::SetDefault { .. } | AlterColumnOperation::AddGenerated { .. },
+            } => {
+                self.defaulted
+                    .insert((table.to_string(), name(column_name)));
+            }
+            AlterTableOperation::AlterColumn {
+                column_name,
+                op: AlterColumnOperation::DropDefault,
+            } => {
+                self.defaulted
                     .remove(&(table.to_string(), name(column_name)));
             }
             AlterTableOperation::DetachPartitionOf { partition, .. } => {
@@ -981,6 +1213,17 @@ impl Model {
     }
 
     fn require(&mut self, table: &str, column: &ColumnDef) {
+        let filled = SERIAL.contains(&column.data_type.to_string().to_lowercase().as_str())
+            || column.options.iter().any(|option| {
+                matches!(
+                    option.option,
+                    ColumnOption::Default(_) | ColumnOption::Generated { .. }
+                )
+            });
+        if filled {
+            self.defaulted
+                .insert((table.to_string(), name(&column.name)));
+        }
         let required = column.options.iter().any(|option| {
             matches!(
                 option.option,
@@ -1673,9 +1916,16 @@ impl Model {
     }
 }
 
-impl Session {
-    fn has_timeout(&self) -> bool {
-        self.lock_timeout || self.local_timeout
+impl Session<'_> {
+    /// Why the `lock_timeout` in effect does not bound the wait for a lock, if it does not.
+    fn missing_timeout(&self) -> Option<String> {
+        let Some(set) = self.local_timeout.as_ref().or(self.lock_timeout.as_ref()) else {
+            return Some("takes a lock that blocks writes without `SET lock_timeout` first: while it waits for the lock, the queries it blocks wait behind it".to_string());
+        };
+        let max = self.max_timeout?;
+        (lock_timeout_ms(set)? > lock_timeout_ms(max)?).then(|| format!(
+            "takes a lock that blocks writes with `lock_timeout` {set}, above the configured maximum of {max}: while it waits for the lock, the queries it blocks wait behind it"
+        ))
     }
 
     /// Follow a transaction or `lock_timeout` statement; whether `tokens` was one.
@@ -1685,18 +1935,18 @@ impl Session {
             ["begin", ..] | ["start", "transaction", ..] => self.transaction = true,
             ["rollback", "to", ..] | ["release" | "savepoint", ..] => {}
             ["commit" | "end" | "rollback" | "abort", ..] => {
-                (self.transaction, self.local_timeout) = (false, false);
+                (self.transaction, self.local_timeout) = (false, None);
                 self.added_values.clear();
                 self.locked.clear();
                 self.locking.clear();
                 (self.reported_tables, self.reported_backfill) = (false, false);
             }
             ["reset", "lock_timeout" | "all"] => {
-                (self.lock_timeout, self.local_timeout) = (false, false);
+                (self.lock_timeout, self.local_timeout) = (None, None);
             }
-            ["set", "local", "lock_timeout", _, value] => self.local_timeout = !is_zero(value),
+            ["set", "local", "lock_timeout", _, value] => self.local_timeout = timeout(value),
             ["set", "session", "lock_timeout", _, value] | ["set", "lock_timeout", _, value] => {
-                self.lock_timeout = !is_zero(value);
+                (self.lock_timeout, self.local_timeout) = (timeout(value), None);
             }
             _ => return false,
         }
@@ -1944,6 +2194,148 @@ fn filled(stmt: &Statement) -> Option<String> {
     }
 }
 
+/// The table an `INSERT`, `UPDATE` or `MERGE` writes, and the columns it writes: all of them
+/// for an `INSERT` without a column list or a `MERGE`.
+fn written(stmt: &Statement) -> Option<Written<'_>> {
+    match stmt {
+        Statement::Query(query) => match &*query.body {
+            SetExpr::Insert(stmt) | SetExpr::Update(stmt) => written(stmt),
+            _ => None,
+        },
+        Statement::Insert(Insert {
+            table: TableObject::TableName(table),
+            columns,
+            source,
+            on,
+            ..
+        }) => {
+            let table = key(table);
+            if columns.is_empty() {
+                let values = source.iter().map(|source| Value::Query(source)).collect();
+                return Some(Written {
+                    table,
+                    inserts: true,
+                    columns: None,
+                    values,
+                });
+            }
+            let mut written: Vec<String> = columns.iter().map(last_name).collect();
+            let values = source.iter().map(|source| Value::Query(source));
+            let values = values.cycle().take(written.len()).collect();
+            if let Some(OnInsert::OnConflict(OnConflict {
+                action: OnConflictAction::DoUpdate(update),
+                ..
+            })) = on
+            {
+                written.extend(assigned(&update.assignments).0);
+            }
+            Some(Written {
+                table,
+                inserts: true,
+                columns: Some(written),
+                values,
+            })
+        }
+        Statement::Update(update) => match &update.table.relation {
+            TableFactor::Table { name: table, .. } => {
+                let (columns, values) = assigned(&update.assignments);
+                let table = key(table);
+                Some(Written {
+                    table,
+                    inserts: false,
+                    columns: Some(columns),
+                    values,
+                })
+            }
+            _ => None,
+        },
+        Statement::Merge(Merge {
+            table: TableFactor::Table { name: table, .. },
+            ..
+        }) => Some(Written {
+            table: key(table),
+            inserts: true,
+            columns: None,
+            values: Vec::new(),
+        }),
+        _ => None,
+    }
+}
+
+/// The columns `assignments` set, each with its value.
+fn assigned(assignments: &[Assignment]) -> (Vec<String>, Vec<Value<'_>>) {
+    let mut columns = Vec::new();
+    let mut values = Vec::new();
+    for assignment in assignments {
+        let targets = match &assignment.target {
+            AssignmentTarget::ColumnName(column) => std::slice::from_ref(column),
+            AssignmentTarget::Tuple(columns) => columns.as_slice(),
+        };
+        for target in targets {
+            columns.push(last_name(target));
+            values.push(Value::Expr(&assignment.value));
+        }
+    }
+    (columns, values)
+}
+
+/// The names of the columns `value` reads, folded.
+fn read_columns(value: &Value<'_>) -> FxHashSet<String> {
+    let mut found = FxHashSet::default();
+    let mut read = |expr: &Expr| {
+        match expr {
+            Expr::Identifier(ident) => {
+                found.insert(name(ident));
+            }
+            Expr::CompoundIdentifier(parts) => {
+                found.extend(parts.last().map(name));
+            }
+            _ => {}
+        }
+        ControlFlow::<()>::Continue(())
+    };
+    let _ = match value {
+        Value::Expr(expr) => visit_expressions(*expr, &mut read),
+        Value::Query(query) => visit_expressions(*query, &mut read),
+    };
+    found
+}
+
+/// The table an `INSERT ... SELECT` without `ON CONFLICT` copies into, unless its query
+/// reads that table, as `NOT EXISTS` or an anti-join on the key does to skip copied rows.
+fn rerun_insert(stmt: &Statement) -> Option<String> {
+    let insert = match stmt {
+        Statement::Query(query) => match &*query.body {
+            SetExpr::Insert(insert) => return rerun_insert(insert),
+            _ => return None,
+        },
+        Statement::Insert(insert) => insert,
+        _ => return None,
+    };
+    let Insert {
+        table: TableObject::TableName(table),
+        source: Some(source),
+        on: None,
+        ignore: false,
+        ..
+    } = insert
+    else {
+        return None;
+    };
+    if matches!(*source.body, SetExpr::Values(_)) {
+        return None;
+    }
+    let table = key(table);
+    let reads_target = visit_relations(source, |relation| {
+        if key(relation) == table {
+            ControlFlow::Break(())
+        } else {
+            ControlFlow::Continue(())
+        }
+    });
+    reads_target.is_continue().then_some(table)
+}
+
 fn unique_message(table: &ObjectName) -> String {
     format!(
         "the constraint builds its index under an ACCESS EXCLUSIVE lock on `{table}`: `CREATE UNIQUE INDEX CONCURRENTLY`, then add the constraint `USING INDEX`"
@@ -1958,6 +2350,19 @@ fn rewrite_command_message(command: &str) -> String {
     format!(
         "`{command}` rewrites the table under an ACCESS EXCLUSIVE lock, blocking reads and writes until it finishes: rebuild it online with pg_repack or pg_squeeze, outside migrations"
     )
+}
+
+/// The table and constraint of `ALTER TABLE ... VALIDATE CONSTRAINT`.
+fn validated(stmt: &Statement) -> Option<(String, String)> {
+    let Statement::AlterTable(alter) = stmt else {
+        return None;
+    };
+    alter.operations.iter().find_map(|op| match op {
+        AlterTableOperation::ValidateConstraint { name: validated } => {
+            Some((key(&alter.name), name(validated)))
+        }
+        _ => None,
+    })
 }
 
 /// Whether `op` takes a lock weaker than `SHARE`, which lets writes go on.
@@ -2085,6 +2490,14 @@ fn added_foreign_keys(stmt: &Statement) -> Vec<ForeignKey> {
             name: name.map_or_else(|| format!("{short}_{}_fkey", columns.join("_")), self::name),
             columns,
             referenced: key(&fk.foreign_table),
+            actions: [("DELETE", fk.on_delete), ("UPDATE", fk.on_update)]
+                .into_iter()
+                .filter_map(|(event, action)| match action? {
+                    ReferentialAction::NoAction | ReferentialAction::Restrict => None,
+                    action => Some(format!("ON {event} {action}")),
+                })
+                .collect::<Vec<_>>()
+                .join(" "),
         };
     let (columns, constraints): (Vec<&ColumnDef>, Vec<&TableConstraint>) = match stmt {
         Statement::CreateTable(create) => (
@@ -2480,10 +2893,41 @@ fn name(ident: &Ident) -> String {
     fold(ident, SqlDialect::Postgres)
 }
 
-/// Whether a `lock_timeout` value turns the timeout off: `0`, `'0'`, `'0s'` or `DEFAULT`.
-fn is_zero(value: &str) -> bool {
+/// The `lock_timeout` a `SET` value turns on, unquoted: `None` for `0`, `'0s'` or `DEFAULT`,
+/// which turn it off.
+fn timeout(value: &str) -> Option<String> {
     let value = value.trim_matches('\'');
-    value == "default" || value.trim_end_matches(|c: char| c.is_ascii_alphabetic()) == "0"
+    let off = value == "default" || lock_timeout_ms(value) == Some(0.0);
+    (!off).then(|| value.to_string())
+}
+
+/// The milliseconds of a `lock_timeout` value as PostgreSQL reads it: a number of `us`, `ms`,
+/// `s`, `min`, `h` or `d`, milliseconds without a unit; `None` for anything else. Units are
+/// lowercase, as PostgreSQL takes them.
+///
+/// Example:
+///
+/// ```
+/// use sqlty_sql::migrations::lock_timeout_ms;
+///
+/// assert_eq!(lock_timeout_ms("1.5s"), Some(1500.0));
+/// assert_eq!(lock_timeout_ms("2000"), Some(2000.0));
+/// assert_eq!(lock_timeout_ms("soon"), None);
+/// ```
+pub fn lock_timeout_ms(value: &str) -> Option<f64> {
+    let value = value.trim();
+    let number = value.trim_end_matches(|c: char| c.is_ascii_alphabetic());
+    let scale = match &value[number.len()..] {
+        "us" => 1e-3,
+        "" | "ms" => 1.0,
+        "s" => 1e3,
+        "min" => 60e3,
+        "h" => 3600e3,
+        "d" => 86400e3,
+        _ => return None,
+    };
+    let number: f64 = number.trim().parse().ok()?;
+    (number.is_finite() && number >= 0.0).then_some(number * scale)
 }
 
 #[cfg(test)]
@@ -3581,6 +4025,60 @@ mod tests {
     }
 
     #[test]
+    fn an_insert_select_without_on_conflict_fails_or_duplicates_when_run_again() {
+        let baseline =
+            format!("{USERS}\nCREATE TABLE stats (team_id BIGINT PRIMARY KEY, n BIGINT);");
+        let copy =
+            "INSERT INTO stats (team_id, n) SELECT team_id, count(*) FROM users GROUP BY team_id";
+        assert_eq!(rules(&baseline, copy), [Rule::RerunBackfill]);
+        let with =
+            format!("WITH t AS (SELECT team_id, count(*) AS n FROM users GROUP BY team_id) {copy}");
+        assert_eq!(rules(&baseline, &with), [Rule::RerunBackfill]);
+        for safe in [
+            format!("{copy} ON CONFLICT (team_id) DO UPDATE SET n = excluded.n"),
+            format!("{copy} HAVING NOT EXISTS (SELECT 1 FROM public.stats s WHERE s.team_id = users.team_id)"),
+        ] {
+            assert_eq!(rules(&baseline, &safe), []);
+        }
+    }
+
+    #[test]
+    fn validating_a_foreign_key_in_the_transaction_that_added_it_scans_under_its_lock() {
+        let together = "SET lock_timeout = '1s'; BEGIN;
+            ALTER TABLE users ADD CONSTRAINT fk FOREIGN KEY (team_id) REFERENCES teams (id) NOT VALID;
+            ALTER TABLE users VALIDATE CONSTRAINT fk; COMMIT;";
+        assert_eq!(rules(USERS, together), [Rule::ConstraintScan]);
+        let apart = together.replace("VALID;\n", "VALID; COMMIT; BEGIN;\n");
+        assert_eq!(rules(USERS, &apart), []);
+    }
+
+    #[test]
+    fn dropping_a_foreign_key_with_an_action_loses_it() {
+        let baseline = format!(
+            "{USERS}\nCREATE TABLE orders (id BIGINT PRIMARY KEY, \
+             user_id BIGINT REFERENCES users (id) ON DELETE CASCADE, \
+             team_id BIGINT REFERENCES teams (id) ON DELETE RESTRICT ON UPDATE NO ACTION);"
+        );
+        let found = check(&baseline, &["ALTER TABLE orders DROP COLUMN user_id;"]);
+        assert_eq!(
+            found[0].iter().map(|f| f.rule).collect::<Vec<_>>(),
+            [Rule::MissingLockTimeout, Rule::DroppedDeleteAction]
+        );
+        assert!(found[0][1].message.starts_with(
+            "drops the foreign key of `orders` (user_id) to `users` with `ON DELETE CASCADE`"
+        ));
+        for kept in [
+            "ALTER TABLE orders DROP COLUMN team_id;",
+            "DROP TABLE orders;",
+            "ALTER TABLE orders DROP COLUMN user_id; \
+             ALTER TABLE orders ADD COLUMN user_id BIGINT REFERENCES users (id) ON DELETE CASCADE;",
+        ] {
+            let rules = rules(&baseline, &format!("SET lock_timeout = '1s'; {kept}"));
+            assert!(!rules.contains(&Rule::DroppedDeleteAction), "{kept}");
+        }
+    }
+
+    #[test]
     fn a_validated_not_null_check_spares_the_scan() {
         let checked = "SET lock_timeout = '1s';
             ALTER TABLE users ADD CONSTRAINT c CHECK (bio IS NOT NULL) NOT VALID;
@@ -3622,6 +4120,38 @@ mod tests {
         );
         let off = "SET lock_timeout = '1s'; BEGIN; REINDEX (CONCURRENTLY 'off') INDEX a; COMMIT;";
         assert_eq!(rules(USERS, off), [Rule::MissingConcurrently]);
+    }
+
+    #[test]
+    fn lock_timeout_values_read_as_postgres_reads_them() {
+        for (value, ms) in [
+            ("250", Some(250.0)),
+            ("250ms", Some(250.0)),
+            ("1.5 s", Some(1500.0)),
+            ("2min", Some(120_000.0)),
+            ("1h", Some(3_600_000.0)),
+            ("1d", Some(86_400_000.0)),
+            ("1e3s", Some(1_000_000.0)),
+            ("30000000us", Some(30_000.0)),
+            ("2S", None),
+            ("2w", None),
+            ("-1s", None),
+            ("s", None),
+            ("", None),
+        ] {
+            assert_eq!(lock_timeout_ms(value), ms, "{value}");
+        }
+        let max = |set: &str| {
+            let migration = format!("SET lock_timeout = {set}; LOCK TABLE users;");
+            let found = check_with(USERS, &[(&migration, Some("2s"))], &[]).remove(0);
+            found.into_iter().map(|f| f.message).collect::<Vec<_>>()
+        };
+        assert_eq!(
+            max("'1min'"),
+            ["takes a lock that blocks writes with `lock_timeout` 1min, above the configured maximum of 2s: while it waits for the lock, the queries it blocks wait behind it"]
+        );
+        assert_eq!(max("2000"), Vec::<String>::new());
+        assert_eq!(max("'soon'"), Vec::<String>::new());
     }
 
     #[test]
@@ -3672,5 +4202,83 @@ mod tests {
         ] {
             assert_eq!(rules(USERS, weak), [], "{weak}");
         }
+    }
+
+    #[test]
+    fn a_backfill_names_a_writer_that_leaves_its_column_out() {
+        let baseline = "CREATE TABLE users (id BIGINT PRIMARY KEY, a TEXT, b TEXT, c SERIAL, \
+            d TEXT GENERATED ALWAYS AS (a) STORED);\n\
+            CREATE TRIGGER t BEFORE UPDATE ON \"Audited\" FOR EACH ROW EXECUTE FUNCTION f();\n\
+            CREATE TABLE \"Audited\" (id BIGINT, a TEXT);";
+        let found = |writers: &[&str], migration: &str| -> Vec<String> {
+            let writers: Vec<(String, String)> = writers
+                .iter()
+                .enumerate()
+                .map(|(at, sql)| (format!("q{at}"), sql.to_string()))
+                .collect();
+            let migration = format!("SET lock_timeout = '1s';\n{migration}");
+            check_with(baseline, &[(&migration, None)], &writers)
+                .remove(0)
+                .into_iter()
+                .filter(|f| f.rule == Rule::BackfillWithoutWriter)
+                .map(|f| f.message.split(':').next().unwrap_or_default().to_string())
+                .collect()
+        };
+        let none = Vec::<String>::new();
+        let update = "UPDATE users SET (a, b) = ('x', 'y') WHERE id BETWEEN 1 AND 9;";
+        let renamed = ["UPDATE users SET a = $1 WHERE id = $2"];
+        assert_eq!(found(&renamed, update), none);
+        let copied = "UPDATE users SET b = upper(u.a) FROM users u WHERE users.id BETWEEN 1 AND 9;";
+        assert_eq!(
+            found(&renamed, copied),
+            ["fills `users.b` from `a`, which `q0` updates without `b`"]
+        );
+        let cte = "WITH x AS (SELECT 1) INSERT INTO public.users (id, a) VALUES (1, 'a')";
+        assert_eq!(
+            found(&[cte], update),
+            ["fills `users.b`, which `q0` inserts into `users` without"]
+        );
+        let all = [
+            "INSERT INTO users VALUES ($1)",
+            "SELECT 1",
+            "not sql",
+            "DELETE FROM users",
+        ];
+        assert_eq!(found(&all, update), none);
+        let merged = "MERGE INTO users u USING users s ON u.id = s.id WHEN MATCHED THEN DELETE";
+        assert_eq!(found(&[merged], update), none);
+        let generated = "UPDATE users SET c = 1, d = 'x' WHERE id BETWEEN 1 AND 9;";
+        assert_eq!(
+            found(&["INSERT INTO users (id) VALUES (1)"], generated),
+            none
+        );
+        let defaults = "ALTER TABLE users ALTER COLUMN a SET DEFAULT '';\n\
+            ALTER TABLE users ALTER COLUMN b SET DEFAULT '';\n\
+            ALTER TABLE users ALTER COLUMN b DROP DEFAULT;\n\
+            UPDATE users SET a = 'x', b = 'y' WHERE id BETWEEN 1 AND 9;";
+        assert_eq!(
+            found(&["INSERT INTO users (id) VALUES (1)"], defaults),
+            ["fills `users.b`, which `q0` inserts into `users` without"]
+        );
+        let audited = "UPDATE \"Audited\" SET a = id::text WHERE id BETWEEN 1 AND 9;";
+        assert_eq!(found(&["UPDATE \"Audited\" SET id = 1"], audited), none);
+        assert_eq!(
+            found(&["INSERT INTO \"Audited\" (id) VALUES (1)"], audited),
+            ["fills `Audited.a`, which `q0` inserts into `Audited` without"]
+        );
+        let joined = "UPDATE users SET a = 'x' FROM (SELECT 1) s;";
+        let writers = [
+            "UPDATE (SELECT 1) s SET a = 1",
+            "INSERT INTO users (b) VALUES (1)",
+        ];
+        assert_eq!(found(&writers, joined).len(), 1);
+        let created = "CREATE TABLE copy (id BIGINT, a TEXT);\n\
+            INSERT INTO copy (id, a) VALUES (1, 'x');\n\
+            INSERT INTO copy SELECT id, a FROM users;";
+        assert_eq!(found(&["INSERT INTO copy VALUES (1, 'a')"], created), none);
+        assert_eq!(
+            found(&["INSERT INTO copy (id) VALUES (1)"], created),
+            ["fills `copy.a`, which `q0` inserts into `copy` without"]
+        );
     }
 }

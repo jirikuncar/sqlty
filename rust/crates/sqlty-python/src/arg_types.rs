@@ -205,7 +205,7 @@ impl<'a, 's> SourceTypes<'a, 's> {
         let name = name?;
         let head = name.split('.').next().unwrap_or_default();
         let outer = &stack[..stack.len() - usize::from(parameter && !stack.is_empty())];
-        if self.source.is_some_and(|source| source.bound(head) > 1)
+        if self.source.is_some_and(|source| source.rebound(head))
             || outer
                 .iter()
                 .any(|&scope| self.scan.types.contains_key(&(scope, head)))
@@ -327,8 +327,7 @@ fn resolve<S: std::ops::Deref<Target = Source>>(names: &ModuleTypes<S>, name: &s
 /// `ty` spelled as [`class_of`] spells a class: a `NewType` as its supertype, nothing for
 /// what is not a builtin or a known imported class.
 fn spell(ty: &Ty) -> Option<String> {
-    match ty {
-        Ty::NewType(newtype) => spell(&newtype.supertype),
+    match ty.base() {
         Ty::Class(class) if class.module == "builtins" => {
             class_of(Some(class.name.clone()), &Table::default())
         }

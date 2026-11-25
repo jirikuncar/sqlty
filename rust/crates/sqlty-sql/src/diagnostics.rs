@@ -109,11 +109,21 @@ impl Diagnostics {
 
     /// Record `item` unless one of its rule and message is recorded already.
     pub(crate) fn push(&self, item: NameDiagnostic) {
+        self.add(item, 1);
+    }
+
+    /// [`Diagnostics::push`] of a finding about a column that is typed, which explains
+    /// no untyped result.
+    pub(crate) fn warn(&self, item: NameDiagnostic) {
+        self.add(item, 0);
+    }
+
+    fn add(&self, item: NameDiagnostic, explains: usize) {
         let mut inner = self.0.borrow_mut();
         if !inner.enabled {
             return;
         }
-        inner.explained += 1;
+        inner.explained += explains;
         let known = |(found, _): &(NameDiagnostic, Span)| {
             found.rule == item.rule && found.message == item.message
         };
@@ -316,6 +326,7 @@ mod tests {
             [
                 "unknown-table",
                 "unknown-column",
+                "deprecated-column",
                 "ambiguous-column",
                 "duplicate-alias",
                 "unknown-function",
@@ -323,6 +334,8 @@ mod tests {
                 "unsupported-syntax",
                 "insert-missing-column",
                 "insert-value-count",
+                "literal-write",
+                "unmatched-literal",
                 "ungrouped-column",
                 "fanout-aggregate",
                 "chasm-join",
