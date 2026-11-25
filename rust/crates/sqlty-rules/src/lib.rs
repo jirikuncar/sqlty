@@ -83,7 +83,7 @@ impl Rule {
 
 /// A set of rules, one bit each.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct RuleSet(u64);
+pub struct RuleSet(u128);
 
 impl RuleSet {
     /// The set with no rule.
@@ -212,7 +212,7 @@ mod tests {
         assert!(Rule::SelectStar.fixable());
         assert!(!Rule::SelectStar.is_sql());
         assert!(Rule::SQL.iter().all(|rule| rule.is_sql()));
-        assert_eq!(Rule::SQL.len(), 16);
+        assert_eq!(Rule::SQL.len(), 17);
         assert!(Rule::ALL.iter().all(|rule| !rule.summary().is_empty()));
     }
 

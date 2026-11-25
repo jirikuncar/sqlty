@@ -30,7 +30,7 @@ use sqlty_sql::Dialect;
 pub const CONFIG_FILES: [&str; 3] = ["sqlty.toml", "pyproject.toml", "Cargo.toml"];
 
 /// Keys of `[tool.sqlty]` that are not file discovery; see also [`DISCOVERY_KEYS`].
-pub const TOOL_KEYS: [&str; 19] = [
+pub const TOOL_KEYS: [&str; 20] = [
     "dialect",
     "driver",
     "schema",
@@ -47,6 +47,7 @@ pub const TOOL_KEYS: [&str; 19] = [
     "coerce-row-types",
     "functions",
     "types",
+    "deprecated-columns",
     "format-command",
     "extend",
     "databases",
@@ -95,13 +96,14 @@ pub const OVERRIDE_KEYS: [&str; 3] = ["include", "exclude", "rules"];
 
 /// Keys of a `[tool.sqlty.databases.NAME]` table: what names a catalog, and the files it
 /// applies to. The rest of `[tool.sqlty]` is shared by every database.
-pub const DATABASE_KEYS: [&str; 9] = [
+pub const DATABASE_KEYS: [&str; 10] = [
     "dialect",
     "schema",
     "queries",
     "query-format",
     "rules",
     "types",
+    "deprecated-columns",
     "functions",
     "include",
     "exclude",
@@ -376,6 +378,9 @@ pub fn validate(mut table: Table, source: &str) -> Result<Config, InvalidConfig>
             table.insert("functions".into(), Value::Array(kept));
         }
     }
+    if let Some(columns) = table.get("deprecated-columns") {
+        check_deprecated(columns).map_err(named)?;
+    }
     if table.get("types").is_some_and(|types| {
         types
             .as_table()
@@ -541,6 +546,55 @@ pub fn rule_entries(rules: Option<&Value>) -> Vec<(String, String)> {
     entries
 }
 
+/// Keys of a `[tool.sqlty.deprecated-columns]` entry.
+pub const DEPRECATED_KEYS: [&str; 2] = ["use", "remove-after"];
+
+fn check_deprecated(columns: &Value) -> Result<(), String> {
+    let place = "[tool.sqlty.deprecated-columns]";
+    let Some(columns) = columns.as_table() else {
+        return Err(format!(
+            "{place} must be a table of table.column = {{ use = \"column\", remove-after = \"date\" }}"
+        ));
+    };
+    for (key, entry) in columns {
+        if !key.contains('.') {
+            return Err(format!("{place} '{key}' must be table.column"));
+        }
+        let Some(entry) = entry.as_table() else {
+            return Err(format!(
+                "{place} '{key}' must be a table of use and remove-after"
+            ));
+        };
+        for (option, value) in entry {
+            if !DEPRECATED_KEYS.contains(&option.as_str()) {
+                return Err(format!(
+                    "unknown key '{option}' in {place} '{key}'{}; expected one of: {}",
+                    suggest(option, &DEPRECATED_KEYS),
+                    DEPRECATED_KEYS.join(", ")
+                ));
+            }
+            if !value.is_str() {
+                return Err(format!("{place} '{key}' {option} must be a string"));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// The `deprecated-columns` of a checked table as the `types` pairs
+/// `TypeOverrides::new` reads.
+pub fn deprecated_types(table: &Table) -> Vec<(String, String)> {
+    let columns = table.get("deprecated-columns").and_then(Value::as_table);
+    columns
+        .into_iter()
+        .flatten()
+        .map(|(key, entry)| {
+            let part = |name: &str| entry.get(name).and_then(Value::as_str);
+            sqlty_sql::analyzer::deprecated_type(key, part("use"), part("remove-after"))
+        })
+        .collect()
+}
+
 fn is_strings(value: &Value) -> bool {
     value
         .as_array()
@@ -635,6 +689,22 @@ mod tests {
     }
 
     #[test]
+    fn deprecated_columns_are_carried_with_the_types() {
+        let table = "[deprecated-columns]\n'users.a' = { use = 'b', remove-after = 'soon' }\n\
+                     'users.c' = {}";
+        let table = validate(table.parse().unwrap(), "sqlty.toml")
+            .unwrap()
+            .table;
+        assert_eq!(
+            deprecated_types(&table),
+            [
+                ("!users.a".to_string(), "b\tsoon".to_string()),
+                ("!users.c".to_string(), "\t".to_string()),
+            ]
+        );
+    }
+
+    #[test]
     fn rules_merge_rule_by_rule() {
         let merged = |under: &str, over: &str| {
             let mut under: Table = under.parse().unwrap();
@@ -696,6 +766,30 @@ mod tests {
         assert!(invalid("[rules]\nstale-type = 'loud'").contains("invalid severity 'loud'"));
         assert!(invalid("[rules]\nstale-type = 1").contains("invalid severity 1"));
         assert!(invalid("[rules.missing-lock-timeout]\nmax = 2").contains("invalid max 2"));
+        for (toml, message) in [
+            (
+                "deprecated-columns = 1",
+                "deprecated-columns] must be a table",
+            ),
+            (
+                "[deprecated-columns]\nemail = {}",
+                "'email' must be table.column",
+            ),
+            (
+                "[deprecated-columns]\n'u.e' = 'x'",
+                "'u.e' must be a table of use",
+            ),
+            (
+                "[deprecated-columns]\n'u.e' = { uses = 'f' }",
+                "did you mean 'use'?",
+            ),
+            (
+                "[deprecated-columns]\n'u.e' = { use = 1 }",
+                "'u.e' use must be a string",
+            ),
+        ] {
+            assert!(invalid(toml).contains(message), "{toml}");
+        }
         assert_eq!(
             invalid("[rules.select-star]\nmax = '2s'"),
             "sqlty.toml: unknown key 'max' in [tool.sqlty.rules.select-star]; expected one of: severity"
@@ -723,8 +817,8 @@ mod tests {
         assert_eq!(
             invalid("[databases.analytics]\nimport-style = 'import sqlty'"),
             "sqlty.toml: unknown key 'import-style' in [tool.sqlty.databases.analytics]; \
-             expected one of: dialect, schema, queries, query-format, rules, types, functions, \
-             include, exclude"
+             expected one of: dialect, schema, queries, query-format, rules, types, \
+             deprecated-columns, functions, include, exclude"
         );
         assert!(invalid("[databases.a]\ninclude = 'x'").contains("include must be a list"));
         assert!(invalid("[databases.a]\ndialect = 'duck'").starts_with(

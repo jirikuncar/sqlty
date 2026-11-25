@@ -39,6 +39,7 @@ stale-type = "error"
 | [`unknown-database`](rules/unknown-database.md) | Query | error | no | Query marker names a database the project does not configure |
 | [`unknown-table`](rules/unknown-table.md) | Names | error | no | Table the schema does not define |
 | [`unknown-column`](rules/unknown-column.md) | Names | error | yes | Column the table does not have |
+| [`deprecated-column`](rules/deprecated-column.md) | Names | warn | no | Query reads a column scheduled for removal |
 | [`ambiguous-column`](rules/ambiguous-column.md) | Names | error | no | Unqualified column that more than one table of the query has |
 | [`duplicate-alias`](rules/duplicate-alias.md) | Names | error | no | Two tables of a FROM clause read by the same name |
 | [`unknown-function`](rules/unknown-function.md) | Names | warn | no | Function whose result sqlty cannot type |
@@ -81,6 +82,7 @@ stale-type = "error"
 | [`drop-primary-key`](rules/drop-primary-key.md) | Migration | warn | no | Migration leaves a table without a replica identity |
 | [`rerun-backfill`](rules/rerun-backfill.md) | Migration | warn | no | Migration copies rows in a way that fails or duplicates when run again |
 | [`dropped-delete-action`](rules/dropped-delete-action.md) | Migration | warn | no | Migration drops a foreign key with an ON DELETE or ON UPDATE action |
+| [`backfill-without-writer`](rules/backfill-without-writer.md) | Migration | warn | no | Migration backfills a column that the new code does not write |
 | [`unused-ignore`](rules/unused-ignore.md) | Suppression | warn | no | # sqlty: ignore comment that suppresses nothing |
 | [`internal-error`](rules/internal-error.md) | Internal | error | no | sqlty crashed checking the file |
 <!-- /generated:rules -->

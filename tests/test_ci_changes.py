@@ -19,6 +19,10 @@ CRATES = sorted(p.name for p in (ROOT / "rust" / "crates").iterdir() if p.is_dir
 EVERYTHING = {*CRATES, *ci_changes.PACKAGES}
 # The crates whose tests run the mdtest suite.
 MDTEST = {"sqlty-sql", "sqlty-python", "sqlty-format"}
+# The database tests, which run the queries of the mdtests and docs.
+FIDELITY = {"pg-fidelity", "mysql-fidelity"}
+# The jobs that build the extension and run it.
+ENGINE = {"free-threaded", *FIDELITY, "bench", "package"}
 
 
 def hit(*changed: str) -> set[str]:
@@ -27,17 +31,30 @@ def hit(*changed: str) -> set[str]:
 
 # fmt: off
 @pytest.mark.parametrize(("changed", "expected"), [
-    (["README.md"], {"python", *MDTEST}),
-    (["docs/guide/x.md"], {"python", *MDTEST}),
+    (["README.md"], {"docs", "package", *MDTEST}),
+    (["docs/guide/x.md"], {"docs", *FIDELITY, *MDTEST}),
+    (["docs/assets/playground/app.js"], {"python", "playground"}),
+    (["docs/robots.txt"], {"python"}),
     (["rust/mdtest/harness.rs"], MDTEST),
     (["plans/2026-11-19-x.md", ".github/workflows/docs.yml"], set()),
-    (["CONTRIBUTING.md"], {"python"}),
-    (["skills/sqlty/SKILL.md"], {"sqlty-cli", "sqlty-ext", "python", "engine", "vscode", *MDTEST}),
+    (["CONTRIBUTING.md"], {"docs"}),
+    ([".github/pull_request_template.md"], {"docs"}),
+    (["tests/test_docs.py"], {"python", "docs"}),
+    (["skills/sqlty/SKILL.md"], {"sqlty-cli", "sqlty-ext", "python", "docs", *ENGINE, "vscode", *MDTEST}),
     (["npm/wasm/engine.js"], {"playground", "vscode"}),
     (["editors/vscode/src/extension.ts"], {"vscode"}),
-    (["src/sqlty/__init__.py"], {"python", "engine", "vscode"}),
+    (["src/sqlty/__init__.py"], {"python", "docs", *ENGINE, "vscode"}),
+    (["tests/test_cli.py"], {"python"}),
+    (["tests/test_threads.py"], {"python", "free-threaded"}),
+    (["tests/test_pg_describe.py"], {"python", "pg-fidelity"}),
+    (["tests/test_server_describe.py"], {"python", "mysql-fidelity"}),
+    (["tests/fixtures/driver_values.toml"], {"python", *FIDELITY}),
+    (["tests/mdtest/check/x.md"], {"python", *FIDELITY, *MDTEST}),
+    (["tests/conftest.py"], {"python", "docs", "free-threaded", *FIDELITY, "bench"}),
+    (["benchmarks/synth.py"], {"python", "bench"}),
+    (["tests/check_dist.py"], {"python", "package"}),
     (["rust/crates/sqlty-wasm/src/lib.rs"], {"sqlty-wasm", "vscode", "playground"}),
-    (["rust/crates/sqlty-cli/src/lib.rs"], {"sqlty-cli", "sqlty-ext", "python", "engine", "vscode"}),
+    (["rust/crates/sqlty-cli/src/lib.rs"], {"sqlty-cli", "sqlty-ext", "python", "docs", *ENGINE, "vscode"}),
     (["rust/crates/sqlty-sql/src/lib.rs"], EVERYTHING - {"sqlty-rules"}),
     (["rust/Cargo.lock"], EVERYTHING),
     (["somewhere/new.txt"], EVERYTHING),

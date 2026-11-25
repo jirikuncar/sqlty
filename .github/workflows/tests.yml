@@ -27,7 +27,12 @@ jobs:
     outputs:
       crates: ${{ steps.changes.outputs.crates }}
       python: ${{ steps.changes.outputs.python }}
-      engine: ${{ steps.changes.outputs.engine }}
+      docs: ${{ steps.changes.outputs.docs }}
+      free-threaded: ${{ steps.changes.outputs.free-threaded }}
+      pg-fidelity: ${{ steps.changes.outputs.pg-fidelity }}
+      mysql-fidelity: ${{ steps.changes.outputs.mysql-fidelity }}
+      bench: ${{ steps.changes.outputs.bench }}
+      package: ${{ steps.changes.outputs.package }}
       vscode: ${{ steps.changes.outputs.vscode }}
       playground: ${{ steps.changes.outputs.playground }}
     steps:
@@ -45,7 +50,7 @@ jobs:
   ci:
     name: CI
     if: always()
-    needs: [changes, no-exec-harness, rust, test, free-threaded, wasm, pg-fidelity, mysql-fidelity, bench, codspeed, package, vscode, lint]
+    needs: [changes, no-exec-harness, rust, test, docs, free-threaded, wasm, pg-fidelity, mysql-fidelity, bench, codspeed, package, vscode, lint]
     runs-on: ubuntu-latest
     steps:
       - env:
@@ -190,10 +195,36 @@ jobs:
         if: ${{ !matrix.coverage }}
         run: uv run cargo nextest run -p sqlty-core --manifest-path rust/Cargo.toml
 
+  # The guides alone: the tests that read them and their mdtests, without the Python matrix.
+  docs:
+    name: Docs
+    needs: changes
+    if: needs.changes.outputs.docs == 'true' && needs.changes.outputs.python != 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: $/.github/actions/setup
+        with:
+          python-version: "3.14"
+          rust-cache-key: python-3.14
+
+      - name: Install the dependencies
+        run: uv sync --all-groups --no-group duckdb --no-install-project
+
+      - name: Build Rust extension
+        run: uv run maturin develop --manifest-path rust/crates/sqlty-ext/Cargo.toml
+
+      - name: Run the tests that read the docs
+        run: uv run pytest tests/test_docs.py tests/test_core_invariants.py tests/test_duplicates.py tests/test_rust_types.py docs README.md
+
   free-threaded:
     name: Threads on free-threaded Python ${{ matrix.python }}
     needs: changes
-    if: needs.changes.outputs.engine == 'true'
+    if: needs.changes.outputs.free-threaded == 'true'
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -261,7 +292,7 @@ jobs:
   pg-fidelity:
     name: PostgreSQL column names, types and nullability
     needs: changes
-    if: needs.changes.outputs.engine == 'true'
+    if: needs.changes.outputs.pg-fidelity == 'true'
     runs-on: ubuntu-latest
 
     services:
@@ -302,7 +333,7 @@ jobs:
   mysql-fidelity:
     name: MySQL column names and types
     needs: changes
-    if: needs.changes.outputs.engine == 'true'
+    if: needs.changes.outputs.mysql-fidelity == 'true'
     runs-on: ubuntu-latest
 
     services:
@@ -344,7 +375,7 @@ jobs:
   bench:
     name: Performance budget
     needs: changes
-    if: needs.changes.outputs.engine == 'true'
+    if: needs.changes.outputs.bench == 'true'
     runs-on: ubuntu-latest
 
     steps:
@@ -378,7 +409,7 @@ jobs:
   codspeed:
     name: CodSpeed
     needs: changes
-    if: needs.changes.outputs.engine == 'true'
+    if: needs.changes.outputs.bench == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -417,7 +448,7 @@ jobs:
   package:
     name: Package (wheel + sdist, Python ${{ matrix.python-version }})
     needs: changes
-    if: needs.changes.outputs.engine == 'true'
+    if: needs.changes.outputs.package == 'true'
     runs-on: ubuntu-latest
     strategy:
       matrix:

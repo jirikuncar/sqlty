@@ -7,6 +7,7 @@ from sqlty._lint import NAME_RULES, RULES, Severity
 DEFAULTS = {
     "unknown-table": Severity.ERROR,
     "unknown-column": Severity.ERROR,
+    "deprecated-column": Severity.WARN,
     "ambiguous-column": Severity.ERROR,
     "duplicate-alias": Severity.ERROR,
     "insert-missing-column": Severity.ERROR,

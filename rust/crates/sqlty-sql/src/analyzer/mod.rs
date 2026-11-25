@@ -78,7 +78,7 @@ pub use inference::RuleRef;
 pub(crate) use input::iso_types;
 pub use nullability::Nullability;
 pub use params::{analyze_params, Param};
-pub(crate) use preprocess::{parse_ddl, parse_function_without_hints};
+pub(crate) use preprocess::{parse_ddl, parse_function_without_hints, parse_query};
 pub use query::Column;
 pub(crate) use sql_type::canonical_type;
 pub use sql_type::python_types;
@@ -88,8 +88,8 @@ pub use tables::{query_tables, TableRef};
 use typed::Typed;
 
 pub use crate::catalog::{
-    Catalog as SchemaData, Columns, Join, NameRef, RelationKind, RelationRef, SchemaColumn,
-    TypeOverrides,
+    deprecated_type, Catalog as SchemaData, Columns, Join, NameRef, RelationKind, RelationRef,
+    SchemaColumn, TypeOverrides,
 };
 
 /// A loaded schema, shared so callers can cache it across queries.

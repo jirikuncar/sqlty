@@ -1528,6 +1528,27 @@ def test_databases_pick_the_schema_and_rules_of_a_file(tmp_path, monkeypatch, ca
     ]
 
 
+def test_a_database_merges_its_deprecated_columns(tmp_path, monkeypatch, capsys) -> None:
+    _databases_project(tmp_path)
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text(
+        pyproject.read_text()
+        + '[tool.sqlty.deprecated-columns]\n"events.kind" = { use = "type" }\n'
+        + "[tool.sqlty.databases.analytics.deprecated-columns]\n"
+        + '"events.kind" = { remove-after = "2027-01-01" }\n'
+    )
+    (tmp_path / "app/reports/events.py").write_text(
+        'from sqlty import SQL\nq = SQL[tuple[str]]("--sql\\nSELECT kind FROM events")\n'
+    )
+    monkeypatch.chdir(tmp_path)
+
+    _, out, _ = _run(["check", "app/reports/events.py"], capsys)
+
+    assert out.splitlines()[0].endswith(
+        "[deprecated-column] `events.kind` is deprecated, it is removed after 2027-01-01"
+    )
+
+
 def test_a_database_inherits_and_merges_the_project_settings(tmp_path, monkeypatch, capsys) -> None:
     _databases_project(tmp_path)
     (tmp_path / "app/reports/events.py").write_text(

@@ -161,7 +161,7 @@ fn config_errors_are_reported_as_sqlty_check_reports_them() {
         ("[rules]\nselect-star = \"loud\"", "loud"),
         (
             "schema = \"schema.sql\"",
-            "the WebAssembly engine reads only dialect, driver, import-style, max-query-variants, param-types, preview, rules, types, not 'schema'",
+            "the WebAssembly engine reads only deprecated-columns, dialect, driver, import-style, max-query-variants, param-types, preview, rules, types, not 'schema'",
         ),
         ("import-style = \"from x\"", "Unsupported import-style"),
         ("param-types = 1", "param-types must be true or false"),
@@ -246,7 +246,7 @@ fn config_answers_the_sqlty_table_of_a_file() {
     );
     assert_eq!(
         config("/app/sqlty.toml", "dialet = \"sqlite\"")["error"],
-        "/app/sqlty.toml: unknown key 'dialet' in [tool.sqlty] (did you mean 'dialect'?); expected one of: dialect, driver, schema, queries, query-format, rules, overrides, import-style, untyped, json-types, param-types, preview, max-query-variants, coerce-row-types, functions, types, format-command, extend, databases, exclude, extend-exclude, respect-gitignore"
+        "/app/sqlty.toml: unknown key 'dialet' in [tool.sqlty] (did you mean 'dialect'?); expected one of: dialect, driver, schema, queries, query-format, rules, overrides, import-style, untyped, json-types, param-types, preview, max-query-variants, coerce-row-types, functions, types, deprecated-columns, format-command, extend, databases, exclude, extend-exclude, respect-gitignore"
     );
 }
 
@@ -257,6 +257,7 @@ fn settings_resolved_by_the_host_apply_with_their_types() {
         "dialect": "sqlite",
         "schema": "ignored by the engine.sql",
         "types": {"DATE": "datetime.date"},
+        "deprecated-columns": {"t.d": {"use": "e"}},
         "rules": {"stale-rewrite": {"severity": "error"}},
     });
     let answer = ask(&json!({
@@ -265,6 +266,13 @@ fn settings_resolved_by_the_host_apply_with_their_types() {
     }));
     assert_eq!(answer["queries"][0]["row_type"], "tuple[datetime.date]");
     assert_eq!(answer["diagnostics"][0]["severity"], "error");
+    let rules: Vec<&str> = answer["diagnostics"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|found| found["rule"].as_str())
+        .collect();
+    assert!(rules.contains(&"deprecated-column"), "{answer}");
     let bad = ask(&json!({
         "op": "analyze", "source": source, "dialect": "postgres",
         "settings": {"types": {"NOT A TYPE": "str"}},

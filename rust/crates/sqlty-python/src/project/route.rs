@@ -75,7 +75,9 @@ pub fn file_table(table: &Table, route: &Route) -> Table {
     });
     for (key, value) in database.into_iter().flatten() {
         match (merged.get_mut(key), value) {
-            (Some(Value::Table(own)), Value::Table(value)) if key == "rules" || key == "types" => {
+            (Some(Value::Table(own)), Value::Table(value))
+                if matches!(key.as_str(), "rules" | "types" | "deprecated-columns") =>
+            {
                 match key == "rules" {
                     true => crate::config::merge_rules(own, value.clone()),
                     false => own.extend(value.clone()),

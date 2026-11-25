@@ -77,7 +77,17 @@ impl harness::Runner for Python {
         let found = match (&run.against, unit.lang) {
             _ if unit.migration => {
                 let baseline = section.files.get("against.sql").map_or("", String::as_str);
-                sqlty_python::migrations::check_migrations(baseline, &[&text], &run.rules)
+                let style = ImportStyle::default();
+                let writers: Vec<(String, String)> = section
+                    .files
+                    .iter()
+                    .filter(|(path, _)| path.ends_with(".py"))
+                    .flat_map(|(path, text)| {
+                        sqlty_python::migrations::queries_of(path, text, &style, None)
+                    })
+                    .collect();
+                let files = [(text.as_str(), &run.rules)];
+                sqlty_python::migrations::check_migrations_with(baseline, &files, &writers)
                     .into_iter()
                     .flatten()
                     .collect()
