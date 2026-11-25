@@ -3746,6 +3746,32 @@ mod tests {
     }
 
     #[test]
+    fn dropping_a_foreign_key_with_an_action_loses_it() {
+        let baseline = format!(
+            "{USERS}\nCREATE TABLE orders (id BIGINT PRIMARY KEY, \
+             user_id BIGINT REFERENCES users (id) ON DELETE CASCADE, \
+             team_id BIGINT REFERENCES teams (id) ON DELETE RESTRICT ON UPDATE NO ACTION);"
+        );
+        let found = check(&baseline, &["ALTER TABLE orders DROP COLUMN user_id;"]);
+        assert_eq!(
+            found[0].iter().map(|f| f.rule).collect::<Vec<_>>(),
+            [Rule::MissingLockTimeout, Rule::DroppedDeleteAction]
+        );
+        assert!(found[0][1].message.starts_with(
+            "drops the foreign key of `orders` (user_id) to `users` with `ON DELETE CASCADE`"
+        ));
+        for kept in [
+            "ALTER TABLE orders DROP COLUMN team_id;",
+            "DROP TABLE orders;",
+            "ALTER TABLE orders DROP COLUMN user_id; \
+             ALTER TABLE orders ADD COLUMN user_id BIGINT REFERENCES users (id) ON DELETE CASCADE;",
+        ] {
+            let rules = rules(&baseline, &format!("SET lock_timeout = '1s'; {kept}"));
+            assert!(!rules.contains(&Rule::DroppedDeleteAction), "{kept}");
+        }
+    }
+
+    #[test]
     fn a_validated_not_null_check_spares_the_scan() {
         let checked = "SET lock_timeout = '1s';
             ALTER TABLE users ADD CONSTRAINT c CHECK (bio IS NOT NULL) NOT VALID;
