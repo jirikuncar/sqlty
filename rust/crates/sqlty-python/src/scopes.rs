@@ -521,6 +521,25 @@ mod tests {
     }
 
     #[test]
+    fn a_function_binds_imports_and_loop_targets_to_no_class() {
+        let text = "import os\ndef f(a: int):\n    import os.path, json as a\n    \
+                    for (b, *c), d.e in []:\n        pass\n    g: int = 1\n";
+        let parsed = parse_module(text).unwrap();
+        let scan = Scan::new(&parsed.syntax().body);
+        let mut bound: Vec<&str> = scan
+            .types
+            .iter()
+            .filter(|(&(scope, _), kind)| scope == 1 && kind.is_none())
+            .map(|(&(_, name), _)| name)
+            .collect();
+        bound.sort_unstable();
+        assert_eq!(bound, ["a", "b", "c", "os"]);
+        assert!(!scan.parameters.contains(&(1, "a")));
+        assert_eq!(scan.types[&(1, "g")].as_deref(), Some("int"));
+        assert!(!scan.types.contains_key(&(0, "os")));
+    }
+
+    #[test]
     fn lines_end_at_newline_carriage_return_or_both() {
         let lines = Lines::new("a\nb\r\nc\rd");
         let found: Vec<usize> = [0, 2, 5, 7].map(|offset| lines.line(offset)).into();
