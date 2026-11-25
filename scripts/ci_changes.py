@@ -67,6 +67,7 @@ PACKAGES: dict[str, tuple[list[str], list[str]]] = {
             ".claude-plugin/**",
             ".codex-plugin/**",
             ".cursor-plugin/**",
+            "hooks/**",
             ".github/workflows/pypi.yml",
             "npm/sqlty/package.json",
         ],
