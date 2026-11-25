@@ -343,7 +343,10 @@ impl<'a> Analyzer<'a> {
         }
         match self.resolve_reference(expr, scope) {
             Some(resolved) => {
-                if let ColumnRef::Schema(_) = resolved.found {
+                // `EXCLUDED` of an upsert is the row being written, not a read.
+                if matches!(resolved.found, ColumnRef::Schema(_))
+                    && resolved.reference != "excluded"
+                {
                     self.check_deprecated(&resolved.table, &resolved.column);
                 }
                 let typed = resolved.found.typed(self.dialect);

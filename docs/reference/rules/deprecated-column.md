@@ -13,12 +13,13 @@ Default severity: **warn**
 
 ## What it does
 
-Reports each read of a column that
-[`deprecated-columns`](../configuration.md#deprecated-columns) marks: in the select
+Reports a query that reads a column
+[`deprecated-columns`](../configuration.md#deprecated-columns) marks, once per
+column: in the select
 list, `WHERE`, `JOIN ... ON`, `GROUP BY`, `ORDER BY`, `RETURNING`, the arguments of
 `CASE`, `COALESCE` and other functions, and the values of `INSERT` and `UPDATE`.
-Writing it, in an `INSERT` column list or as the target of `UPDATE ... SET`, is
-not reported.
+Writing it, in an `INSERT` column list, as the target of `UPDATE ... SET` or as
+`EXCLUDED.column` in an upsert, is not reported.
 
 ```toml
 [tool.sqlty]

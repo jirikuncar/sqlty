@@ -725,6 +725,7 @@ impl<'a> Analyzer<'a> {
             Some((_, fields)) => {
                 // The composite itself needs no Python type, only its fields.
                 self.diag.rewind(mark);
+                self.check_references(root, scope);
                 fields
                     .iter()
                     .filter(|field| !field.invisible)

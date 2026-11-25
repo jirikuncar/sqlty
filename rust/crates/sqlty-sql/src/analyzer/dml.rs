@@ -457,7 +457,7 @@ impl Analyzer<'_> {
                             _ => Expr::CompoundIdentifier(idents),
                         })
                     });
-                    exprs.for_each(|expr| analyzer.check_references(&expr, &scope));
+                    exprs.for_each(|expr| analyzer.check_written(&expr, &scope));
                 } else if let sqlparser::ast::TableFactor::Table { name, .. } =
                     &update.table.relation
                 {

@@ -113,3 +113,77 @@ from sqlty import SQL
 # error:
 q = SQL[tuple[str | None]]("--sql\nSELECT legacy_email FROM users")
 ```
+
+## Upserts and multi-table updates write
+
+```python
+from sqlty import SQL
+
+# error:
+upsert = SQL("--sql\nINSERT INTO users (id, legacy_email) VALUES (%s, %s) ON CONFLICT (id) DO UPDATE SET legacy_email = EXCLUDED.legacy_email")
+```
+
+```python
+from sqlty import SQL
+
+# error: [deprecated-column] "`users.legacy_email` is deprecated"
+upsert = SQL("--sql\nINSERT INTO users (id, email) VALUES (%s, %s) ON CONFLICT (id) DO UPDATE SET email = users.legacy_email")
+```
+
+### In MySQL
+
+```toml
+[tool.sqlty]
+dialect = "mysql"
+```
+
+```python
+from sqlty import SQL
+
+# error:
+q = SQL("-- sql\nUPDATE users u JOIN orders o ON o.user_id = u.id SET u.legacy_email = %s WHERE o.id = %s")
+```
+
+```python
+from sqlty import SQL
+
+# error: [deprecated-column] "`users.legacy_email` is deprecated"
+q = SQL("-- sql\nUPDATE users u JOIN orders o ON o.user_id = u.id SET o.id = u.legacy_email")
+```
+
+## A field of a deprecated composite column
+
+```toml
+[tool.sqlty.deprecated-columns]
+"people.legacy_addr" = {}
+```
+
+`schema.sql`:
+
+```sql
+CREATE TYPE address AS (city TEXT);
+CREATE TABLE people (id INT, legacy_addr address);
+```
+
+```python
+from sqlty import SQL
+
+# error: [deprecated-column] "`people.legacy_addr` is deprecated"
+q = SQL[tuple[str | None]]("--sql\nSELECT (legacy_addr).* FROM people")
+```
+
+## Grouping, ordering and inserted values
+
+```python
+from sqlty import SQL
+
+# error: [deprecated-column] "`users.legacy_email` is deprecated"
+q = SQL[tuple[int]]("--sql\nSELECT count(*)::int FROM users GROUP BY legacy_email ORDER BY legacy_email")
+```
+
+```python
+from sqlty import SQL
+
+# error: [deprecated-column] "`users.legacy_email` is deprecated"
+q = SQL("--sql\nINSERT INTO users (id, email) SELECT id + 1000, legacy_email FROM users")
+```
