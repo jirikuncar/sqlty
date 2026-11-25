@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import importlib.util
-import json
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -90,9 +89,10 @@ def test_the_extension_crate_runs_with_the_python_package(
     monkeypatch.setenv("GITHUB_OUTPUT", str(output))
     ci_changes.main([])
     lines = dict(line.split("=", 1) for line in output.read_text().splitlines())
-    crates = json.loads(lines.pop("crates"))
-    assert [crate["dir"] for crate in crates] == [name for name in CRATES if name != "sqlty-ext"]
-    assert {"dir": "sqlty-sql", "package": "sqlty-sql"} in crates
+    crates = lines.pop("crates").split()
+    assert crates == [name for name in CRATES if name != "sqlty-ext"]
+    packages = lines.pop("packages").split()
+    assert dict(zip(crates, packages, strict=True))["sqlty-sql"] == "sqlty-sql"
     assert lines == dict.fromkeys(ci_changes.PACKAGES, "true")
 
 
@@ -172,13 +172,11 @@ def test_a_lock_change_is_read_against_the_base(
         return dict(line.split("=", 1) for line in output.read_text().splitlines())
 
     lines = ran("HEAD~1")
-    assert [crate["dir"] for crate in json.loads(lines["crates"])] == ["sqlty-cli", "sqlty-lsp"]
+    assert lines["crates"].split() == ["sqlty-cli", "sqlty-lsp"]
     assert (lines["vscode"], lines["compat"]) == ("true", "false")
     # Without the lock at the base, every crate runs.
     lines = ran("HEAD~2")
-    assert [crate["dir"] for crate in json.loads(lines["crates"])] == [
-        name for name in CRATES if name != "sqlty-ext"
-    ]
+    assert lines["crates"].split() == [name for name in CRATES if name != "sqlty-ext"]
 
 
 def test_lint_builds_what_the_hooks_of_the_changed_files_need() -> None:

@@ -6,14 +6,13 @@ A change to rust/Cargo.lock runs the crates whose dependencies it changes.
 
     python3 scripts/ci_changes.py [BASE]   # BASE omitted: every package
 
-Writes `crates` (a JSON list) and one `true`/`false` per other package to $GITHUB_OUTPUT,
-or prints them.
+Writes `crates` (the affected crates' directories, space-separated), `packages` (their
+package names) and one `true`/`false` per other package to $GITHUB_OUTPUT, or prints them.
 """
 
 from __future__ import annotations
 
 import fnmatch
-import json
 import os
 import subprocess
 import sys
@@ -327,12 +326,15 @@ def main(argv: list[str]) -> None:
             locked = locked_crates(before.stdout, (ROOT / LOCK).read_text())
     result = affected(changed, locked)
     crates = [
-        {"dir": name, "package": package}
+        (name, package)
         for name, (package, _) in sorted(workspace().items())
         # The extension's own tests run with the Python package's.
         if result[name] and name != "sqlty-ext"
     ]
-    lines = [f"crates={json.dumps(crates)}"]
+    lines = [
+        f"crates={' '.join(name for name, _ in crates)}",
+        f"packages={' '.join(package for _, package in crates)}",
+    ]
     lines += [f"{name}={str(result[name]).lower()}" for name in PACKAGES]
     output = os.environ.get("GITHUB_OUTPUT")
     with open(output, "a") if output else sys.stdout as out:
