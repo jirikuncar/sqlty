@@ -58,7 +58,7 @@ migrations/0042_index.sql:2: [missing-concurrently] `CREATE INDEX` blocks writes
 |------|-----|
 | `missing-concurrently` | `CREATE INDEX CONCURRENTLY`, `DROP INDEX CONCURRENTLY`; `UNIQUE` via `CREATE UNIQUE INDEX CONCURRENTLY` then `ADD CONSTRAINT ... USING INDEX` |
 | `concurrently-in-transaction` | move the statement out of `BEGIN` ... `COMMIT` (Django `atomic = False`, Alembic `autocommit_block()`) |
-| `constraint-scan` | add the constraint `NOT VALID`, then `VALIDATE CONSTRAINT`; for `SET NOT NULL`, validate a `CHECK (col IS NOT NULL)` first; before `ATTACH PARTITION`, make the key `NOT NULL` and validate a `CHECK` matching the bounds |
+| `constraint-scan` | add the constraint `NOT VALID`, then `VALIDATE CONSTRAINT` after `COMMIT`; for `SET NOT NULL`, validate a `CHECK (col IS NOT NULL)` first; before `ATTACH PARTITION`, make the key `NOT NULL` and validate a `CHECK` matching the bounds |
 | `table-rewrite` | add the column without a volatile default and backfill; change a type through a new column |
 | `add-required-column` | add the column nullable or with a constant `DEFAULT` |
 | `missing-lock-timeout` | start the migration with `SET lock_timeout = '2s';`, under 1 s when it takes several locks (see below) |
@@ -148,12 +148,11 @@ rules:
 | Dual write | Write the new column or table in the same transaction as the old one, before any backfill | a row written after the backfill is never copied ([#1260](https://github.com/jirikuncar/sqlty/issues/1260)) |
 | Backfill last | Run the backfill once the dual-writing release is fully deployed, from a job the deploy doesn't wait for | every writer is live before it reads |
 | Small batches | Batch by key, one transaction per batch, `SET LOCAL lock_timeout` and `statement_timeout`, a short pause, `SKIP LOCKED` | `unbatched-backfill` and `locked-backfill` report the rest |
-| Rerunnable | `ON CONFLICT ... DO UPDATE ... WHERE` the stored row is older; a rerun writes nothing | a retried batch must not fail or overwrite newer rows ([#1261](https://github.com/jirikuncar/sqlty/issues/1261)) |
+| Rerunnable | `ON CONFLICT ... DO UPDATE ... WHERE` the stored row is older; a rerun writes nothing | a retried batch must not fail or overwrite newer rows; `rerun-backfill` reports an `INSERT ... SELECT` without `ON CONFLICT` |
 | Switch reads | Read the new source and fall back to the old one while the new one can lag | a missed write must not change an answer |
 
-One batch, starting after the last key of the batch before. The migration
-rules accept it, but they don't check yet that it can rerun
-([#1261](https://github.com/jirikuncar/sqlty/issues/1261)):
+One batch, starting after the last key of the batch before, which the
+migration rules accept:
 
 `against.sql`:
 
@@ -182,9 +181,8 @@ Before you drop anything:
 - **Replace a foreign key's `ON DELETE` action** before you drop the column or
   constraint that carries it ([#1258](https://github.com/jirikuncar/sqlty/issues/1258)).
 - **Keep a SQL function that the previous release calls**, and drop it in the
-  next one. `sqlty breaking` reports a call to a dropped function only in the
-  select list ([#1255](https://github.com/jirikuncar/sqlty/issues/1255)), so search
-  `WHERE`, `JOIN` and `EXISTS` for it yourself.
+  next one. `sqlty breaking` reports each call to a dropped function as
+  `unknown-function`, a warning by default.
 - **Prove a code path is dead before you delete it**, for example by finding no
   calls in production telemetry over a full release cycle. Drop its table in a
   later migration.
@@ -200,7 +198,7 @@ Locks across releases:
   is set, not its value ([#1259](https://github.com/jirikuncar/sqlty/issues/1259)).
 - `ADD CONSTRAINT ... NOT VALID` and `VALIDATE CONSTRAINT` go in separate
   transactions, best in separate releases. In one transaction the `ADD` lock is
-  held through the scan ([#1256](https://github.com/jirikuncar/sqlty/issues/1256)).
+  held through the scan, and `constraint-scan` reports the `VALIDATE`.
 - Until a migration ships, edit it, rather than add a second one that locks the
   same busy table again.
 - An index build that can outlast the deploy runs after it, can be rerun (drop
