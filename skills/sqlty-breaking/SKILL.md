@@ -70,6 +70,7 @@ migrations/0042_index.sql:2: [missing-concurrently] `CREATE INDEX` blocks writes
 | `locked-backfill` | `COMMIT` the schema change, then backfill |
 | `unbatched-backfill` | update in batches: `WHERE id IN (SELECT id ... LIMIT 5000)` |
 | `drop-primary-key` | add the new key in the same transaction, or `REPLICA IDENTITY USING INDEX` first |
+| `rerun-backfill` | `ON CONFLICT (key) DO NOTHING`, or skip copied rows with `NOT EXISTS` |
 
 Every `schema` of the configuration is judged, each `[tool.sqlty.databases]` entry
 included, with the severities of `rules` and of the `[[tool.sqlty.overrides]]` that

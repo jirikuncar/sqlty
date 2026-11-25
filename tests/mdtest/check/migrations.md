@@ -372,6 +372,30 @@ UPDATE users SET email = '' WHERE id BETWEEN 1 AND 9;
 COMMIT;
 ```
 
+## Rows copied into a table that has rows
+
+```sql migration
+SET lock_timeout = '1s';
+-- error: [rerun-backfill] "copies rows into `users` without `ON CONFLICT`"
+INSERT INTO users (id, email) SELECT id + 1000, email FROM users_import;
+-- error:
+INSERT INTO users (id, email) SELECT id + 1000, email FROM users_import ON CONFLICT (id) DO NOTHING;
+INSERT INTO users (id, email) SELECT i.id, i.email FROM users_import i LEFT JOIN users u ON u.id = i.id WHERE u.id IS NULL;
+INSERT INTO users (id, email) VALUES (1, 'a');
+CREATE TABLE users_copy (id BIGINT PRIMARY KEY, email TEXT);
+INSERT INTO users_copy SELECT id, email FROM users;
+```
+
+### Once a new table has rows
+
+```sql migration
+SET lock_timeout = '1s';
+CREATE TABLE users_copy (id BIGINT PRIMARY KEY, email TEXT);
+INSERT INTO users_copy SELECT id, email FROM users WHERE id < 100;
+-- error: [rerun-backfill] "`users_copy`"
+INSERT INTO users_copy SELECT id, email FROM users WHERE id >= 100;
+```
+
 ## Indexes of keys a pg_dump schema adds
 
 `against.sql`:
