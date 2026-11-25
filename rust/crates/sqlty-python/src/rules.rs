@@ -122,9 +122,10 @@ impl RuleConfig {
         };
         let mut merged = self.clone();
         let ms = |max: &String| sqlty_sql::migrations::lock_timeout_ms(max);
-        merged.lock_timeout_max = [&self.lock_timeout_max, &other.lock_timeout_max]
+        merged.lock_timeout_max = [self, other]
             .into_iter()
-            .flatten()
+            .filter(|config| config.is_enabled(Rule::MissingLockTimeout))
+            .filter_map(|config| config.lock_timeout_max.as_ref())
             .min_by(|a, b| {
                 ms(a)
                     .partial_cmp(&ms(b))
@@ -201,6 +202,17 @@ mod tests {
             ] {
                 assert_eq!(merged.lock_timeout_max.as_deref(), expected);
             }
+        }
+        let ignored = [
+            (LOCK_TIMEOUT_MAX.to_string(), "1s".to_string()),
+            ("missing-lock-timeout".to_string(), "ignore".to_string()),
+        ];
+        let ignored = RuleConfig::from_overrides(Some(ignored.into())).unwrap();
+        for merged in [
+            ignored.strictest(&config(None)),
+            config(None).strictest(&ignored),
+        ] {
+            assert_eq!(merged.lock_timeout_max, None);
         }
         let overrides = [(LOCK_TIMEOUT_MAX.to_string(), "soon".to_string())].into();
         assert_eq!(

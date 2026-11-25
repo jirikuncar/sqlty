@@ -483,6 +483,40 @@ fn check_rules(rules: &Value, key: &str, place: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// `over` merged into the `rules` table `under`, rule by rule: a severity, plain or in
+/// `severity`, keeps the options `under` gives the rule, and an option keeps its severity.
+///
+/// Example:
+///
+/// ```
+/// use sqlty_python::config::merge_rules;
+///
+/// let mut under: toml::Table = "[missing-lock-timeout]\nmax = '2s'".parse().unwrap();
+/// merge_rules(&mut under, "missing-lock-timeout = 'error'".parse().unwrap());
+/// assert_eq!(under.to_string(), "[missing-lock-timeout]\nmax = \"2s\"\nseverity = \"error\"\n");
+/// ```
+pub fn merge_rules(under: &mut Table, over: Table) {
+    let options = |value: Value| match value {
+        Value::Table(options) => options,
+        severity => Table::from_iter([("severity".to_string(), severity)]),
+    };
+    for (rule, value) in over {
+        let merged = match under.remove(&rule) {
+            Some(Value::Table(mut own)) => {
+                own.extend(options(value));
+                Value::Table(own)
+            }
+            Some(severity) if value.is_table() => {
+                let mut own = options(severity);
+                own.extend(options(value));
+                Value::Table(own)
+            }
+            _ => value,
+        };
+        under.insert(rule, merged);
+    }
+}
+
 /// The entries of a checked `rules` table as hosts pass them, rule to severity: a rule's
 /// table gives its `severity`, and its `max` as `missing-lock-timeout.max`.
 pub fn rule_entries(rules: Option<&Value>) -> Vec<(String, String)> {
@@ -597,6 +631,41 @@ mod tests {
                 ("missing-lock-timeout.max".to_string(), "2s".to_string()),
                 ("unknown-column".to_string(), "warn".to_string()),
             ]
+        );
+    }
+
+    #[test]
+    fn rules_merge_rule_by_rule() {
+        let merged = |under: &str, over: &str| {
+            let mut under: Table = under.parse().unwrap();
+            merge_rules(&mut under, over.parse().unwrap());
+            rule_entries(Some(&Value::Table(under)))
+        };
+        let entries = |pairs: &[(&str, &str)]| -> Vec<(String, String)> {
+            let pair = |(key, value): &(&str, &str)| (key.to_string(), value.to_string());
+            pairs.iter().map(pair).collect()
+        };
+        let max = "missing-lock-timeout = { max = '1s' }";
+        let error = "missing-lock-timeout = 'error'";
+        let both = [
+            ("missing-lock-timeout.max", "1s"),
+            ("missing-lock-timeout", "error"),
+        ];
+        assert_eq!(merged(max, error), entries(&both));
+        assert_eq!(
+            merged(error, max),
+            entries(&[
+                ("missing-lock-timeout", "error"),
+                ("missing-lock-timeout.max", "1s")
+            ])
+        );
+        assert_eq!(
+            merged(error, "missing-lock-timeout = 'warn'"),
+            entries(&[("missing-lock-timeout", "warn")])
+        );
+        assert_eq!(
+            merged("", max),
+            entries(&[("missing-lock-timeout.max", "1s")])
         );
     }
 

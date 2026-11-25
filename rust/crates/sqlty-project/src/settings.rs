@@ -382,7 +382,10 @@ fn merged(table: &Table, database: &Table) -> Table {
     for (key, value) in database {
         match (merged.get_mut(key), value) {
             (Some(Value::Table(own)), Value::Table(value)) if key == "rules" || key == "types" => {
-                own.extend(value.clone());
+                match key == "rules" {
+                    true => config::merge_rules(own, value.clone()),
+                    false => own.extend(value.clone()),
+                }
             }
             _ => {
                 merged.insert(key.clone(), value.clone());

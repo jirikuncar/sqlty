@@ -1799,7 +1799,7 @@ impl Session<'_> {
             }
             ["set", "local", "lock_timeout", _, value] => self.local_timeout = timeout(value),
             ["set", "session", "lock_timeout", _, value] | ["set", "lock_timeout", _, value] => {
-                self.lock_timeout = timeout(value);
+                (self.lock_timeout, self.local_timeout) = (timeout(value), None);
             }
             _ => return false,
         }
@@ -2643,13 +2643,13 @@ fn name(ident: &Ident) -> String {
 /// which turn it off.
 fn timeout(value: &str) -> Option<String> {
     let value = value.trim_matches('\'');
-    let off =
-        value == "default" || value.trim_end_matches(|c: char| c.is_ascii_alphabetic()) == "0";
+    let off = value == "default" || lock_timeout_ms(value) == Some(0.0);
     (!off).then(|| value.to_string())
 }
 
-/// The milliseconds of a `lock_timeout` value as PostgreSQL reads it: a number of `ms`, `s`,
-/// `min`, `h` or `d`, milliseconds without a unit; `None` for anything else.
+/// The milliseconds of a `lock_timeout` value as PostgreSQL reads it: a number of `us`, `ms`,
+/// `s`, `min`, `h` or `d`, milliseconds without a unit; `None` for anything else. Units are
+/// lowercase, as PostgreSQL takes them.
 ///
 /// Example:
 ///
@@ -2662,11 +2662,9 @@ fn timeout(value: &str) -> Option<String> {
 /// ```
 pub fn lock_timeout_ms(value: &str) -> Option<f64> {
     let value = value.trim();
-    let unit_at = value
-        .find(|c: char| c.is_ascii_alphabetic())
-        .unwrap_or(value.len());
-    let (number, unit) = value.split_at(unit_at);
-    let scale = match unit.to_ascii_lowercase().as_str() {
+    let number = value.trim_end_matches(|c: char| c.is_ascii_alphabetic());
+    let scale = match &value[number.len()..] {
+        "us" => 1e-3,
         "" | "ms" => 1.0,
         "s" => 1e3,
         "min" => 60e3,
@@ -3878,7 +3876,10 @@ mod tests {
             ("1.5 s", Some(1500.0)),
             ("2min", Some(120_000.0)),
             ("1h", Some(3_600_000.0)),
-            ("1D", Some(86_400_000.0)),
+            ("1d", Some(86_400_000.0)),
+            ("1e3s", Some(1_000_000.0)),
+            ("30000000us", Some(30_000.0)),
+            ("2S", None),
             ("2w", None),
             ("-1s", None),
             ("s", None),

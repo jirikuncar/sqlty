@@ -110,6 +110,25 @@ COMMIT;
 ALTER TABLE users ADD COLUMN about TEXT;
 ```
 
+A later session `SET` replaces the `SET LOCAL`, as in PostgreSQL.
+
+```sql migration
+BEGIN;
+SET LOCAL lock_timeout = '500ms';
+SET lock_timeout = '1min';
+-- error: [missing-lock-timeout] "with `lock_timeout` 1min"
+ALTER TABLE users ADD COLUMN bio TEXT;
+COMMIT;
+```
+
+A value that PostgreSQL reads as zero turns the timeout off.
+
+```sql migration
+SET lock_timeout = '0.0s';
+-- error: [missing-lock-timeout] "without `SET lock_timeout` first"
+ALTER TABLE users ADD COLUMN bio TEXT;
+```
+
 A value sqlty cannot read, such as a template variable, counts as within the maximum.
 
 ```sql migration

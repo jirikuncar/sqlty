@@ -183,10 +183,15 @@ impl Flags {
             _ => Table::new(),
         };
         for (rule, value) in self.rules() {
-            match rule.split_once('.') {
-                Some((rule, key)) => set_option(&mut rules, rule, key, value),
-                None => set_option(&mut rules, &rule, "severity", value),
-            }
+            let value = Value::String(value);
+            let entry = match rule.split_once('.') {
+                Some((rule, key)) => (
+                    rule.to_string(),
+                    Value::Table(Table::from_iter([(key.to_string(), value)])),
+                ),
+                None => (rule, value),
+            };
+            config::merge_rules(&mut rules, Table::from_iter([entry]));
         }
         if !rules.is_empty() {
             loaded
@@ -194,27 +199,6 @@ impl Flags {
                 .insert("rules".to_string(), Value::Table(rules));
         }
         Ok(loaded)
-    }
-}
-
-/// `key` of `rule` in a `rules` table: its severity replaces a plain entry, and keeps the
-/// other options of a table.
-fn set_option(rules: &mut Table, rule: &str, key: &str, value: String) {
-    match (rules.get_mut(rule), key) {
-        (Some(Value::Table(options)), _) => {
-            options.insert(key.to_string(), Value::String(value));
-        }
-        (_, "severity") => {
-            rules.insert(rule.to_string(), Value::String(value));
-        }
-        (own, _) => {
-            let mut options = Table::new();
-            if let Some(Value::String(severity)) = own {
-                options.insert("severity".to_string(), Value::String(severity.clone()));
-            }
-            options.insert(key.to_string(), Value::String(value));
-            rules.insert(rule.to_string(), Value::Table(options));
-        }
     }
 }
 
