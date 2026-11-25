@@ -31,6 +31,15 @@ PYTEST = [
     "tests/_mdtest/**",
     "tests/_no_exec.py",
 ]
+# The Markdown of the guides, at the root and in docs/.
+DOCS = ["docs/**.md", "*.md", ".github/*.md"]
+# The tests of the docs job besides the mdtests of docs/ and README.md: each reads the guides.
+DOCS_TESTS = [
+    "tests/test_docs.py",
+    "tests/test_core_invariants.py",
+    "tests/test_duplicates.py",
+    "tests/test_rust_types.py",
+]
 # The Markdown whose queries the database tests run.
 CORPUS = ["tests/mdtest/**", "docs/**.md"]
 
@@ -41,14 +50,13 @@ PACKAGES: dict[str, tuple[list[str], list[str]]] = {
         [
             "src/**",
             "tests/**",
-            "docs/**",
+            "docs/assets/**",
+            "docs/favicon.ico",
+            "docs/robots.txt",
             "skills/**",
             "examples/**",
             "scripts/**",
             "benchmarks/**",
-            # The links of the guides at the root are checked.
-            "*.md",
-            ".github/*.md",
             "LICENSE",
             "Makefile",
             "pyproject.toml",
@@ -107,6 +115,8 @@ PACKAGES: dict[str, tuple[list[str], list[str]]] = {
         ],
         ["sqlty-ext"],
     ),
+    # The guides: the tests that read them (links, rule pages, examples) and their mdtests.
+    "docs": ([*DOCS, *PYTEST, *DOCS_TESTS], ["sqlty-ext"]),
     # The desktop test runs the sqlty of the virtual environment.
     "vscode": (["editors/vscode/**", "src/sqlty/**", "npm/wasm/**"], ["sqlty-wasm", "sqlty-ext"]),
     # The engine on WebAssembly: the docs playground and @sqlty/wasm, checking each example.
