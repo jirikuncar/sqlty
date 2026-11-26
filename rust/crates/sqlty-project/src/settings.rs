@@ -187,7 +187,6 @@ impl Directory {
         version: Version,
     ) -> Result<Self, String> {
         let Loaded { table, base, label } = config;
-        let load = loaded_schema;
         let read = |table: &Table| {
             schema_text(&strings(table, "schema"), base.as_deref()?, files, schemas)
         };
@@ -260,9 +259,11 @@ impl Directory {
             })
             .collect::<Result<_, String>>()?;
         let mut routed = Vec::new();
-        for (name, mut settings, schema, types) in named {
-            let text = schema.as_ref().map_or("", |schema| schema.text.as_str());
-            let (loaded, _) = load(text, settings.dialect, &types)?;
+        for ((name, mut settings, schema, types), (.., cached)) in named.into_iter().zip(&plain) {
+            let loaded = match cached {
+                Some(cached) => Arc::clone(cached),
+                None => loaded_schema("", settings.dialect, &types)?.0,
+            };
             let others = plain
                 .iter()
                 .filter(|(other, ..)| *other != name)
@@ -273,7 +274,7 @@ impl Directory {
                 absent: schema.is_none(),
                 others,
             };
-            settings.schema = SchemaData::with_databases(loaded, databases);
+            settings.schema = Some(SchemaData::with_databases(&loaded, databases));
             if let Some(SchemaText { text, files }) = schema {
                 settings.schema_sql = Some(Arc::from(text));
                 settings.schema_files = files;
@@ -336,7 +337,7 @@ impl Directory {
                 .and_then(Value::as_array)
                 .is_some_and(|all| !all.is_empty())
         });
-        if !overrides {
+        if !overrides || (route.rules.is_empty() && self.cli_rules.is_empty()) {
             return Arc::clone(settings);
         }
         let mut rules = settings.rules.clone();

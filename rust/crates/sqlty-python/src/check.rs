@@ -529,6 +529,12 @@ impl<'a> Module<'a, '_> {
         {
             return;
         }
+        // `select_star` analyzes these anyway: analyzed first, their parameters reuse the tree.
+        for (call, _) in self.calls() {
+            if let Some(query) = call.query.as_deref().filter(|query| !query.is_empty()) {
+                self.ctx.analyses.of(query);
+            }
+        }
         let mut reports = Vec::new();
         if self.enabled(Rule::ParamTypeMismatch) {
             let mut singles: Vec<(usize, &str, &str, Option<Span>)> = Vec::new();
