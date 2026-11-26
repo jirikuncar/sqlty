@@ -172,16 +172,111 @@ correlated = SQL[tuple[str]]("--sql\nSELECT p.name FROM projects p WHERE p.org_i
 loose = SQL[tuple[str]]("--sql\nSELECT p.name FROM projects p WHERE p.org_id = %s AND (p.org_id, p.id) IN (SELECT org_id, project_id FROM invoices)")
 ```
 
-A CTE is judged by its body.
+### CTEs and derived tables
+
+A CTE or derived table that returns a tenant key leaves it to the query that reads it,
+which pins it as it pins a table's.
+
+```python
+from sqlty import SQL
+
+# error:
+outside = SQL[tuple[str]]("--sql\nWITH p AS (SELECT name, org_id FROM projects) SELECT name FROM p WHERE org_id = %s")
+
+# error:
+inside = SQL[tuple[str]]("--sql\nWITH p AS (SELECT name FROM projects WHERE org_id = %s) SELECT name FROM p")
+
+# error:
+derived = SQL[tuple[str]]("--sql\nSELECT d.name FROM (SELECT * FROM projects) d WHERE d.org_id = %s")
+
+# error:
+renamed = SQL[tuple[str]]("--sql\nWITH p (n, tenant) AS (SELECT name, org_id FROM projects) SELECT n FROM p WHERE tenant = %s")
+
+# error:
+nested = SQL[tuple[str]]("--sql\nWITH a AS (SELECT name, org_id FROM projects), b AS (SELECT name, org_id FROM a) SELECT name FROM b WHERE org_id = %s")
+
+# error:
+union = SQL[tuple[int]]("--sql\nWITH u AS (SELECT id, org_id FROM projects UNION ALL SELECT id, org_id FROM invoices) SELECT id FROM u WHERE org_id = %s")
+
+# error:
+joined = SQL[tuple[int]]("--sql\nWITH p AS (SELECT id, org_id FROM projects WHERE org_id = %s) SELECT i.id FROM invoices i JOIN p ON p.org_id = i.org_id AND p.id = i.project_id")
+
+# error:
+grouped = SQL[tuple[int]]("--sql\nSELECT n FROM (SELECT org_id, count(*)::INT AS n FROM projects GROUP BY org_id) c WHERE c.org_id = %s")
+```
+
+The tenant table is reported where the CTE reads it when the query reading the CTE does
+not pin the key, or the CTE does not return it.
 
 ```python
 from sqlty import SQL
 
 # error: [tenant-scope] "`projects` is read without `projects.org_id = <parameter>`"
-outside = SQL[tuple[str]]("--sql\nWITH p AS (SELECT name, org_id FROM projects) SELECT name FROM p WHERE org_id = %s")
+unpinned = SQL[tuple[str]]("--sql\nWITH p AS (SELECT name, org_id FROM projects) SELECT name FROM p")
+
+# error: [tenant-scope] "`projects` is read without `projects.org_id = <parameter>`"
+dropped = SQL[tuple[str]]("--sql\nWITH p AS (SELECT name, id FROM projects) SELECT p.name FROM p JOIN invoices i ON i.project_id = p.id WHERE i.org_id = %s")
+
+# error: [tenant-scope] "`projects` is read without `projects.org_id = <parameter>`"
+right = SQL[tuple[str]]("--sql\nSELECT d.name FROM invoices i RIGHT JOIN (SELECT name, org_id FROM projects) d ON d.org_id = %s AND i.org_id = %s")
+
+# error: [tenant-scope] "`invoices` is read without `invoices.org_id = <parameter>`"
+one_branch = SQL[tuple[int]]("--sql\nWITH u AS (SELECT id, org_id FROM projects UNION ALL SELECT id, 1 FROM invoices) SELECT id FROM u WHERE org_id = %s")
+
+# error: [tenant-scope] "`projects` is read without `projects.org_id = <parameter>`"
+shadowed = SQL[tuple[int]]("--sql\nWITH projects AS (SELECT id, org_id FROM projects) SELECT id FROM projects")
+
+# error: [tenant-scope] "`invoices` is read without `invoices.org_id = <parameter>`"
+same_name = SQL[tuple[str]]("--sql\nWITH x AS (SELECT p.name, p.org_id, i.org_id FROM projects p, invoices i WHERE p.org_id = %s) SELECT name FROM x")
+
+# error: [tenant-scope] "`projects` is read without `projects.org_id = <parameter>`"
+recursive = SQL[tuple[int]]("--sql\nWITH RECURSIVE r AS (SELECT id, org_id FROM projects UNION ALL SELECT id, org_id FROM r) SELECT id FROM r WHERE org_id = %s")
+```
+
+MERGE is not judged, so a CTE or derived table it reads is judged by its body.
+
+```python
+from sqlty import SQL
+
+# error: [tenant-scope] "`projects` is read without `projects.org_id = <parameter>`"
+merge_cte = SQL("--sql\nWITH p AS (SELECT id, org_id FROM projects) MERGE INTO invoices i USING p ON i.project_id = p.id WHEN MATCHED THEN DELETE")
+
+# error: [tenant-scope] "`projects` is read without `projects.org_id = <parameter>`"
+merge_derived = SQL("--sql\nMERGE INTO invoices i USING (SELECT id, org_id FROM projects) p ON i.project_id = p.id WHEN MATCHED THEN DELETE")
+```
+
+A window, `DISTINCT ON`, a `LIMIT` or a grouping that is not by the tenant key reads the
+rows of every tenant before the outer query picks some, so the CTE is judged by its body.
+
+```python
+from sqlty import SQL
+
+# error: [tenant-scope] "`projects` is read without `projects.org_id = <parameter>`"
+ranked = SQL[tuple[str]]("--sql\nSELECT name FROM (SELECT name, org_id, row_number() OVER () AS n FROM projects) r WHERE r.org_id = %s AND n = 1")
+
+# error: [tenant-scope] "`projects` is read without `projects.org_id = <parameter>`"
+limited = SQL[tuple[str]]("--sql\nWITH p AS (SELECT name, org_id FROM projects LIMIT 10) SELECT name FROM p WHERE org_id = %s")
+
+# error: [tenant-scope] "`projects` is read without `projects.org_id = <parameter>`"
+by_name = SQL[tuple[int]]("--sql\nSELECT n FROM (SELECT max(org_id) AS org_id, count(*)::INT AS n FROM projects GROUP BY name) c WHERE c.org_id = %s")
+
+# error: [tenant-scope] "`projects` is read without `projects.org_id = <parameter>`"
+first = SQL[tuple[str]]("--sql\nSELECT name FROM (SELECT DISTINCT ON (name) name, org_id FROM projects) d WHERE d.org_id = %s")
+```
+
+A CTE read by an UPDATE or DELETE, or by a subquery, is pinned by that statement.
+
+```python
+from sqlty import SQL
 
 # error:
-inside = SQL[tuple[str]]("--sql\nWITH p AS (SELECT name FROM projects WHERE org_id = %s) SELECT name FROM p")
+update = SQL("--sql\nWITH p AS (SELECT id, org_id FROM projects) UPDATE invoices SET project_id = p.id FROM p WHERE p.org_id = invoices.org_id AND invoices.org_id = %s")
+
+# error: [tenant-scope] "`projects` is read without `projects.org_id = <parameter>`"
+update_unpinned = SQL("--sql\nUPDATE invoices SET project_id = d.id FROM (SELECT id, org_id FROM projects) d WHERE invoices.org_id = %s")
+
+# error:
+delete = SQL("--sql\nWITH p AS (SELECT id, org_id FROM projects) DELETE FROM invoices WHERE org_id = %s AND project_id IN (SELECT id FROM p WHERE org_id = %s)")
 ```
 
 ### UPDATE and DELETE
@@ -287,6 +382,9 @@ from sqlty import SQL
 by_region = SQL[tuple[int]]("--sql\nSELECT id FROM sites WHERE region = %s")
 
 # error:
+split = SQL[tuple[int]]("--sql\nWITH s AS (SELECT id, org_id FROM sites WHERE region = %s) SELECT id FROM s WHERE org_id = %s")
+
+# error:
 by_org = SQL[tuple[int]]("--sql\nSELECT id FROM sites WHERE org_id = %s AND region = %s")
 
 # error: [tenant-scope] "`orgs` is read without `orgs.id = <parameter>` and `orgs.region = <parameter>`"
@@ -360,6 +458,12 @@ mine = SQL[tuple[str]]("--sql\nSELECT name FROM projects WHERE org_id = ?")
 
 # error:
 named = SQL[tuple[str]]("--sql\nSELECT name FROM projects WHERE org_id = :org")
+
+# error: [tenant-scope] "`projects` is read without `projects.org_id = <parameter>`"
+counted = SQL[tuple[int]]("--sql\nSELECT n FROM (SELECT org_id, count(*) AS n FROM projects) c WHERE c.org_id = ?")
+
+# error: [tenant-scope] "`projects` is read without `projects.org_id = <parameter>`"
+unaliased = SQL[tuple[str]]("--sql\nSELECT name FROM (SELECT name, org_id FROM projects) WHERE org_id = ?")
 ```
 
 ## Without a tenancy

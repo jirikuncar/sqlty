@@ -1026,6 +1026,24 @@ fn tenant_scope_reports_statements_that_do_not_pin_the_tenant_key() {
         "UPDATE ONLY projects SET name = $1 WHERE org_id = $2",
         "DELETE FROM projects WHERE org_id = $1",
         "SELECT name FROM projects WHERE org_id = $1 AND name = $2 OR id = $3 AND org_id = $1 AND false",
+        "WITH p AS (SELECT name, org_id FROM projects) SELECT name FROM p WHERE org_id = $1",
+        "WITH p AS (SELECT name FROM projects WHERE org_id = $1) SELECT name FROM p",
+        "SELECT d.name FROM (SELECT * FROM projects) d WHERE d.org_id = $1",
+        "SELECT d.name FROM (SELECT p.* FROM projects p) d WHERE d.org_id = $1",
+        "WITH p (n, t) AS (SELECT name, org_id FROM projects) SELECT n FROM p WHERE t = $1",
+        "WITH a AS (SELECT name, org_id FROM projects), b AS (SELECT name, org_id FROM a) SELECT name FROM b WHERE org_id = $1",
+        "WITH u AS (SELECT id, org_id FROM projects UNION ALL (SELECT id, org_id FROM invoices)) SELECT id FROM u WHERE org_id = $1",
+        "WITH p AS (SELECT id, org_id FROM projects WHERE org_id = $1) SELECT i.id FROM invoices i JOIN p ON p.org_id = i.org_id",
+        "SELECT n FROM (SELECT org_id, count(*)::INT AS n FROM projects GROUP BY org_id) c WHERE c.org_id = $1",
+        "WITH p AS (SELECT i.id, p.org_id FROM projects p JOIN invoices i ON i.org_id = p.org_id) SELECT id FROM p WHERE org_id = $1",
+        "WITH p AS (SELECT id, org_id FROM projects) SELECT i.id FROM invoices i WHERE i.org_id = $1 AND EXISTS (SELECT 1 FROM p WHERE p.org_id = i.org_id)",
+        "WITH p AS (SELECT id, org_id FROM projects) UPDATE invoices SET project_id = p.id FROM p WHERE p.org_id = invoices.org_id AND invoices.org_id = $1",
+        "WITH p AS (SELECT id, org_id FROM projects) DELETE FROM invoices WHERE org_id = $1 AND project_id IN (SELECT id FROM p WHERE org_id = $1)",
+        "WITH t AS (SELECT 1 AS x, 2 AS x) SELECT 1 FROM t",
+        "SELECT g FROM (SELECT x AS g FROM generate_series(1, 2) x) d",
+        "SELECT x FROM (VALUES (1)) v (x)",
+        "WITH p AS (SELECT name, org_id FROM projects) SELECT name FROM p WHERE org_id = $1 AND EXISTS (WITH p AS (SELECT 1 AS one) SELECT one FROM p)",
+        "CREATE TABLE copy (id INT)",
     ] {
         let expected: Vec<String> = match sql {
             s if s.ends_with("false") => read("projects", "org_id"),
@@ -1097,6 +1115,71 @@ fn tenant_scope_reports_statements_that_do_not_pin_the_tenant_key() {
             "INSERT INTO projects (id, org_id) VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET org_id = 1",
             vec!["UPDATE of `projects` does not set `org_id` from a parameter".into()],
         ),
+        ("WITH p AS (SELECT name, org_id FROM projects) SELECT name FROM p", read("projects", "org_id")),
+        (
+            "WITH p AS (SELECT name, id FROM projects) SELECT p.name FROM p JOIN invoices i ON i.project_id = p.id WHERE i.org_id = $1",
+            read("projects", "org_id"),
+        ),
+        (
+            "WITH u AS (SELECT id, org_id FROM projects UNION ALL SELECT id, 1 FROM invoices) SELECT id FROM u WHERE org_id = $1",
+            read("invoices", "org_id"),
+        ),
+        (
+            "WITH u AS (SELECT id, org_id FROM projects UNION ALL SELECT id FROM invoices) SELECT id FROM u WHERE org_id = $1",
+            [read("invoices", "org_id"), read("projects", "org_id")].concat(),
+        ),
+        (
+            "WITH x AS (SELECT p.name, p.org_id, i.org_id FROM projects p, invoices i WHERE p.org_id = $1) SELECT name FROM x",
+            read("invoices", "org_id"),
+        ),
+        (
+            "WITH RECURSIVE r AS (SELECT id, org_id FROM projects UNION ALL SELECT id, org_id FROM r) SELECT id FROM r WHERE org_id = $1",
+            read("projects", "org_id"),
+        ),
+        (
+            "SELECT name FROM (SELECT name, org_id, row_number() OVER () AS n FROM projects) r WHERE r.org_id = $1",
+            read("projects", "org_id"),
+        ),
+        (
+            "WITH p AS (SELECT name, org_id FROM projects LIMIT 10) SELECT name FROM p WHERE org_id = $1",
+            read("projects", "org_id"),
+        ),
+        (
+            "SELECT n FROM (SELECT max(org_id) AS org_id, count(*)::INT AS n FROM projects GROUP BY name) c WHERE c.org_id = $1",
+            read("projects", "org_id"),
+        ),
+        (
+            "SELECT n FROM (SELECT org_id, count(*)::INT AS n FROM projects GROUP BY ALL) c WHERE c.org_id = $1",
+            read("projects", "org_id"),
+        ),
+        (
+            "SELECT name FROM (SELECT DISTINCT ON (name) name, org_id FROM projects) d WHERE d.org_id = $1",
+            read("projects", "org_id"),
+        ),
+        (
+            "SELECT name FROM (SELECT * FROM projects JOIN invoices USING (id)) d WHERE d.org_id = $1",
+            [read("projects", "org_id"), read("invoices", "org_id")].concat(),
+        ),
+        (
+            "SELECT name FROM (SELECT d.* FROM (SELECT name, org_id, row_number() OVER () AS n FROM projects) d) e WHERE e.org_id = $1",
+            read("projects", "org_id"),
+        ),
+        (
+            "SELECT name FROM (SELECT (p).* FROM projects p) d WHERE d.org_id = $1",
+            read("projects", "org_id"),
+        ),
+        (
+            "SELECT name FROM (SELECT name, org_id FROM projects) WHERE org_id = $1",
+            read("projects", "org_id"),
+        ),
+        (
+            "WITH p AS (SELECT id, org_id FROM projects) MERGE INTO invoices i USING p ON i.project_id = p.id WHEN MATCHED THEN DELETE",
+            read("projects", "org_id"),
+        ),
+        (
+            "MERGE INTO invoices i USING (SELECT id, org_id FROM projects) p ON i.project_id = p.id WHEN MATCHED THEN DELETE",
+            read("projects", "org_id"),
+        ),
     ] {
         assert_eq!(found(sql, &orgs), expected, "{sql}");
     }
@@ -1109,6 +1192,13 @@ fn tenant_scope_reports_statements_that_do_not_pin_the_tenant_key() {
     assert_eq!(
         found(
             "SELECT id FROM sites WHERE org_id = $1 AND region = $2",
+            &regions
+        ),
+        Vec::<String>::new()
+    );
+    assert_eq!(
+        found(
+            "WITH s AS (SELECT id, org_id FROM sites WHERE region = $1) SELECT id FROM s WHERE org_id = $2",
             &regions
         ),
         Vec::<String>::new()

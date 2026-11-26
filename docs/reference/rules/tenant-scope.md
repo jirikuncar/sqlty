@@ -93,6 +93,22 @@ tenant keys is pinned, and a column is pinned when:
 - it equals a pinned tenant key of another table, through `=` or `USING`;
 - it is a tenant key of an enclosing query's row, which is judged on its own.
 
+A CTE or derived table that returns a tenant key leaves it to the query that reads it,
+which pins it as it pins a table's:
+
+```python
+from sqlty import SQL
+
+# error:
+recent = SQL[tuple[str]]("--sql\nWITH p AS (SELECT name, org_id FROM projects) SELECT name FROM p WHERE org_id = %s")
+
+# error: [tenant-scope] "`projects` is read without `projects.org_id = <parameter>`"
+leaked = SQL[tuple[str]]("--sql\nWITH p AS (SELECT name, org_id FROM projects) SELECT name FROM p")
+```
+
+A CTE whose rows depend on other tenants' rows is judged by its body: one with a window,
+`DISTINCT ON`, `LIMIT`, or a grouping that is not by the tenant key.
+
 A `LEFT JOIN`'s `ON` pins the joined table only, since every row of the left side is
 kept; a `RIGHT JOIN`'s pins the others, and a `FULL JOIN`'s none. A table with two
 tenant keys, such as `transfers (from_org, to_org)`, is pinned by either.
@@ -172,6 +188,7 @@ still skip the policy: connect as a role that has neither.
 ## Limits
 
 An `INSERT ... SELECT` is judged as the query it runs, and the tenant table itself may be
-inserted into freely. A CTE or derived table is judged by its own body: a pin in the query that reads it
-does not reach it, so pin the key inside the CTE. Views and `MERGE` are not judged.
+inserted into freely. A recursive CTE is judged by its own body: a pin in the query that
+reads it does not reach it, so pin the key inside the CTE. So is a CTE or derived table a
+`MERGE` reads. Views and `MERGE` itself are not judged.
 The rule runs for PostgreSQL, MySQL and SQLite, the dialects whose names sqlty checks.
