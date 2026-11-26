@@ -6,7 +6,7 @@
 //! relations that changed.
 
 use rustc_hash::{FxHashMap, FxHashSet};
-use std::ops::ControlFlow;
+use std::ops::{ControlFlow, Range};
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -52,6 +52,8 @@ pub(super) struct RawTable {
     pub(super) row_security: bool,
     /// `FORCE ROW LEVEL SECURITY`: the policies hold for the table's owner too.
     pub(super) force_row_security: bool,
+    /// The bytes of the latest statement that enabled, disabled or forced row-level security.
+    pub(super) row_security_at: Range<usize>,
     pub(super) policies: Vec<Policy>,
 }
 
@@ -161,6 +163,8 @@ pub(super) struct Op {
     pub(super) kind: OpKind,
     /// Bytes of the statement, which applying it takes time in proportion to.
     pub(super) size: usize,
+    /// Where the statement is in the schema.
+    pub(super) at: Range<usize>,
 }
 
 /// Why an `ALTER TABLE` operation did not apply.
@@ -209,6 +213,8 @@ pub(super) struct Loader {
     allowance: usize,
     /// Columns of the relations set so far, each time one is set.
     written: usize,
+    /// Where the statement being applied is in the schema.
+    pub(super) at: Range<usize>,
 }
 
 /// The most columns all relations hold besides the ones a schema could spell out (see
@@ -250,6 +256,7 @@ impl Loader {
             held: 0,
             allowance: 0,
             written: 0,
+            at: 0..0,
         }
     }
 
@@ -275,6 +282,7 @@ impl Loader {
             held: self.held,
             allowance: self.allowance,
             written: 0,
+            at: 0..0,
         }
     }
 
@@ -405,6 +413,7 @@ impl Loader {
     /// whatever it reads.
     pub(super) fn apply(&mut self, op: &Op, force: bool) -> bool {
         let path = op.path.clone();
+        self.at = op.at.clone();
         let blocked = match &op.kind {
             OpKind::Table(create, likes) => !self.create_table(create, likes, &path),
             OpKind::View(view, table) => !self.create_view(view, *table, &path, force),
@@ -464,9 +473,9 @@ impl Loader {
                 let Some(key) = self.table_key(table, &path) else {
                     return false;
                 };
-                let dialect = self.dialect;
+                let (dialect, at) = (self.dialect, self.at.clone());
                 self.change_table(key, |table| {
-                    policies::apply(&mut table.policies, stmt, dialect);
+                    policies::apply(&mut table.policies, stmt, dialect, at);
                 });
                 false
             }

@@ -57,6 +57,9 @@ pub struct Unit {
     pub assertions: Vec<Assertion>,
     /// A ```` ```sql migration ```` block: a migration run on top of `against.sql`.
     pub migration: bool,
+    /// A ```` ```sql schema ```` block: the schema itself, whose `-- error:` `sqlty check`
+    /// reports on it.
+    pub schema: bool,
 }
 
 impl Unit {
@@ -188,14 +191,14 @@ pub fn parse(path: &Path, text: &str) -> Vec<Section> {
                 .unwrap_or_else(|| panic!("{}:{}: unclosed code block", path.display(), i + 1));
             if indent.is_empty() && !info.split_whitespace().any(|word| word == "ignore") {
                 let section = &mut sections[*stack.last().unwrap()];
-                let migration = info.split_whitespace().any(|word| word == "migration");
+                let tag = |tag: &str| info.split_whitespace().any(|word| word == tag);
                 add_block(
                     section,
                     lang,
                     label.take(),
                     &lines[i + 1..end],
                     i + 2,
-                    migration,
+                    (tag("migration"), tag("schema")),
                 );
             }
             label = None;
@@ -245,7 +248,7 @@ fn add_block(
     label: Option<String>,
     body: &[&str],
     start: usize,
-    migration: bool,
+    tags: (bool, bool),
 ) {
     if let Some(label) = label {
         section.files.insert(label, body.join("\n"));
@@ -255,7 +258,7 @@ fn add_block(
     } else if lang == "python" || lang == "py" {
         add_python(section, body, start);
     } else if lang == "sql" {
-        add_sql(section, body, start, migration);
+        add_sql(section, body, start, tags);
     }
 }
 
@@ -316,10 +319,11 @@ fn add_python(section: &mut Section, body: &[&str], start: usize) {
         lines: all,
         assertions,
         migration: false,
+        schema: false,
     });
 }
 
-fn add_sql(section: &mut Section, body: &[&str], start: usize, migration: bool) {
+fn add_sql(section: &mut Section, body: &[&str], start: usize, (migration, schema): (bool, bool)) {
     let mut lines = Vec::new();
     let mut assertions: Vec<Assertion> = Vec::new();
     let mut pending: Vec<usize> = Vec::new();
@@ -347,6 +351,7 @@ fn add_sql(section: &mut Section, body: &[&str], start: usize, migration: bool) 
             lines,
             assertions,
             migration,
+            schema,
         });
     }
 }

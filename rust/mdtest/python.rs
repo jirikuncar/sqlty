@@ -92,6 +92,17 @@ impl harness::Runner for Python {
                     .flatten()
                     .collect()
             }
+            _ if unit.schema => {
+                let types = sql::types(section, Vec::new());
+                let overrides = analyzer::TypeOverrides::new(&types, run.dialect)?;
+                let (schema, _) =
+                    analyzer::load_schema_with_overrides(&text, run.dialect, overrides);
+                let files = [(text.as_str(), &run.rules)];
+                sqlty_python::migrations::check_schema(&schema, &files)
+                    .into_iter()
+                    .flatten()
+                    .collect()
+            }
             (None, "sql") => run.queries(&text, own)?,
             (None, _) => run.check(&text, own)?,
             // `sqlty breaking`: what the other schema adds.

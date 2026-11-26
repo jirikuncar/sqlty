@@ -365,11 +365,27 @@ function refresh() {
     return;
   }
   current = answer;
-  const model = models.python;
+  const schema = answer.schema_diagnostics ?? [];
+  marked(models.python, answer.diagnostics);
+  marked(models.schema, schema);
+  listed(problems, [...answer.diagnostics, ...schema.map((found) => ({ ...found, file: "schema" }))], "No problems.");
+  root.querySelector('[data-tab="problems"]').textContent = `Problems (${answer.diagnostics.length + schema.length})`;
+  root.querySelector("[data-types]").replaceChildren(...answer.queries.map(describe));
+  const json = [
+    ...answer.diagnostics.map((found) => checked(found, models.python, "queries.py")),
+    ...schema.map((found) => checked(found, models.schema, "schema.sql")),
+  ];
+  output.setValue(JSON.stringify(json, null, 2));
+  refreshed.fire();
+  refreshBreaking(answer.diagnostics.some((found) => found.rule === "internal-error"));
+}
+
+// Show `diagnostics` as markers of `model`.
+function marked(model, diagnostics) {
   monaco.editor.setModelMarkers(
     model,
     "sqlty",
-    answer.diagnostics.map((found) => {
+    diagnostics.map((found) => {
       const start = model.getPositionAt(found.start);
       const end = model.getPositionAt(found.end);
       return {
@@ -384,12 +400,6 @@ function refresh() {
       };
     }),
   );
-  listed(problems, answer.diagnostics, "No problems.");
-  root.querySelector('[data-tab="problems"]').textContent = `Problems (${answer.diagnostics.length})`;
-  root.querySelector("[data-types]").replaceChildren(...answer.queries.map(describe));
-  output.setValue(JSON.stringify(answer.diagnostics.map((found) => checked(found, model)), null, 2));
-  refreshed.fire();
-  refreshBreaking(answer.diagnostics.some((found) => found.rule === "internal-error"));
 }
 
 // What schema.sql breaks in code that before.sql checks clean, as `sqlty breaking` reports it.
@@ -415,23 +425,25 @@ function refreshBreaking(crashed) {
   tab.textContent = `Breaking (${answer.diagnostics.length})`;
 }
 
-// `diagnostics` as items of `list` that go to their line, or `empty` when there are none.
+// `diagnostics` as items of `list` that go to their line, in queries.py or the `file` of
+// `models` they name, or `empty` when there are none.
 function listed(list, diagnostics, empty) {
-  const model = models.python;
   list.replaceChildren(
     ...diagnostics.map((found) => {
+      const file = found.file ?? "python";
       const item = document.createElement("li");
       item.dataset.severity = found.severity;
-      const at = model.getPositionAt(found.start);
+      const at = models[file].getPositionAt(found.start);
       const rule = Object.assign(document.createElement("a"), {
         href: new URL(`../reference/rules/${found.rule}/`, location.href).href,
         textContent: found.rule,
         title: `The ${found.rule} rule`,
       });
       const button = Object.assign(document.createElement("button"), { type: "button" });
-      button.append(tag("span", `${at.lineNumber}:${at.column}`, "sqlty-at"), " ", ...coded(found.message));
+      const where = `${found.file ? "schema.sql:" : ""}${at.lineNumber}:${at.column}`;
+      button.append(tag("span", where, "sqlty-at"), " ", ...coded(found.message));
       button.addEventListener("click", () => {
-        open("python");
+        open(file);
         editor.setPosition(at);
         editor.revealPositionInCenter(at);
         editor.focus();
@@ -444,13 +456,13 @@ function listed(list, diagnostics, empty) {
 }
 
 // A diagnostic as `sqlty check --output-format json` prints it.
-function checked(found, model) {
+function checked(found, model, file) {
   const at = (offset) => {
     const { lineNumber, column } = model.getPositionAt(offset);
     return { line: lineNumber, column };
   };
   return {
-    file: "queries.py",
+    file,
     rule: found.rule,
     message: found.message,
     severity: found.severity,

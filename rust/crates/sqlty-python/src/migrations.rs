@@ -33,27 +33,75 @@ pub fn check_migrations_with(
     sqlty_sql::migrations::check_with(baseline, &sources, writers)
         .into_iter()
         .zip(files)
-        .map(|(found, (sql, rules))| {
-            let lines = LineIndex::new(sql);
-            let found: Vec<Diagnostic> = found
-                .into_iter()
-                .filter(|finding| rules.is_enabled(finding.rule))
-                .map(|finding| Diagnostic {
-                    rule: finding.rule,
-                    message: finding.message,
-                    severity: rules.severity(finding.rule),
-                    line: lines.line_at(finding.span.start),
-                    span: finding.span,
-                    fix: Vec::new(),
-                })
-                .collect();
-            // Each finding spans its statement.
-            let statements: Vec<_> = found.iter().map(|found| found.span.clone()).collect();
-            apply_sql(&sql_ignores(sql, &statements), found, rules)
-                .into_iter()
-                .filter(|diagnostic| diagnostic.rule != Rule::UnusedIgnore)
-                .collect()
+        .map(|(found, (sql, rules))| diagnosed(sql, found, rules))
+        .collect()
+}
+
+/// The schema checks of `sqlty check` (`tenant-policy`) of each of `files`, whose texts
+/// joined with `\n` are the SQL `schema` was loaded from, each with its rules.
+/// `-- sqlty: ignore[rule]` drops a diagnostic as in [`check_migrations`].
+///
+/// Example:
+///
+/// ```
+/// use sqlty_python::migrations::check_schema;
+/// use sqlty_python::rules::RuleConfig;
+/// use sqlty_sql::analyzer::load_schema_with_skipped;
+///
+/// let sql = "CREATE TABLE notes (org_id INT);\nALTER TABLE notes ENABLE ROW LEVEL SECURITY;\n\
+///            CREATE POLICY t ON notes USING (org_id = current_setting('app.org')::int);";
+/// let (schema, _) = load_schema_with_skipped(sql, "postgres");
+/// let rules = RuleConfig::default();
+/// let found = check_schema(&schema, &[(sql, &rules)]);
+/// assert_eq!(found[0][0].line, 2);
+/// ```
+pub fn check_schema(
+    schema: &sqlty_sql::analyzer::SchemaData,
+    files: &[(&str, &RuleConfig)],
+) -> Vec<Vec<Diagnostic>> {
+    let mut findings = schema.tenant_policies().into_iter().peekable();
+    let mut start = 0;
+    files
+        .iter()
+        .map(|(sql, rules)| {
+            let end = start + sql.len();
+            let mut own = Vec::new();
+            while let Some(found) = findings.next_if(|found| found.span.start <= end) {
+                if found.span.start >= start && found.span.end <= end {
+                    let span = found.span.start - start..found.span.end - start;
+                    own.push(sqlty_sql::migrations::Finding { span, ..found });
+                }
+            }
+            start = end + 1;
+            diagnosed(sql, own, rules)
         })
+        .collect()
+}
+
+/// The diagnostics of `found` in the SQL file `sql`, each spanning its statement, with the
+/// file's severities and suppressions.
+fn diagnosed(
+    sql: &str,
+    found: Vec<sqlty_sql::migrations::Finding>,
+    rules: &RuleConfig,
+) -> Vec<Diagnostic> {
+    let lines = LineIndex::new(sql);
+    let found: Vec<Diagnostic> = found
+        .into_iter()
+        .filter(|finding| rules.is_enabled(finding.rule))
+        .map(|finding| Diagnostic {
+            rule: finding.rule,
+            message: finding.message,
+            severity: rules.severity(finding.rule),
+            line: lines.line_at(finding.span.start),
+            span: finding.span,
+            fix: Vec::new(),
+        })
+        .collect();
+    let statements: Vec<_> = found.iter().map(|found| found.span.clone()).collect();
+    apply_sql(&sql_ignores(sql, &statements), found, rules)
+        .into_iter()
+        .filter(|diagnostic| diagnostic.rule != Rule::UnusedIgnore)
         .collect()
 }
 

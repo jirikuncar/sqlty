@@ -56,6 +56,7 @@ stale-type = "error"
 | [`entity-mismatch`](rules/entity-mismatch.md) | Names | ignore | no | Comparison between columns holding keys of different tables |
 | [`foreign-key-mismatch`](rules/foreign-key-mismatch.md) | Names | warn | no | Foreign key column compared with a column it does not reference |
 | [`tenant-scope`](rules/tenant-scope.md) | Names | error | no | Query on a tenant table does not filter by the tenant key |
+| [`tenant-policy`](rules/tenant-policy.md) | Names | warn | no | Row-level security does not scope a tenant table for every role and command |
 | [`rejected-query`](rules/rejected-query.md) | Names | error | no | Query the database rejects for a reason no other rule names |
 | [`stale-rewrite`](rules/stale-rewrite.md) | Rewrite | warn | yes | --sql string not wrapped in SQL[T] |
 | [`stale-type`](rules/stale-type.md) | Rewrite | warn | yes | SQL[tuple[...]] wider than the inferred row type |

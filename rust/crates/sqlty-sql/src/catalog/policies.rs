@@ -6,7 +6,7 @@
 //! key. A table whose policies pin one for every command, with `FORCE ROW LEVEL SECURITY`,
 //! is scoped by the database: <https://www.postgresql.org/docs/17/ddl-rowsecurity.html>.
 
-use std::ops::ControlFlow;
+use std::ops::{ControlFlow, Range};
 
 use sqlparser::ast::{
     visit_expressions, visit_expressions_mut, AlterPolicy, AlterPolicyOperation, BinaryOperator,
@@ -28,6 +28,8 @@ pub(super) struct Policy {
     public: bool,
     using: Option<Expr>,
     with_check: Option<Expr>,
+    /// The bytes of the latest `CREATE` or `ALTER POLICY` that set it.
+    at: Range<usize>,
 }
 
 /// A `CREATE`, `ALTER` or `DROP POLICY` (by name), or a policy statement sqlparser does
@@ -40,7 +42,12 @@ pub(super) enum Change {
 }
 
 /// Applies a `CREATE`, `ALTER` or `DROP POLICY` to the policies of its table.
-pub(super) fn apply(policies: &mut Vec<Policy>, change: &Change, dialect: SqlDialect) {
+pub(super) fn apply(
+    policies: &mut Vec<Policy>,
+    change: &Change,
+    dialect: SqlDialect,
+    at: Range<usize>,
+) {
     match change {
         Change::Create(create) => {
             let name = fold(&create.name, dialect);
@@ -54,6 +61,7 @@ pub(super) fn apply(policies: &mut Vec<Policy>, change: &Change, dialect: SqlDia
                 public: is_public(create.to.as_deref()),
                 using: create.using.clone(),
                 with_check: create.with_check.clone(),
+                at,
             });
         }
         Change::Alter(alter) => {
@@ -61,6 +69,7 @@ pub(super) fn apply(policies: &mut Vec<Policy>, change: &Change, dialect: SqlDia
             let Some(policy) = policies.iter_mut().find(|policy| policy.name == name) else {
                 return;
             };
+            policy.at = at;
             match &alter.operation {
                 AlterPolicyOperation::Rename { new_name } => policy.name = fold(new_name, dialect),
                 AlterPolicyOperation::Apply {
@@ -85,6 +94,7 @@ pub(super) fn apply(policies: &mut Vec<Policy>, change: &Change, dialect: SqlDia
             public: true,
             using: None,
             with_check: None,
+            at,
         }),
     }
 }
@@ -151,31 +161,72 @@ impl Policy {
 /// permissive one does (none at all denies every row). A row an `INSERT` or `UPDATE`
 /// writes passes `WITH CHECK`, or `USING` when the policy has none.
 pub(super) fn enforce(policies: &[Policy], keys: &[Vec<String>], functions: &[String]) -> bool {
+    gaps(policies, keys, functions).is_empty()
+}
+
+/// A permissive policy that lets a command through for rows of any tenant.
+pub(super) struct Gap<'p> {
+    pub policy: &'p Policy,
+    pub command: CreatePolicyCommand,
+    /// Whether it is the rows the command writes that the policy does not pin.
+    pub written: bool,
+}
+
+/// What keeps [`enforce`] from holding: for each command no restrictive policy scopes, the
+/// permissive policies that do not, in order.
+pub(super) fn gaps<'p>(
+    policies: &'p [Policy],
+    keys: &[Vec<String>],
+    functions: &[String],
+) -> Vec<Gap<'p>> {
     use CreatePolicyCommand::{Delete, Insert, Select, Update};
     let pins = |expr: Option<&Expr>| {
         let pinned = expr.map(|expr| pinned(expr, functions)).unwrap_or_default();
         keys.iter()
             .any(|key| key.iter().all(|column| pinned.contains(column)))
     };
-    let scoped = |policy: &Policy, command: CreatePolicyCommand| {
-        let new_rows = || pins(policy.with_check.as_ref().or(policy.using.as_ref()));
-        match command {
-            Insert => new_rows(),
-            Update => pins(policy.using.as_ref()) && new_rows(),
-            _ => pins(policy.using.as_ref()),
-        }
+    // `Some(written)` when the policy lets the command through for another tenant's rows.
+    let gap = |policy: &Policy, command: CreatePolicyCommand| {
+        let reads = !matches!(command, Insert) && !pins(policy.using.as_ref());
+        let writes = matches!(command, Insert | Update)
+            && !pins(policy.with_check.as_ref().or(policy.using.as_ref()));
+        (reads || writes).then_some(!reads)
     };
-    [Select, Insert, Update, Delete].into_iter().all(|command| {
-        let applies = policies
+    let mut found = Vec::new();
+    for command in [Select, Insert, Update, Delete] {
+        let applies: Vec<&Policy> = policies
             .iter()
-            .filter(|policy| policy.command.is_none_or(|own| own == command));
-        let (restrictive, permissive): (Vec<&Policy>, Vec<&Policy>) =
-            applies.partition(|policy| policy.restrictive);
-        restrictive
+            .filter(|policy| policy.command.is_none_or(|own| own == command))
+            .collect();
+        let restricted = applies
             .iter()
-            .any(|policy| policy.public && scoped(policy, command))
-            || permissive.iter().all(|policy| scoped(policy, command))
-    })
+            .any(|policy| policy.restrictive && policy.public && gap(policy, command).is_none());
+        if restricted {
+            continue;
+        }
+        for policy in applies.into_iter().filter(|policy| !policy.restrictive) {
+            if let Some(written) = gap(policy, command) {
+                found.push(Gap {
+                    policy,
+                    command,
+                    written,
+                });
+            }
+        }
+    }
+    found
+}
+
+impl Policy {
+    /// The policy's name, empty for one sqlparser could not read.
+    pub(super) fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// The bytes of the latest statement that set it.
+    pub(super) fn at(&self) -> Range<usize> {
+        self.at.clone()
+    }
 }
 
 /// The columns `expr` compares to a session value with `=` in a conjunct, folded.

@@ -61,6 +61,7 @@ static DROP_EXPRESSION: LazyLock<regex::Regex> =
 /// Apply each statement as it is read, so a parsed statement lives only until it is
 /// applied; the ones waiting on a later definition are returned for [`Loader::run`].
 pub(super) fn read_statements<'a>(
+    source: &'a str,
     statements: impl IntoIterator<Item = ddl::Statement<'a>>,
     dialect: SqlDialect,
     loader: &mut Loader,
@@ -89,6 +90,7 @@ pub(super) fn read_statements<'a>(
                 path: path.clone(),
                 kind,
                 size: stmt.size(),
+                at: stmt.range_in(source).unwrap_or_default(),
             };
             if !loader.apply(&op, false) {
                 pending.push(op);
@@ -405,7 +407,13 @@ pub(crate) fn load_with(
     static BUILTIN: LazyLock<Loader> = LazyLock::new(|| {
         let mut loader = Loader::new(SqlDialect::Postgres);
         let builtin = ddl::statements(BUILTIN_SQL, false);
-        let ops = read_statements(builtin, SqlDialect::Postgres, &mut loader, &mut Vec::new());
+        let ops = read_statements(
+            BUILTIN_SQL,
+            builtin,
+            SqlDialect::Postgres,
+            &mut loader,
+            &mut Vec::new(),
+        );
         loader.run(ops);
         loader.search_path = vec!["public".to_string()];
         loader
@@ -420,7 +428,7 @@ pub(crate) fn load_with(
     loader.allow(schema_sql);
     let mut skipped = Vec::new();
     let statements = ddl::statements(schema_sql, dialect == SqlDialect::MySql);
-    let ops = read_statements(statements, dialect, &mut loader, &mut skipped);
+    let ops = read_statements(schema_sql, statements, dialect, &mut loader, &mut skipped);
     loader.run(ops);
     loader.resolve_foreign_keys();
     skipped.append(&mut loader.skipped);

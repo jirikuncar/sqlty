@@ -93,6 +93,18 @@ impl Loader {
         if unsupported {
             self.skipped.push(("table", alter.name.to_string()));
         }
+        let row_security = alter.operations.iter().any(|op| {
+            matches!(
+                op,
+                AlterTableOperation::EnableRowLevelSecurity
+                    | AlterTableOperation::DisableRowLevelSecurity
+                    | AlterTableOperation::ForceRowLevelSecurity
+                    | AlterTableOperation::NoForceRowLevelSecurity
+            )
+        });
+        if row_security {
+            root.row_security_at = self.at.clone();
+        }
         let mut changed = vec![(key.clone(), root)];
         if !alter.only {
             let children = self.descendants(&key).into_iter().filter_map(|child| {

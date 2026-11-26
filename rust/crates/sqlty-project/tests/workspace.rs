@@ -56,3 +56,29 @@ fn a_database_without_schema_files_has_no_schema_source() {
     fs::remove_dir_all(&root).expect("removes");
     assert_eq!(databases, ["default"]);
 }
+
+#[test]
+fn a_schema_buffer_has_its_tenant_policies_while_it_matches_the_file() {
+    let schema = "CREATE TABLE notes (id INT, org_id INT);\nALTER TABLE notes ENABLE ROW LEVEL SECURITY;\nCREATE POLICY t ON notes USING (org_id = current_setting('app.org')::int);\n";
+    let root = project(
+        "schema-checks",
+        &[
+            ("sqlty.toml", "schema = \"schema.sql\"\n"),
+            ("schema.sql", schema),
+        ],
+    );
+    let mut workspace = open(&root);
+    let path = root.join("schema.sql");
+    let rules = |text: &str, workspace: &mut Workspace| -> Vec<(String, usize)> {
+        let found = workspace.check(&path, text).expect("checks");
+        found
+            .into_iter()
+            .map(|found| (found.rule.name().to_string(), found.line))
+            .collect()
+    };
+    let saved = rules(schema, &mut workspace);
+    let edited = rules(&format!("\n{schema}"), &mut workspace);
+    fs::remove_dir_all(&root).expect("removes");
+    assert_eq!(saved, [("tenant-policy".to_string(), 2)]);
+    assert_eq!(edited, []);
+}
