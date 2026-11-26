@@ -169,6 +169,7 @@ def test_unknown_keys_raise_config_error_naming_the_file(tmp_path):
         ("[tool.sqlty.deprecated-columns]\n'u.e' = 'x'\n", "'u.e' must be a table of use"),
         ("[tool.sqlty.deprecated-columns]\n'u.e' = { uses = 'f' }\n", "did you mean 'use'?"),
         ("[tool.sqlty.deprecated-columns]\n'u.e' = { use = 1 }\n", "'u.e' use must be a string"),
+        ("[tool.sqlty.tenancy]\ntabel = 'orgs'\n", "did you mean 'table'?"),
         ("[[tool.sqlty.functions]]\nimport-path = 'a.b'\nquery = 'q'\n", "unknown key 'query'"),
         (
             "[[tool.sqlty.functions]]\nimport_path = 'a.b'\nquery-param = 'q'\n",

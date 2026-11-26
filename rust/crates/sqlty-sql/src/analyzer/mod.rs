@@ -46,6 +46,7 @@ mod star_expand;
 mod suggest;
 mod table_functions;
 mod tables;
+mod tenancy;
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod test_support;
@@ -88,8 +89,8 @@ pub use tables::{query_tables, TableRef};
 use typed::Typed;
 
 pub use crate::catalog::{
-    deprecated_type, Catalog as SchemaData, Columns, Join, NameRef, RelationKind, RelationRef,
-    SchemaColumn, TypeOverrides,
+    deprecated_type, tenancy_type, Catalog as SchemaData, Columns, Join, NameRef, RelationKind,
+    RelationRef, SchemaColumn, TypeOverrides,
 };
 
 /// A loaded schema, shared so callers can cache it across queries.

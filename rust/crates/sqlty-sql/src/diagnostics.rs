@@ -342,6 +342,7 @@ mod tests {
                 "unproven-join",
                 "entity-mismatch",
                 "foreign-key-mismatch",
+                "tenant-scope",
                 "rejected-query",
             ]
         );

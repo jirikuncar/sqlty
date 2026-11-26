@@ -116,6 +116,7 @@ A directory with more than one file reads the first of `sqlty.toml`,
 | [`functions`](#functions) | array of tables | `[]` | `check` | Helper functions whose string argument is a query |
 | [`types`](#types) | table of SQL type or `table.column` = Python type | `{}` | `rewrite`, `check` | Python types a converter above the driver gives a SQL type or a column |
 | [`deprecated-columns`](#deprecated-columns) | table of `table.column` = `{ use, remove-after }` | `{}` | `check` | Columns scheduled for removal: `deprecated-column` reports every read |
+| [`tenancy`](#tenancy) | table of `table`, `exclude`, `columns` | none | `check` | The tenant table: `tenant-scope` reports queries that do not filter by its key |
 | [`format-command`](#format-command) | list of strings | none | `rewrite`, `check --fix` | Formatter run on each file `rewrite` or `check --fix` changes, with the path appended |
 | [`extend`](#extend) | string | none | `rewrite`, `strip`, `check`, magic codec | Another configuration file this one is applied on top of, relative to this file |
 | [`databases`](#databases) | table of tables | `{}` | `rewrite`, `check` | Named databases, each with its own `dialect`, `schema` and the files it applies to |
@@ -420,6 +421,30 @@ reads one; writing it stays allowed until the migration that drops it.
 | `remove-after` | The date the column goes, shown in the message |
 
 Both are optional. A schema in the key is dropped, as in [`types`](#types).
+
+## `tenancy`
+
+The tenant table of a multi-tenant schema. The
+[`tenant-scope`](rules/tenant-scope.md) rule reports every query that reads, updates
+or deletes rows of a tenant table without filtering by its tenant key.
+
+```toml
+[tool.sqlty.tenancy]
+table = "orgs"
+exclude = ["audit_log.org_id"]
+columns = ["events.org"]
+```
+
+| Key | Value |
+|-----|-------|
+| `table` | The tenant table, required |
+| `exclude` | `table.column` keys of data shared across tenants |
+| `columns` | `table.column` tenant ids without a foreign key to `table` |
+
+The tenant keys are the primary key of `table` and each foreign key to it, less
+those with a column in `exclude`, plus each column of `columns`. `table` is looked
+up as a query names it; a schema in an `exclude` or `columns` key is dropped, as in
+[`types`](#types).
 
 ## `format-command`
 
