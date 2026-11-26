@@ -1,8 +1,11 @@
 name: Fuzz
 
-# On demand: the property tests of rust/fuzz, the analyzer compared with PostgreSQL among them,
-# and the Hypothesis tests of tests/ generating cases (the suite runs their examples only).
+# Nightly, with Fuzz the engine, and on demand: the property tests of rust/fuzz, the analyzer
+# compared with PostgreSQL among them, and the Hypothesis tests of tests/ generating cases (the
+# suite runs their examples only).
 on:
+  schedule:
+    - cron: "41 3 * * *"
   workflow_dispatch:
     inputs:
       examples:
@@ -35,7 +38,7 @@ jobs:
 
     env:
       SQLTY_PG_DSN: postgresql://postgres:postgres@localhost:5432/postgres
-      SQLTY_FUZZ_EXAMPLES: ${{ inputs.examples }}
+      SQLTY_FUZZ_EXAMPLES: ${{ inputs.examples || '2000' }}
       SQLTY_FUZZ_PYTHON: ${{ github.workspace }}/.venv/bin/python
 
     steps:
@@ -65,7 +68,7 @@ jobs:
     name: Fuzz the Python checks
     runs-on: ubuntu-latest
     env:
-      SQLTY_FUZZ_EXAMPLES: ${{ inputs.examples }}
+      SQLTY_FUZZ_EXAMPLES: ${{ inputs.examples || '2000' }}
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

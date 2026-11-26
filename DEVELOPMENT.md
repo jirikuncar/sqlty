@@ -201,9 +201,9 @@ SQLTY_FUZZ_EXAMPLES=2000 SQLTY_PG_DSN=postgresql:///scratch SQLTY_FUZZ_PYTHON=.v
 
 The server's tables are dropped and recreated, so point it at a scratch
 database. `SQLTY_FUZZ_PYTHON` must import this checkout's `sqlty` dependencies;
-each property prints how many distinct cases it ran (`--nocapture`). In CI, run the `Fuzz`
-workflow by hand (Actions, Fuzz, Run workflow); a failure prints the case it
-shrank to and the `PROPTEST_RNG_SEED` that replays it. The case belongs in an
+each property prints how many distinct cases it ran (`--nocapture`). In CI, the `Fuzz`
+workflow runs every night, or by hand (Actions, Fuzz, Run workflow); a failure prints the
+case it shrank to and the `PROPTEST_RNG_SEED` that replays it. The case belongs in an
 mdtest next to the fix.
 
 `rust/fuzz` feeds every playground request (`analyze`, `complete`, `hover`,
