@@ -48,9 +48,9 @@ queries as you type. It runs in your browser. The engine is compiled to
     </span>
     <span class="sqlty-status" data-link-status role="status"></span>
   </div>
-  <form class="sqlty-ask" id="sqlty-ask" data-ask popover aria-label="Ask for a query">
-    <input type="text" data-ask-question placeholder="Ask for a query, or put the cursor on a # comment in queries.py" aria-label="Question">
-    <select data-ask-model aria-label="Model"></select>
+  <form class="sqlty-ask" id="sqlty-ask" data-ask popover aria-label="Ask for a query" toolname="sqlty_ask" tooldescription="Fill in a question for a model that runs in the page to answer with a SQL query, checked by sqlty against the schema and added to queries.py. Submitting downloads the chosen model the first time.">
+    <input type="text" name="question" data-ask-question placeholder="Ask for a query, or put the cursor on a # comment in queries.py" aria-label="Question">
+    <select name="model" data-ask-model aria-label="Model"></select>
     <button type="submit" class="sqlty-button sqlty-button--primary">Ask</button>
     <span class="sqlty-status" data-ask-status role="status"></span>
   </form>

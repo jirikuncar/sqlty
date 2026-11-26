@@ -1,0 +1,48 @@
+{
+  "entries": [
+    {
+      "identifier": "urn:air:sqlty.kuncar.dev:sqlty:skill",
+      "displayName": "SQLTy",
+      "type": "application/agent-skills+md",
+      "url": "https://raw.githubusercontent.com/jirikuncar/sqlty/main/skills/sqlty/SKILL.md",
+      "description": "Write, type and check raw SQL in Python with SQLTy.",
+      "representativeQueries": [
+        "type-check raw SQL strings in Python",
+        "infer Python row types from a SQL query"
+      ]
+    },
+    {
+      "identifier": "urn:air:sqlty.kuncar.dev:sqlty-check:skill",
+      "displayName": "SQLTy check",
+      "type": "application/agent-skills+md",
+      "url": "https://raw.githubusercontent.com/jirikuncar/sqlty/main/skills/sqlty-check/SKILL.md",
+      "description": "Run sqlty check and act on its diagnostics, name row types and check query parameters.",
+      "representativeQueries": [
+        "fix an unknown-column diagnostic from sqlty check",
+        "check the parameters of a SQL query in Python"
+      ]
+    },
+    {
+      "identifier": "urn:air:sqlty.kuncar.dev:sqlty-adopt:skill",
+      "displayName": "Adopt SQLTy",
+      "type": "application/agent-skills+md",
+      "url": "https://raw.githubusercontent.com/jirikuncar/sqlty/main/skills/sqlty-adopt/SKILL.md",
+      "description": "Introduce SQLTy into an existing Python project with raw SQL queries.",
+      "representativeQueries": [
+        "add SQL type checking to an existing Python project",
+        "configure sqlty for my schema and migrations"
+      ]
+    },
+    {
+      "identifier": "urn:air:sqlty.kuncar.dev:sqlty-breaking:skill",
+      "displayName": "SQLTy breaking changes",
+      "type": "application/agent-skills+md",
+      "url": "https://raw.githubusercontent.com/jirikuncar/sqlty/main/skills/sqlty-breaking/SKILL.md",
+      "description": "Check that a schema change doesn't break the queries running during a rolling deploy.",
+      "representativeQueries": [
+        "will this migration break deployed queries",
+        "plan an expand and contract migration"
+      ]
+    }
+  ]
+}

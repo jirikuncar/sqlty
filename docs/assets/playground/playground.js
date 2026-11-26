@@ -763,6 +763,30 @@ function resizable(handle, panel) {
   });
 }
 
+// WebMCP, where the browser has it: `sqlty check` for an agent, without touching the editor.
+document.modelContext
+  ?.registerTool({
+    name: "sqlty_check",
+    description: "Type-check the SQL strings in Python source against a SQL schema with sqlty, and return the diagnostics. Arguments left out come from the playground's editor.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        source: { type: "string", description: "Python source with SQL strings marked --sql" },
+        schema: { type: "string", description: "CREATE TABLE statements" },
+        dialect: { type: "string", enum: [...dialect.options].map((found) => found.value) },
+      },
+    },
+    annotations: { readOnlyHint: true, untrustedContentHint: true },
+    execute: async ({ source, schema, dialect: chosen } = {}) => {
+      const asked = request("analyze");
+      const answer = ask({ ...asked, source: source ?? asked.source, schema: schema ?? asked.schema, dialect: chosen ?? asked.dialect });
+      if (answer.error) return JSON.stringify({ error: answer.error });
+      const found = answer.diagnostics.map(({ rule, message, severity, line }) => ({ rule, message, severity, line }));
+      return JSON.stringify({ diagnostics: found });
+    },
+  })
+  ?.catch(console.error);
+
 if (!new URLSearchParams(location.search).has("embed")) asking(root.querySelector("[data-ask]"), root.querySelector("[data-ask-open]"));
 
 // Natural language to SQL with a model that runs in the page (ask.js). Nothing downloads until

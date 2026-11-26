@@ -7,3 +7,4 @@ User-agent: Claude-User
 Allow: /
 
 Sitemap: https://sqlty.kuncar.dev/sitemap.xml
+Agentmap: https://sqlty.kuncar.dev/ard.json
