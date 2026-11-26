@@ -48,6 +48,7 @@ command without adding it, or outside Python:
 ```bash
 uvx sqlty check                     # the Python package, in a throwaway environment
 brew install jirikuncar/sqlty/sqlty # the native executable, from Homebrew
+npx @sqlty/cli check                # the native executable, from npm
 ```
 
 The native executable reads your project as the Python package does. It takes the

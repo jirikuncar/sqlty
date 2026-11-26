@@ -131,7 +131,7 @@ def npm(version: str, work: Path) -> None:
     smoke(work / "node_modules" / package / "bin" / executable, version, work)
     found = run(node, work / "node_modules/@sqlty/cli/bin/sqlty.js", "version").strip()
     if found != f"sqlty {version}":
-        sys.exit(f"npx @sqlty/cli version: {found}")
+        sys.exit(f"@sqlty/cli/bin/sqlty.js version: {found}")
     script = WASM
     for name, value in (("VERSION", version), ("QUERY", QUERY), ("REWRITTEN", REWRITTEN)):
         script = script.replace(name, json.dumps(value))
