@@ -2142,6 +2142,31 @@ def test_check_reads_the_named_queries_of_query_files(tmp_path, monkeypatch, cap
     assert _run(["check", "notes.sql", "migrations"], capsys)[:2] == (0, "")
 
 
+def test_check_reports_tenant_policies_on_the_schema_files(tmp_path, monkeypatch, capsys) -> None:
+    (tmp_path / "sqlty.toml").write_text('schema = "db/"\n')
+    (tmp_path / "db").mkdir()
+    (tmp_path / "db" / "001.sql").write_text("CREATE TABLE notes (id INT, org_id INT);\n")
+    (tmp_path / "db" / "002.sql").write_text(
+        "ALTER TABLE notes ENABLE ROW LEVEL SECURITY;\n"
+        "CREATE POLICY t ON notes USING (org_id = current_setting('app.org')::int);\n"
+    )
+    (tmp_path / "app").mkdir()
+    (tmp_path / "app" / "q.py").write_text(
+        'from sqlty import SQL\nq = SQL[tuple[int | None]]("--sql\\nSELECT id FROM notes WHERE org_id = %s")\n'
+    )
+    monkeypatch.chdir(tmp_path)
+
+    expected = f"db{os.sep}002.sql:1: [tenant-policy] `notes` has row-level security without `FORCE ROW LEVEL SECURITY`, so its owner sees every tenant"
+    for paths in (["."], ["db"], [str(Path("db/002.sql"))]):
+        code, out, _ = _run(["check", *paths], capsys)
+        assert (code, out.splitlines()) == (0, [expected, "Found 1 warning(s)"])
+    assert _run(["check", "app"], capsys)[:2] == (0, "")
+    (tmp_path / "db" / "002.sql").write_text(
+        "-- sqlty: ignore[tenant-policy]\n" + (tmp_path / "db" / "002.sql").read_text()
+    )
+    assert _run(["check", "."], capsys)[:2] == (0, "")
+
+
 def test_unknown_query_format_is_an_error(tmp_path, monkeypatch, capsys) -> None:
     _project(tmp_path, 'query-format = "aiosq"\n')
     monkeypatch.chdir(tmp_path)

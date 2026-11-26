@@ -450,6 +450,9 @@ PostgreSQL policy compares to a session value (see
 up as a query names it; a schema in an `exclude` or `columns` key is dropped, as in
 [`types`](#types).
 
+[`tenant-policy`](rules/tenant-policy.md) reports, on the schema files, a tenant
+table whose row-level security does not scope every role and command to one tenant.
+
 ## `format-command`
 
 A formatter `rewrite` and `check --fix` run on each file they change, with the

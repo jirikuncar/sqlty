@@ -201,6 +201,8 @@ its row to the table of `docs/reference/rules.md`.
   In a ```` ```sql migration ```` block, `-- error:` asserts what the migration
   rules report for the block's statements that `against.sql` does not have
   (`_core.check_migrations()`).
+- In a ```` ```sql schema ```` block, `-- error:` asserts what `sqlty check` reports on
+  the block as the schema itself (`migrations::check_schema`), such as `tenant-policy`.
 
 ````markdown
 ## Schema-based TypedDict mismatch

@@ -257,6 +257,7 @@ def exercise(browser: Browser, url: str, watch: Callable[[Page], None]) -> None:
     page.wait_for_selector("[data-source] .monaco-editor.vs-dark")
 
     files_and_panels(page)
+    schema_problems(page)
     breaking(page)
     editing(page)
     engine_errors(page)
@@ -389,6 +390,26 @@ def files_and_panels(page: Page) -> None:
     page.click('[data-file="schema"]')
     page.click("[data-problems] li button >> nth=0")
     assert page.evaluate(f"{SOURCE}.getModel().getLanguageId()") == "python"
+
+
+def schema_problems(page: Page) -> None:
+    """A schema whose row-level security is not forced: Problems and JSON name schema.sql, and
+    its problem opens it."""
+    page.click('[data-file="schema"]')
+    schema = page.evaluate(f"{SOURCE}.getValue()")
+    rls = "ALTER TABLE users ENABLE ROW LEVEL SECURITY;\nCREATE POLICY t ON users USING (id = current_setting('app.id')::int);\n"
+    page.evaluate(f"(text) => {SOURCE}.setValue(text)", schema + rls)
+    page.click('[data-file="python"]')
+    page.wait_for_selector("[data-problems] li:has-text('tenant-policy')")
+    assert "schema.sql:" in page.inner_text("[data-problems] li:has-text('tenant-policy')")
+    page.click('[data-tab="json"]')
+    json = "monaco.editor.getEditors().find((e) => e.getContainerDomNode().matches('[data-json]'))"
+    assert '"schema.sql"' in page.evaluate(f"{json}.getValue()")
+    page.click('[data-tab="problems"]')
+    page.click("[data-problems] li:has-text('tenant-policy') button")
+    assert page.evaluate(f"{SOURCE}.getModel().getLanguageId()") == "sql"
+    page.evaluate(f"(text) => {SOURCE}.setValue(text)", schema)
+    page.click('[data-file="python"]')
 
 
 def breaking(page: Page) -> None:

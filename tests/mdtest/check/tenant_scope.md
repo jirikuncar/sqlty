@@ -641,3 +641,47 @@ names = SQL[tuple[str]]("--sql\nSELECT name FROM projects")
 # error:
 mine = SQL[tuple[str]]("--sql\nSELECT name FROM projects WHERE tenant_id = %s")
 ```
+
+## Row-level security of a partitioned table
+
+PostgreSQL does not pass `ENABLE` or `FORCE ROW LEVEL SECURITY` on to partitions, so a
+query that reads a partition directly is judged.
+
+```toml
+[tool.sqlty]
+schema = "partitioned.sql"
+
+[tool.sqlty.tenancy]
+columns = ["events_1.org_id"]
+```
+
+`partitioned.sql`:
+
+```sql
+CREATE TABLE events (id INT, org_id INT NOT NULL) PARTITION BY RANGE (id);
+CREATE TABLE events_1 PARTITION OF events FOR VALUES FROM (0) TO (1000);
+ALTER TABLE events ENABLE ROW LEVEL SECURITY;
+ALTER TABLE events FORCE ROW LEVEL SECURITY;
+CREATE POLICY tenant ON events USING (org_id = current_setting('app.org_id')::int);
+```
+
+```python
+from sqlty import SQL
+
+# error:
+parent = SQL[tuple[int | None]]("--sql\nSELECT id FROM events")
+
+# error: [tenant-scope] "`events_1` is read without `events_1.org_id = <parameter>`"
+partition = SQL[tuple[int | None]]("--sql\nSELECT id FROM events_1")
+```
+
+A ```` ```sql schema ```` block is the schema itself:
+
+```sql schema
+CREATE TABLE events (id INT, org_id INT NOT NULL) PARTITION BY RANGE (id);
+CREATE TABLE events_1 PARTITION OF events FOR VALUES FROM (0) TO (1000);
+-- error:
+ALTER TABLE events ENABLE ROW LEVEL SECURITY;
+ALTER TABLE events FORCE ROW LEVEL SECURITY;
+CREATE POLICY tenant ON events USING (org_id = current_setting('app.org_id')::int);
+```
