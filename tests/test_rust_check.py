@@ -2,7 +2,8 @@
 
 Generated modules define helpers and call them, run queries on driver connections, write
 ``--sql`` t-strings and declare ``SQL[R, P]``. Raise the number of generated examples with
-``SQLTY_FUZZ_EXAMPLES``.
+``SQLTY_FUZZ_EXAMPLES``
+under ``--hypothesis-profile=fuzz``.
 """
 
 from __future__ import annotations

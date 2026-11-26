@@ -205,7 +205,7 @@ impl<'a, 's> SourceTypes<'a, 's> {
         let name = name?;
         let head = name.split('.').next().unwrap_or_default();
         let outer = &stack[..stack.len() - usize::from(parameter && !stack.is_empty())];
-        if self.source.is_some_and(|source| source.bound(head) > 1)
+        if self.source.is_some_and(|source| source.rebound(head))
             || outer
                 .iter()
                 .any(|&scope| self.scan.types.contains_key(&(scope, head)))

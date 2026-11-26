@@ -120,7 +120,7 @@ Commit `baseline.json` with the change that moved the numbers. To add the
 
 ## CodSpeed
 
-The `codspeed` job in `.github/workflows/tests.yml` runs `test_benchmarks.py` under
+The `bench` job in `.github/workflows/tests.yml` runs `test_benchmarks.py` under
 [CodSpeed](https://codspeed.io) on every push to `main` and every pull request, and
 comments the change per benchmark on the pull request.
 

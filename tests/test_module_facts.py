@@ -3,7 +3,8 @@
 Generated modules nest imports, aliases, driver bindings and calls in every block kind; the
 corpus is every Python file of the repository and every Python block of the Markdown tests.
 Driver calls are left to the driver tests. Raise the number of generated examples with
-``SQLTY_FUZZ_EXAMPLES``.
+``SQLTY_FUZZ_EXAMPLES``
+under ``--hypothesis-profile=fuzz``.
 """
 
 from __future__ import annotations

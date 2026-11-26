@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
-import json
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -32,18 +32,27 @@ def hit(*changed: str) -> set[str]:
 # fmt: off
 @pytest.mark.parametrize(("changed", "expected"), [
     (["README.md"], {"docs", "package", *MDTEST}),
-    (["docs/guide/x.md"], {"docs", *FIDELITY, *MDTEST}),
-    (["docs/assets/playground/app.js"], {"python", "playground"}),
-    (["docs/robots.txt"], {"python"}),
+    (["docs/guide/x.md"], {"docs", "site", *FIDELITY, *MDTEST}),
+    (["docs/assets/playground/app.js"], {"python", "playground", "site"}),
+    (["docs/robots.txt"], {"python", "site"}),
+    (["overrides/main.html", "zensical.toml", ".github/workflows/docs.yml"], {"site"}),
+    ([".github/workflows/docs-preview-cleanup.yml"], {"site"}),
+    (["src/sqlty/lexer.py"], {"python", "docs", *ENGINE, "vscode", "site"}),
+    ([".github/workflows/vscode.yml"], {"vscode"}),
+    (["scripts/compat/run.sh"], {"python", "compat"}),
+    ([".github/workflows/compat.yml"], {"compat"}),
     (["rust/mdtest/harness.rs"], MDTEST),
-    (["plans/2026-11-19-x.md", ".github/workflows/docs.yml"], set()),
+    (["plans/2026-11-19-x.md", ".github/workflows/fuzz.yml"], set()),
     (["CONTRIBUTING.md"], {"docs"}),
+    ([".vale/styles/config/vocabularies/SQLTy/accept.txt", ".vale.ini"], {"docs"}),
+    ([".python-version", ".vscode/extensions.json"], set()),
     ([".github/pull_request_template.md"], {"docs"}),
     (["tests/test_docs.py"], {"python", "docs"}),
-    (["skills/sqlty/SKILL.md"], {"sqlty-cli", "sqlty-ext", "python", "docs", *ENGINE, "vscode", *MDTEST}),
-    (["npm/wasm/engine.js"], {"playground", "vscode"}),
+    (["skills/sqlty/SKILL.md"], {"sqlty-cli", "sqlty-ext", "python", "docs", *ENGINE, "vscode", "site", *MDTEST}),
+    (["npm/wasm/engine.js"], {"playground", "vscode", "site"}),
     (["editors/vscode/src/extension.ts"], {"vscode"}),
-    (["src/sqlty/__init__.py"], {"python", "docs", *ENGINE, "vscode"}),
+    (["src/sqlty/__init__.py"], {"python", "docs", *ENGINE, "vscode", "site"}),
+    (["Makefile"], {"python", "bench", "playground", "site"}),
     (["tests/test_cli.py"], {"python"}),
     (["tests/test_threads.py"], {"python", "free-threaded"}),
     (["tests/test_pg_describe.py"], {"python", "pg-fidelity"}),
@@ -53,19 +62,38 @@ def hit(*changed: str) -> set[str]:
     (["tests/conftest.py"], {"python", "docs", "free-threaded", *FIDELITY, "bench"}),
     (["benchmarks/synth.py"], {"python", "bench"}),
     (["tests/check_dist.py"], {"python", "package"}),
-    (["rust/crates/sqlty-wasm/src/lib.rs"], {"sqlty-wasm", "vscode", "playground"}),
-    (["rust/crates/sqlty-cli/src/lib.rs"], {"sqlty-cli", "sqlty-ext", "python", "docs", *ENGINE, "vscode"}),
-    (["rust/crates/sqlty-sql/src/lib.rs"], EVERYTHING - {"sqlty-rules"}),
+    (["rust/crates/sqlty-wasm/src/lib.rs"], {"sqlty-wasm", "vscode", "playground", "site"}),
+    (["rust/crates/sqlty-cli/src/lib.rs"], {"sqlty-cli", "sqlty-ext", "python", "docs", *ENGINE, "vscode", "site"}),
+    (["rust/crates/sqlty-sql/src/lib.rs"], EVERYTHING - {"sqlty-rules", "compat"}),
     (["rust/Cargo.lock"], EVERYTHING),
+    (["rust/Cargo.toml"], EVERYTHING),
+    (["uv.lock"], {"python", "docs", *ENGINE, "site"}),
     (["somewhere/new.txt"], EVERYTHING),
-    (["editors/vscode/syntaxes/sqlty.tmLanguage.json"], EVERYTHING - {"sqlty-rules"}),
-    (["docs/reference/rules/narrow-type.md"], EVERYTHING),
+    (["editors/vscode/syntaxes/sqlty.tmLanguage.json"], EVERYTHING - {"sqlty-rules", "compat"}),
+    (["docs/reference/rules/narrow-type.md"], EVERYTHING - {"compat"}),
 ])
 # fmt: on
 def test_a_change_runs_its_packages_and_their_dependents(
     changed: list[str], expected: set[str]
 ) -> None:
     assert hit(*changed) == expected
+
+
+def test_every_tracked_file_has_a_rule() -> None:
+    """A file no package owns runs everything; each must be owned, ignored or listed in
+    EVERYTHING, so a new file is placed on purpose."""
+    tracked = subprocess.run(
+        ["git", "ls-files"], cwd=ROOT, check=True, capture_output=True, text=True
+    ).stdout.split()
+    crates = set(CRATES)
+    unplaced = [
+        path
+        for path in tracked
+        if ci_changes.owners(path, crates) is None
+        and not ci_changes.matches(path, ci_changes.EVERYTHING)
+        and path != ci_changes.LOCK
+    ]
+    assert unplaced == []
 
 
 def test_no_base_runs_every_package() -> None:
@@ -80,7 +108,110 @@ def test_the_extension_crate_runs_with_the_python_package(
     monkeypatch.setenv("GITHUB_OUTPUT", str(output))
     ci_changes.main([])
     lines = dict(line.split("=", 1) for line in output.read_text().splitlines())
-    crates = json.loads(lines.pop("crates"))
-    assert [crate["dir"] for crate in crates] == [name for name in CRATES if name != "sqlty-ext"]
-    assert {"dir": "sqlty-sql", "package": "sqlty-sql"} in crates
+    crates = lines.pop("crates").split()
+    assert crates == [name for name in CRATES if name != "sqlty-ext"]
+    packages = lines.pop("packages").split()
+    assert dict(zip(crates, packages, strict=True))["sqlty-sql"] == "sqlty-sql"
     assert lines == dict.fromkeys(ci_changes.PACKAGES, "true")
+
+
+LOCK = """\
+[[package]]
+name = "sqlty-sql"
+version = "0.8.0"
+dependencies = ["sqlparser"]
+
+[[package]]
+name = "sqlty-lsp"
+version = "0.8.0"
+dependencies = ["sqlty-sql", "lsp-types 0.97.0"]
+
+[[package]]
+name = "sqlparser"
+version = "0.64.0"
+
+[[package]]
+name = "lsp-types"
+version = "0.97.0"
+dependencies = ["fluent-uri"]
+
+[[package]]
+name = "fluent-uri"
+version = "0.1.4"
+"""
+
+
+def test_a_lock_change_runs_the_crates_that_lock_what_changed() -> None:
+    bumped = LOCK.replace('"0.1.4"', '"0.1.5"')
+    assert ci_changes.locked_crates(LOCK, bumped) == {"sqlty-lsp"}
+    removed = LOCK.replace('[[package]]\nname = "fluent-uri"\nversion = "0.1.4"\n', "")
+    assert ci_changes.locked_crates(LOCK, removed) == {"sqlty-lsp"}
+    assert ci_changes.locked_crates(LOCK, LOCK.replace('"0.64.0"', '"0.65.0"')) == {
+        "sqlty-sql",
+        "sqlty-lsp",
+    }
+    assert ci_changes.locked_crates(LOCK, LOCK) == set()
+    found = ci_changes.affected(["rust/Cargo.lock"], {"sqlty-lsp"})
+    assert {name for name, hit in found.items() if hit} == {
+        "sqlty-lsp",
+        "sqlty-cli",
+        "sqlty-ext",
+        "python",
+        "docs",
+        *ENGINE,
+        "vscode",
+        "site",
+        "playground",
+    }
+    assert not any(ci_changes.affected(["rust/Cargo.lock"], set()).values())
+
+
+def test_a_lock_change_is_read_against_the_base(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def git(*args: str) -> None:
+        subprocess.run(["git", *args], cwd=tmp_path, check=True, capture_output=True)
+
+    lock = tmp_path / "rust" / "Cargo.lock"
+    lock.parent.mkdir()
+    lock.write_text(LOCK)
+    git("init", "-q")
+    git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "base", "--allow-empty")
+    git("add", "-A")
+    git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "lock")
+    lock.write_text(LOCK.replace('"0.1.4"', '"0.1.5"'))
+    git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qam", "bump")
+    monkeypatch.setattr(ci_changes, "ROOT", tmp_path)
+    output = tmp_path / "output"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+
+    def ran(base: str) -> dict[str, str]:
+        output.write_text("")
+        ci_changes.main([base])
+        return dict(line.split("=", 1) for line in output.read_text().splitlines())
+
+    lines = ran("HEAD~1")
+    assert lines["crates"].split() == ["sqlty-cli", "sqlty-lsp"]
+    assert (lines["vscode"], lines["compat"]) == ("true", "false")
+    # Without the lock at the base, every crate runs.
+    lines = ran("HEAD~2")
+    assert lines["crates"].split() == [name for name in CRATES if name != "sqlty-ext"]
+
+
+def test_lint_builds_what_the_hooks_of_the_changed_files_need() -> None:
+    """The patterns of the Lint job's `needs` step are the `files` of the hooks of prek.toml
+    that need the extension or Node."""
+    import tomllib
+
+    import yaml
+
+    hooks = {
+        hook["id"]: hook
+        for repo in tomllib.loads((ROOT / "prek.toml").read_text())["repos"]
+        for hook in repo["hooks"]
+    }
+    lint = yaml.safe_load((ROOT / ".github" / "workflows" / "tests.yml").read_text())["jobs"]["lint"]
+    [step] = [step for step in lint["steps"] if step.get("id") == "needs"]
+    assert f"extension=$(has '{hooks['sqlty-check-examples']['files']}')" in step["run"]
+    assert f"extension=$(has '{hooks['sqlty-rewrite-examples']['files']}')" in step["run"]
+    assert f"node=$(has '{hooks['vscode-check']['files']}')" in step["run"]

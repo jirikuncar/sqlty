@@ -2,17 +2,17 @@
 
 Each Rust crate is a package of its own; its workspace dependencies come from its
 Cargo.toml. A file no package owns runs every package, unless it is listed in IGNORED.
+A change to rust/Cargo.lock runs the crates whose dependencies it changes.
 
     python3 scripts/ci_changes.py [BASE]   # BASE omitted: every package
 
-Writes `crates` (a JSON list) and one `true`/`false` per other package to $GITHUB_OUTPUT,
-or prints them.
+Writes `crates` (the affected crates' directories, space-separated), `packages` (their
+package names) and one `true`/`false` per other package to $GITHUB_OUTPUT, or prints them.
 """
 
 from __future__ import annotations
 
 import fnmatch
-import json
 import os
 import subprocess
 import sys
@@ -31,8 +31,8 @@ PYTEST = [
     "tests/_mdtest/**",
     "tests/_no_exec.py",
 ]
-# The Markdown of the guides, at the root and in docs/.
-DOCS = ["docs/**.md", "*.md", ".github/*.md"]
+# The Markdown of the guides, at the root and in docs/, and the Vale styles that judge it.
+DOCS = ["docs/**.md", "*.md", ".github/*.md", ".vale.ini", ".vale/**"]
 # The tests of the docs job besides the mdtests of docs/ and README.md: each reads the guides.
 DOCS_TESTS = [
     "tests/test_docs.py",
@@ -43,7 +43,8 @@ DOCS_TESTS = [
 # The Markdown whose queries the database tests run.
 CORPUS = ["tests/mdtest/**", "docs/**.md"]
 
-# Paths a package owns, and the packages it depends on beyond its own crates.
+# Paths a package owns, and the packages it depends on beyond its own crates. Each is an
+# output the jobs of tests.yml, docs.yml, vscode.yml or compat.yml are gated on.
 PACKAGES: dict[str, tuple[list[str], list[str]]] = {
     # The extension is tested through the Python package, which reads most of the repository.
     "python": (
@@ -117,8 +118,11 @@ PACKAGES: dict[str, tuple[list[str], list[str]]] = {
     ),
     # The guides: the tests that read them (links, rule pages, examples) and their mdtests.
     "docs": ([*DOCS, *PYTEST, *DOCS_TESTS], ["sqlty-ext"]),
-    # The desktop test runs the sqlty of the virtual environment.
-    "vscode": (["editors/vscode/**", "src/sqlty/**", "npm/wasm/**"], ["sqlty-wasm", "sqlty-ext"]),
+    # The desktop test runs the sqlty of the virtual environment; vscode.yml packages it.
+    "vscode": (
+        ["editors/vscode/**", "src/sqlty/**", "npm/wasm/**", ".github/workflows/vscode.yml"],
+        ["sqlty-wasm", "sqlty-ext"],
+    ),
     # The engine on WebAssembly: the docs playground and @sqlty/wasm, checking each example.
     "playground": (
         [
@@ -132,6 +136,37 @@ PACKAGES: dict[str, tuple[list[str], list[str]]] = {
         ],
         ["sqlty-wasm", "sqlty-lsp"],
     ),
+    # Workflows of their own (docs.yml, compat.yml), gated on these outputs too.
+    # The site: the docs with the playground, built by zensical and colored by the lexer.
+    "site": (
+        [
+            "docs/**",
+            "examples/**",
+            "npm/wasm/**",
+            "overrides/**",
+            "zensical.toml",
+            "wrangler.jsonc",
+            "Makefile",
+            "pyproject.toml",
+            "uv.lock",
+            # The lexer imports the package's core.
+            "src/sqlty/lexer.py",
+            "src/sqlty/core.py",
+            "src/sqlty/__init__.py",
+            "tests/_mdtest/parser.py",
+            "scripts/generate_playground_examples.py",
+            "scripts/vendor_assets.py",
+            "scripts/offline.py",
+            "scripts/playground_links.py",
+            "scripts/structured_data.py",
+            "scripts/check_playground.py",
+            ".github/workflows/docs.yml",
+            ".github/workflows/docs-preview-cleanup.yml",
+        ],
+        ["sqlty-wasm", "sqlty-ext"],
+    ),
+    # The comparisons with drivers and ORMs, at the versions scripts/compat/ pins.
+    "compat": (["scripts/compat/**", ".github/workflows/compat.yml"], []),
 }
 
 # Files outside a crate's directory that its build or tests read.
@@ -153,7 +188,6 @@ EVERYTHING = [
     "scripts/coverage.sh",
     "scripts/coverage-floors.txt",
     "rust/Cargo.toml",
-    "rust/Cargo.lock",
     "rust/clippy.toml",
     "rust-toolchain.toml",
 ]
@@ -170,6 +204,9 @@ IGNORED = [
     "wrangler.jsonc",
     "context7.json",
     ".gitignore",
+    # The interpreter uv picks locally and the editor's recommendations: CI names its own.
+    ".python-version",
+    ".vscode/**",
 ]
 
 
@@ -217,7 +254,9 @@ def data(path: str) -> set[str]:
     return {name for name, paths in TEST_DATA.items() if matches(path, paths)}
 
 
-def affected(changed: list[str] | None) -> dict[str, bool]:
+def affected(changed: list[str] | None, locked: set[str] | None = None) -> dict[str, bool]:
+    """The packages `changed` reaches; `locked` are the crates a change to rust/Cargo.lock
+    reaches, as `locked_crates` gives them (None: every package)."""
     graph = {name: deps for name, (_, deps) in workspace().items()}
     graph.update({name: set(deps) for name, (_, deps) in PACKAGES.items()})
     everything = set(graph)
@@ -226,6 +265,9 @@ def affected(changed: list[str] | None) -> dict[str, bool]:
 
     hit: set[str] = set()
     for path in changed:
+        if path == LOCK and locked is not None:
+            hit |= locked
+            continue
         found = owners(path, everything - set(PACKAGES))
         if found is None:
             return dict.fromkeys(sorted(everything), True)
@@ -236,20 +278,66 @@ def affected(changed: list[str] | None) -> dict[str, bool]:
     return {name: name in hit for name in sorted(everything)}
 
 
+LOCK = "rust/Cargo.lock"
+
+
+def locked_crates(before: str, after: str) -> set[str]:
+    """The directories of the workspace crates whose locked dependencies differ between two
+    texts of Cargo.lock: a package added, removed or at another version or source."""
+    old, new = (
+        {p["name"]: p for p in tomllib.loads(text).get("package", [])} for text in (before, after)
+    )
+    # A lock entry names a dependency as `name` or, when two versions are locked, `name version`.
+    uses: dict[str, set[str]] = {}
+    for lock in (old, new):
+        for name, package in lock.items():
+            deps = {dep.split()[0] for dep in package.get("dependencies", [])}
+            uses.setdefault(name, set()).update(deps)
+
+    def pinned(package: dict[str, object]) -> dict[str, object]:
+        return {key: value for key, value in package.items() if key != "dependencies"}
+
+    changed = {
+        name
+        for name in old.keys() | new.keys()
+        if pinned(old.get(name, {})) != pinned(new.get(name, {}))
+    }
+    found = set()
+    for name, (package, _) in workspace().items():
+        seen, todo = set(), [package]
+        while todo:
+            for dep in uses.get(todo.pop(), set()) - seen:
+                seen.add(dep)
+                todo.append(dep)
+        if seen & changed:
+            found.add(name)
+    return found
+
+
 def changed_files(base: str) -> list[str]:
     diff = ["git", "diff", "--name-only", "--no-renames", f"{base}...HEAD"]
     return subprocess.run(diff, cwd=ROOT, check=True, capture_output=True, text=True).stdout.split()
 
 
 def main(argv: list[str]) -> None:
-    result = affected(changed_files(argv[0]) if argv else None)
+    changed = changed_files(argv[0]) if argv else None
+    locked = None
+    if changed and LOCK in changed:
+        show = ["git", "show", f"{argv[0]}:{LOCK}"]
+        before = subprocess.run(show, cwd=ROOT, capture_output=True, text=True)
+        if before.returncode == 0:
+            locked = locked_crates(before.stdout, (ROOT / LOCK).read_text())
+    result = affected(changed, locked)
     crates = [
-        {"dir": name, "package": package}
+        (name, package)
         for name, (package, _) in sorted(workspace().items())
         # The extension's own tests run with the Python package's.
         if result[name] and name != "sqlty-ext"
     ]
-    lines = [f"crates={json.dumps(crates)}"]
+    lines = [
+        f"crates={' '.join(name for name, _ in crates)}",
+        f"packages={' '.join(package for _, package in crates)}",
+    ]
     lines += [f"{name}={str(result[name]).lower()}" for name in PACKAGES]
     output = os.environ.get("GITHUB_OUTPUT")
     with open(output, "a") if output else sys.stdout as out:

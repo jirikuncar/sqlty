@@ -47,12 +47,16 @@ stale-type = "error"
 | [`unsupported-syntax`](rules/unsupported-syntax.md) | Names | warn | no | Construct that parses but is not typed |
 | [`insert-missing-column`](rules/insert-missing-column.md) | Names | error | no | INSERT that leaves out a NOT NULL column without a default |
 | [`insert-value-count`](rules/insert-value-count.md) | Names | error | no | INSERT that gives a different number of values than the columns it writes |
+| [`literal-write`](rules/literal-write.md) | Names | error | no | INSERT or UPDATE writes a constant an enum or CHECK list does not allow |
+| [`unmatched-literal`](rules/unmatched-literal.md) | Names | warn | no | WHERE compares a column with a constant its enum or CHECK list never holds |
 | [`ungrouped-column`](rules/ungrouped-column.md) | Names | error | no | Grouped query selects a column it neither groups by nor aggregates |
 | [`fanout-aggregate`](rules/fanout-aggregate.md) | Names | warn | no | Aggregate over rows a one-to-many join repeats |
 | [`chasm-join`](rules/chasm-join.md) | Names | warn | no | Aggregating query joins one table one-to-many to two others |
 | [`unproven-join`](rules/unproven-join.md) | Names | ignore | no | Join in an aggregating query that matches no primary or unique key |
 | [`entity-mismatch`](rules/entity-mismatch.md) | Names | ignore | no | Comparison between columns holding keys of different tables |
 | [`foreign-key-mismatch`](rules/foreign-key-mismatch.md) | Names | warn | no | Foreign key column compared with a column it does not reference |
+| [`tenant-scope`](rules/tenant-scope.md) | Names | error | no | Query on a tenant table does not filter by the tenant key |
+| [`tenant-policy`](rules/tenant-policy.md) | Names | warn | no | Row-level security does not scope a tenant table for every role and command |
 | [`rejected-query`](rules/rejected-query.md) | Names | error | no | Query the database rejects for a reason no other rule names |
 | [`stale-rewrite`](rules/stale-rewrite.md) | Rewrite | warn | yes | --sql string not wrapped in SQL[T] |
 | [`stale-type`](rules/stale-type.md) | Rewrite | warn | yes | SQL[tuple[...]] wider than the inferred row type |

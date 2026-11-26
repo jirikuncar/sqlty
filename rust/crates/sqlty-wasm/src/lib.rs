@@ -32,6 +32,7 @@ use sqlty_python::checker::{query_sites, Diagnostic, SiteKind};
 use sqlty_python::config;
 use sqlty_python::fixer::fix_module;
 use sqlty_python::locate::{self, Queries};
+use sqlty_python::migrations::check_schema;
 use sqlty_python::options::Options;
 use sqlty_python::params::add_param_types;
 use sqlty_python::project::{self, FindError, Read};
@@ -118,7 +119,8 @@ fn postgres() -> String {
 /// (`postgres` by default).
 ///
 /// - `analyze`: `diagnostics` (what `sqlty check` reports for a module by itself, each
-///   with the `fix` edits of its quick fix), `queries` (row type, columns
+///   with the `fix` edits of its quick fix), `schema_diagnostics` (what it reports on
+///   `schema`, such as `tenant-policy`, offsets into `schema`), `queries` (row type, columns
 ///   and parameters of each query), `highlights` (the SQL tokens to color), and what
 ///   `sqlty rewrite`, `sqlty strip` and `sqlty check --fix` make of the source: `rewritten`,
 ///   `stripped` and `fixed`.
@@ -142,7 +144,7 @@ fn postgres() -> String {
 /// A request that `crashed` gets the `internal-error` of `sqlty check` in place of a check.
 ///
 /// `config` is a `sqlty.toml` whose `dialect`, `driver`, `import-style`, `param-types`,
-/// `preview`, `max-query-variants`, `rules`, `types` and `deprecated-columns` apply; another key, or an invalid one, is an `error`, as `sqlty check` reports
+/// `preview`, `max-query-variants`, `rules`, `types`, `deprecated-columns` and `tenancy` apply; another key, or an invalid one, is an `error`, as `sqlty check` reports
 /// it. `settings` replaces it with a table `config` answered, `extend` applied.
 pub fn run(request: &str) -> String {
     let error = |error: String| json!({ "error": error }).to_string();
@@ -251,8 +253,17 @@ pub fn run(request: &str) -> String {
     let answer = match op {
         SourceOp::Analyze => {
             let diagnostics = check(&options, &schema);
+            let schema_units = sqlty_python::utf16::Utf16::new(&request.schema);
+            let schema_diagnostics: Vec<Diagnostic> = schema
+                .as_deref()
+                .map(|loaded| check_schema(loaded, &[(request.schema.as_str(), &rules)]))
+                .into_iter()
+                .flatten()
+                .flatten()
+                .collect();
             json!({
             "diagnostics": reported(&diagnostics, utf16),
+            "schema_diagnostics": reported(&schema_diagnostics, |byte| schema_units.at(byte)),
             "queries": query_sites(source, &options.style, &[])
                 .into_iter()
                 .filter(|(_, kind, _)| *kind == SiteKind::Query)
@@ -334,11 +345,14 @@ fn resolved(table: &serde_json::Map<String, Value>) -> Settings {
         None => Vec::new(),
     };
     types.extend(pairs("types"));
-    let deprecated = table
-        .get("deprecated-columns")
-        .and_then(|columns| serde_json::from_value::<toml::Value>(columns.clone()).ok());
+    let configured = ["deprecated-columns", "tenancy"]
+        .into_iter()
+        .filter_map(|key| {
+            let value = serde_json::from_value::<toml::Value>(table.get(key)?.clone()).ok()?;
+            Some((key.to_string(), value))
+        });
     types.extend(config::deprecated_types(&toml::Table::from_iter(
-        deprecated.map(|columns| ("deprecated-columns".to_string(), columns)),
+        configured,
     )));
     Settings {
         dialect,
@@ -363,7 +377,7 @@ fn resolved(table: &serde_json::Map<String, Value>) -> Settings {
 }
 
 /// The keys the engine reads: the others name files, which the page has none of.
-const READ: [&str; 9] = [
+const READ: [&str; 10] = [
     "deprecated-columns",
     "dialect",
     "driver",
@@ -372,6 +386,7 @@ const READ: [&str; 9] = [
     "param-types",
     "preview",
     "rules",
+    "tenancy",
     "types",
 ];
 

@@ -2,7 +2,8 @@
 
 Generated packages define helpers, row types and aliases, re-export them, import each
 other in cycles and register configured functions; a module using them is checked with
-their ``index``. Raise the number of generated examples with ``SQLTY_FUZZ_EXAMPLES``.
+their ``index``. Raise the number of generated examples with ``SQLTY_FUZZ_EXAMPLES``
+under ``--hypothesis-profile=fuzz``.
 """
 
 from __future__ import annotations

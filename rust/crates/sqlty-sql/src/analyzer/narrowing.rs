@@ -21,9 +21,11 @@ use std::collections::HashSet;
 use std::rc::Rc;
 
 use sqlparser::ast::InTarget;
+use std::ops::ControlFlow;
+
 use sqlparser::ast::{
-    BinaryOperator, Expr, Join, JoinConstraint, JoinOperator, Query, Select, SetExpr, TableFactor,
-    TableWithJoins, UnaryOperator,
+    visit_expressions_mut, BinaryOperator, Expr, Ident, Join, JoinConstraint, JoinOperator, Query,
+    Select, SetExpr, TableFactor, TableWithJoins, UnaryOperator,
 };
 
 use super::dialect::SqlDialect;
@@ -36,6 +38,7 @@ use super::query::Analyzer;
 use super::registry::{lookup, Behavior};
 use super::scope::Scope;
 use crate::catalog::fold;
+use crate::diagnostics::Rule;
 use crate::values::Value;
 use rustc_hash::FxHashSet;
 
@@ -101,9 +104,13 @@ impl Learned {
         !self.values.is_empty()
     }
 
-    /// Whether no row can satisfy this: a column is proven both NULL and not NULL.
+    /// Whether no row can satisfy this: a column is proven both NULL and not NULL, or
+    /// proven not NULL and limited to no values.
     fn contradicts(&self) -> bool {
         self.null.iter().any(|pair| self.columns.contains(pair))
+            || self.values.iter().any(|(r, c, values)| {
+                values.is_empty() && self.columns.contains(&(r.clone(), c.clone()))
+            })
     }
 
     fn union(mut self, other: Learned) -> Learned {
@@ -227,13 +234,18 @@ impl Facts {
 
     /// These facts and what the conditions of a SELECT prove, given as the `cases` they
     /// can hold in: what all prove, and each case apart in [`Facts::cases`].
-    fn with_cases(&self, mut cases: Vec<Learned>) -> Facts {
+    pub(super) fn with_cases(&self, mut cases: Vec<Learned>) -> Facts {
         if cases.len() == 1 {
             return self.with(cases.remove(0));
         }
         let mut facts = self.with(merge(cases.clone()));
         facts.cases = Rc::new(cases);
         facts
+    }
+
+    /// Whether these facts limit the values of a column.
+    pub(super) fn limits_values(&self) -> bool {
+        !self.values.is_empty()
     }
 
     /// These facts in each way the conditions in force can hold, when there are several.
@@ -314,7 +326,58 @@ impl<'a> Analyzer<'a> {
         for cond in conditions(select) {
             cases = both(cases, self.learn_cases(cond, true, scope));
         }
-        facts.with_cases(cases)
+        // What all cases prove makes an outer join's row present, so its `CHECK`s hold.
+        let proven = facts.with(merge(cases.clone()));
+        facts.with_cases(self.checked(cases, scope, &proven))
+    }
+
+    /// `cases` combined with the `CHECK`s of the tables of `scope`, which hold for every row:
+    /// under `kind = 'card'`, only the `kind = 'card'` arm of a `CHECK` is left. Only where
+    /// a case limits the values of a column, which is what tells the arms apart.
+    pub(super) fn checked(
+        &self,
+        mut cases: Vec<Learned>,
+        scope: &Scope,
+        facts: &Facts,
+    ) -> Vec<Learned> {
+        if cases.iter().any(Learned::limits_values) || facts.limits_values() {
+            for check in self.checks_in(scope, facts) {
+                cases = both(cases, self.learn_cases(&check, true, scope));
+            }
+        }
+        cases
+    }
+
+    /// The `CHECK` conditions of the schema tables of `scope`, with their columns qualified
+    /// by the source's reference, that are true for each row they read: a `CHECK` passes a
+    /// row it is NULL for, and an outer join's NULL row passes none.
+    fn checks_in(&self, scope: &Scope, facts: &Facts) -> Vec<Expr> {
+        let mut found = Vec::new();
+        let named = scope
+            .iter()
+            .filter_map(|source| Some((source, source.table.named()?)));
+        for (source, table) in named {
+            if source.reference.is_empty()
+                || facts.is_null_extended(&source.reference)
+                || self.virtual_columns(table).is_some()
+            {
+                continue;
+            }
+            for check in self.schema.checks(table) {
+                let mut check = check.clone();
+                let _ = visit_expressions_mut(&mut check, |expr| {
+                    if let Expr::Identifier(ident) = expr {
+                        let qualifier = Ident::with_quote('"', source.reference.clone());
+                        *expr = Expr::CompoundIdentifier(vec![qualifier, ident.clone()]);
+                    }
+                    ControlFlow::<()>::Continue(())
+                });
+                if self.nullability(&check, scope, facts) == Nullability::NonNull {
+                    found.push(check);
+                }
+            }
+        }
+        found
     }
 
     /// What is proven not NULL when `cond` evaluates to `truth`, whichever way it does.
@@ -535,6 +598,53 @@ impl<'a> Analyzer<'a> {
         vec![(reference, name, kept)]
     }
 
+    /// Records `unmatched-literal` for each term of the `AND` of `selection`, a `WHERE`,
+    /// that compares a column of known values with constants it never holds:
+    /// `column = constant` or `column IN (constants)`.
+    pub(super) fn check_unmatched(&self, selection: &Expr, scope: &Scope) {
+        if !self.diag.enabled() || !self.judges_names() {
+            return;
+        }
+        for term in super::fanout::conjuncts(selection) {
+            let (column, constants): (&Expr, Vec<&Expr>) = match term {
+                Expr::BinaryOp {
+                    left,
+                    op: BinaryOperator::Eq,
+                    right,
+                } if crate::values::constant(right).is_some() => (left, vec![right]),
+                Expr::BinaryOp {
+                    left,
+                    op: BinaryOperator::Eq,
+                    right,
+                } => (right, vec![left]),
+                Expr::In {
+                    expr,
+                    target: InTarget::List(list),
+                    negated: false,
+                    ..
+                } => (expr, list.iter().collect()),
+                _ => continue,
+            };
+            let known = self
+                .resolve_column(column, scope)
+                .and_then(|typed| typed.values);
+            let (Some((reference, name, constants)), Some(known)) =
+                (self.column_values(column, &constants, scope), known)
+            else {
+                continue;
+            };
+            if crate::values::excludes(&known, &constants) {
+                self.diag.record(
+                    Rule::UnmatchedLiteral,
+                    format!(
+                        "`{reference}.{name}` is never {}, so this WHERE matches no row",
+                        crate::values::spell(&constants, "or")
+                    ),
+                );
+            }
+        }
+    }
+
     /// `column = constant` or `column IN (constants)`: the values the column keeps. Only
     /// where comparison is exact: MySQL compares with case-insensitive collations by
     /// default, and a `citext` column ignores case.
@@ -559,6 +669,15 @@ impl<'a> Analyzer<'a> {
             .sql()
             .is_some_and(|sql| sql.eq_ignore_ascii_case("CITEXT"))
         {
+            return None;
+        }
+        // `status = '1'` compares as `status = 1`: a constant of another kind is not a value.
+        let kind = super::literals::python_kind(&typed);
+        let same = |value: &Value| match value {
+            Value::Str(_) => kind == Some("str"),
+            Value::Int(_) => kind == Some("int"),
+        };
+        if !values.iter().all(same) {
             return None;
         }
         Some((reference, name, values))

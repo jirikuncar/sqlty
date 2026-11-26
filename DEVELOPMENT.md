@@ -45,7 +45,10 @@ runs only it). Each runs when the files it depends on change:
 | file checks (whitespace, line endings, YAML/TOML/JSON syntax, ...) | any file |
 
 Hooks that edit files run one at a time; the read-only checks run in
-parallel. CI's Lint job runs the commit hooks on all files.
+parallel. CI's Lint job runs the commit hooks on the files a pull request changes,
+and on all files on a push to `main`. It builds the extension and installs Node only
+when a changed file matches a hook that needs them, and validates the plugin manifests
+only when they or `skills/` change.
 
 ## Running tests
 
@@ -121,13 +124,24 @@ Each Rust crate under `rust/crates/` is a package, and so is the Python package
 [`scripts/ci_changes.py`](scripts/ci_changes.py) picks the packages the changed files
 belong to, with every package that depends on one of them, and the Tests workflow runs
 only those; a push to `main` runs all of them. A change to a file no package owns runs
-everything, unless the script ignores it, as it does `plans/`. The jobs that run the
+everything, unless the script ignores it, as it does `plans/`; `tests/test_ci_changes.py`
+fails on a tracked file that is neither owned nor ignored, so each new file gets a rule.
+A change to
+`rust/Cargo.lock` runs the crates whose locked dependencies it changes, read from the
+lock at the base and at the head; `uv.lock` runs the jobs that install it. The jobs that run the
 built extension (free-threaded Python, the database tests, the benchmarks and the
 package) are packages of their own, each owning the files it reads: a change to
 `tests/test_cli.py` runs none of them. So is `docs`, the Markdown of the guides: a
 change to it alone runs the tests that read them and the Markdown tests of `docs/` and
 `README.md`, not the Python matrix.
+The Docs, VS Code extension and Compatibility workflows have no `paths:` filter: their
+first job runs the same script and gates the rest on its `site`, `vscode` or `compat`
+output, so one list says what each reads.
 The required check is `CI`, which passes when every job the change needed passed.
+Jobs that share their setup share a job: one `Rust` job runs the gate of each affected
+crate in a row on one target dir, with the doctests building beside it; the PostgreSQL
+and MySQL comparisons share a job and run at once; the performance budget and CodSpeed
+share a release build. A push to `main` runs 15 jobs.
 
 A package's coverage counts its own tests only: a crate's Rust tests, or for the Python
 package pytest and the extension crate's Rust tests. Each must run every line of its
@@ -187,9 +201,9 @@ SQLTY_FUZZ_EXAMPLES=2000 SQLTY_PG_DSN=postgresql:///scratch SQLTY_FUZZ_PYTHON=.v
 
 The server's tables are dropped and recreated, so point it at a scratch
 database. `SQLTY_FUZZ_PYTHON` must import this checkout's `sqlty` dependencies;
-each property prints how many distinct cases it ran (`--nocapture`). In CI, run the `Fuzz`
-workflow by hand (Actions, Fuzz, Run workflow); a failure prints the case it
-shrank to and the `PROPTEST_RNG_SEED` that replays it. The case belongs in an
+each property prints how many distinct cases it ran (`--nocapture`). In CI, the `Fuzz`
+workflow runs every night, or by hand (Actions, Fuzz, Run workflow); a failure prints the
+case it shrank to and the `PROPTEST_RNG_SEED` that replays it. The case belongs in an
 mdtest next to the fix.
 
 `rust/fuzz` feeds every playground request (`analyze`, `complete`, `hover`,
@@ -206,6 +220,14 @@ cargo +nightly fuzz run -O -a run -- -dict=sql.dict -max_total_time=600
 A crash leaves its input in `artifacts/run/`; `cargo +nightly fuzz fmt -O -a run
 <file>` prints it. The `Fuzz the engine` workflow runs it every night and
 uploads the input when it fails.
+
+The Hypothesis tests of `tests/` (the Rust engine against the Python oracle in
+`tests/type_oracle`, round trips over tricky fragments) run only their `@example`s in the
+suite. The `Fuzz` workflow generates `SQLTY_FUZZ_EXAMPLES` cases for each of them as well:
+
+```bash
+SQLTY_FUZZ_EXAMPLES=2000 uv run pytest --hypothesis-profile=fuzz --no-cov
+```
 
 ## Type checking
 
@@ -234,7 +256,7 @@ make bench-ci         # CI-size project; exits 1 when over benchmarks/baseline.j
 make bench-baseline   # re-record the baseline after an intended change
 make bench-project    # full-size synthetic project (10k files): CLI wall time and peak RSS
 make bench-rust       # Criterion benches in rust/crates/sqlty-bench; extra args via ARGS=
-make bench-codspeed   # benchmarks/test_benchmarks.py, as CI's CodSpeed job measures them
+make bench-codspeed   # benchmarks/test_benchmarks.py, as CI's bench job measures them
 make bench-corpus     # sqlty check on pinned real repositories (benchmarks/corpus.py)
 ```
 

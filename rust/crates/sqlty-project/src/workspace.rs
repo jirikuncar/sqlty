@@ -36,6 +36,9 @@ type Configured = Vec<(
     Result<Arc<Directory>, String>,
 )>;
 
+/// A schema file, its diagnostics and its text.
+type CheckedSchema = (PathBuf, Vec<Diagnostic>, Arc<str>);
+
 /// A module with its settings and helpers.
 type Prepared = (PathBuf, Arc<FileSettings>, Arc<HelperIndex>);
 
@@ -467,6 +470,67 @@ impl Workspace {
         Ok(sources)
     }
 
+    /// The schema checks (`tenant-policy`) of the schema files of the configurations under
+    /// the paths, or of those that load `only`: each file once, as `(path, diagnostics,
+    /// text)`, the path resolved. A file changed on disk since its schema was loaded is left
+    /// out.
+    fn schema_checks(&mut self, only: Option<&Path>) -> Result<Vec<CheckedSchema>, String> {
+        let mut seen = HashSet::new();
+        let mut found = Vec::new();
+        for source in self.schema_sources()? {
+            let settings = &source.settings;
+            let loads = |only: &Path| {
+                let mut files = settings.schema_files.iter();
+                files.any(|path| self.files.canonical(path) == only)
+            };
+            if settings.dialect != "postgres"
+                || only.is_some_and(|only| !loads(only))
+                || !seen.insert(settings.schema_files.clone())
+            {
+                continue;
+            }
+            let texts: Option<Vec<Arc<str>>> = (settings.schema_files.iter())
+                .map(|path| self.files.text(path).map(Arc::from))
+                .collect();
+            let loaded =
+                |texts: &Vec<Arc<str>>| Some(&*texts.join("\n")) == settings.schema_sql.as_deref();
+            let (Some(schema), Some(texts)) = (&settings.schema, texts.filter(loaded)) else {
+                continue;
+            };
+            let rules: Vec<_> = (source.files.iter())
+                .map(|settings| Checker::of(settings, None).rules)
+                .collect();
+            let files: Vec<(&str, &_)> = texts.iter().map(|text| &**text).zip(&rules).collect();
+            let checked = sqlty_python::migrations::check_schema(schema, &files);
+            for ((path, text), diagnostics) in settings.schema_files.iter().zip(&texts).zip(checked)
+            {
+                found.push((self.files.canonical(path), diagnostics, Arc::clone(text)));
+            }
+        }
+        Ok(found)
+    }
+
+    /// The schema checks of the schema files under the paths, relative to the current
+    /// directory when under it, sorted: `(path, diagnostics, text)`.
+    pub fn schema_diagnostics(&mut self) -> Result<Vec<CheckedSchema>, String> {
+        let roots: Vec<PathBuf> = self.paths.iter().map(|path| self.resolved(path)).collect();
+        let cwd = self.files.canonical(&self.flags.cwd);
+        let mut found: Vec<_> = self
+            .schema_checks(None)?
+            .into_iter()
+            .filter(|(path, ..)| roots.iter().any(|root| path.starts_with(root)))
+            .map(|(path, diagnostics, text)| {
+                let shown = path
+                    .strip_prefix(&cwd)
+                    .map_or(path.clone(), Path::to_path_buf);
+                (shown, diagnostics, text)
+            })
+            .collect();
+        found.sort_by(|a, b| a.0.cmp(&b.0));
+        found.dedup_by(|a, b| a.0 == b.0);
+        Ok(found)
+    }
+
     /// The databases of the configuration of the directory of `path`, each with its
     /// settings: the project's own first, under [`analyzer::DEFAULT`].
     pub fn databases(&mut self, path: &Path) -> Result<Vec<(String, Arc<FileSettings>)>, String> {
@@ -804,11 +868,18 @@ impl Workspace {
     }
 
     /// The diagnostics of `text`, the buffer of `path`: a Python module, or a `.sql` file
-    /// whose project's `queries` name it (any other has none).
+    /// of named queries or of a schema while it is saved (any other has none).
     pub fn check(&mut self, path: &Path, text: &str) -> Result<Vec<Diagnostic>, String> {
         let settings = self.settings(path)?;
         if path.extension().is_some_and(|extension| extension == "sql") {
-            return self.check_queries(path, text);
+            let mut found = self.check_queries(path, text)?;
+            let resolved = self.resolved(path);
+            let schema = self.schema_checks(Some(&resolved))?;
+            let schema = schema.into_iter().find(|(file, ..)| *file == resolved);
+            if let Some((_, diagnostics, _)) = schema.filter(|(.., checked)| **checked == *text) {
+                found.extend(diagnostics);
+            }
+            return Ok(found);
         }
         self.update(path, text);
         let helpers = self.helpers(&settings);

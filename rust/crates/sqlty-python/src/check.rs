@@ -30,10 +30,13 @@ use crate::rows::{
 use crate::rules::{Rule, RuleConfig, SQL_RULES};
 use crate::scan::Scan;
 use crate::scopes::{class_of, dotted, Key, Node, Param, Scope};
+use crate::types::compat::{column_literal_values, extra_literals};
 use crate::types::generic::is_word;
 use crate::types::info::{Dict, Kind, TypeInfo};
-use crate::types::resolve::slice_items;
+use crate::types::pydantic::Known;
+use crate::types::resolve::{slice_items, NoNames, Resolver};
 use crate::types::symbols::{bound_names, Source};
+use crate::types::ty::Lit;
 use crate::unparse::unparse;
 use crate::{drivers, module, templates};
 
@@ -861,7 +864,36 @@ impl<'a> Module<'a, '_> {
         let typed = dialect != "sqlite";
         let postgres = dialect == "postgres" || dialect == "postgresql";
         let mut found = Vec::new();
+        let resolver = Resolver {
+            aliases: &source.aliases,
+            imports: None,
+            known: Known::Imported,
+            version: source.version,
+        };
         for (label, annotation, param, key) in pairs {
+            // The annotation of a key of a TypedDict is of the source that defines it.
+            let defined = info.and_then(|info| {
+                info.annotations
+                    .values()
+                    .find(|a| std::ptr::eq(&a.expr, annotation))
+            });
+            let annotation_text = defined.map_or(text.as_ref(), |a| a.source.as_ref());
+            // MySQL compares with case-insensitive collations by default.
+            let exact = postgres || dialect == "sqlite";
+            let column = param.literal.as_deref().filter(|_| exact);
+            let column = column.and_then(column_literal_values);
+            let declared = resolver.resolve(annotation, annotation_text, &NoNames);
+            if let (Some(column), Some(declared)) = (column, declared) {
+                let extra = extra_literals(&declared, &column);
+                if !extra.is_empty() {
+                    let spelled = unparse(annotation, annotation_text);
+                    let extra: Vec<String> = extra.iter().map(Lit::repr).collect();
+                    found.push(format!(
+                        "{label} is {spelled} but query parameter {key} is never {}",
+                        extra.join(", ")
+                    ));
+                }
+            }
             for member in union_members(annotation) {
                 let actual = annotation_type(member, &source.imports);
                 if actual.as_deref() != Some("None") && !(typed && !param.cast) {
@@ -875,15 +907,7 @@ impl<'a> Module<'a, '_> {
                     false,
                 ) {
                     let expected = problem.split(", got ").next().unwrap_or(&problem);
-                    // The annotation of a key of a TypedDict is of the source that defines it.
-                    let spelled = match info.and_then(|info| {
-                        info.annotations
-                            .values()
-                            .find(|a| std::ptr::eq(&a.expr, annotation))
-                    }) {
-                        Some(annotation) => annotation.unparse(),
-                        None => unparse(annotation, text),
-                    };
+                    let spelled = unparse(annotation, annotation_text);
                     found.push(format!(
                         "{label} is {spelled} but query parameter {key} {expected}"
                     ));

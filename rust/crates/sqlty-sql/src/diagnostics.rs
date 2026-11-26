@@ -334,12 +334,15 @@ mod tests {
                 "unsupported-syntax",
                 "insert-missing-column",
                 "insert-value-count",
+                "literal-write",
+                "unmatched-literal",
                 "ungrouped-column",
                 "fanout-aggregate",
                 "chasm-join",
                 "unproven-join",
                 "entity-mismatch",
                 "foreign-key-mismatch",
+                "tenant-scope",
                 "rejected-query",
             ]
         );
