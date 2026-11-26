@@ -84,6 +84,8 @@ pub(super) struct Scope {
     sources: Vec<Source>,
     /// The position of the first source of each reference, built on the first lookup.
     index: OnceCell<FxHashMap<Box<str>, usize>>,
+    /// These sources followed by an outer scope, kept for the subqueries that read both.
+    correlated: OnceCell<(Rc<Scope>, Rc<Scope>)>,
 }
 
 /// The most sources [`Scope::position`] scans.
@@ -100,6 +102,7 @@ impl Scope {
                 .entry(source.reference.as_str().into())
                 .or_insert(self.sources.len());
         }
+        self.correlated = OnceCell::new();
         self.sources.push(source);
     }
 
@@ -107,6 +110,23 @@ impl Scope {
     pub(super) fn rotate_first_last(&mut self) {
         self.sources.rotate_left(1);
         self.index = OnceCell::new();
+        self.correlated = OnceCell::new();
+    }
+
+    /// These sources, then those of `outer`: what a subquery correlated to them reads.
+    /// Built once per outer scope, so subqueries of one clause share it.
+    pub(super) fn with_outer(&self, outer: &Rc<Scope>) -> Rc<Scope> {
+        if let Some((seen, combined)) = self.correlated.get() {
+            if Rc::ptr_eq(seen, outer) {
+                return Rc::clone(combined);
+            }
+        }
+        let combined = Rc::new(Scope::from([&self[..], &outer[..]].concat()));
+        // A second outer scope is rare: only the first is kept.
+        let _ = self
+            .correlated
+            .set((Rc::clone(outer), Rc::clone(&combined)));
+        combined
     }
 
     /// The position of the first source read by `reference`.
@@ -151,6 +171,7 @@ impl From<Vec<Source>> for Scope {
         Self {
             sources,
             index: OnceCell::new(),
+            correlated: OnceCell::new(),
         }
     }
 }
@@ -625,7 +646,7 @@ impl<'a> Analyzer<'a> {
     /// An analyzer for a subquery of an expression: its names may refer to `scope`.
     pub(super) fn correlated(&self, scope: &Scope) -> Analyzer<'a> {
         let mut inner = self.clone();
-        inner.outer = Rc::new(Scope::from([&scope[..], &self.outer[..]].concat()));
+        inner.outer = scope.with_outer(&self.outer);
         inner
     }
 

@@ -37,3 +37,25 @@ SELECT EXISTS (SELECT 1 FROM member WHERE false) AS has_any,
        (SELECT count(*)::int + 1 FROM member WHERE false) AS c
 -- inferred: tuple[bool, int]
 ```
+
+## Correlated subqueries read every relation before them
+
+The subqueries of one clause share their outer scope, and a relation added after one
+subquery is read by the subqueries after it.
+
+```sql
+SELECT g::int AS g, (SELECT g FROM member x LIMIT 1) AS h
+FROM member a, generate_series(1, (SELECT max(x.id) FROM member x WHERE x.id = a.id)) g
+WHERE EXISTS (SELECT 1 FROM member x WHERE x.id = g)
+-- inferred: tuple[int, int | None]
+```
+
+```python
+from sqlty import SQL
+
+# error:
+q = SQL[tuple[int, int | None]]("""--sql
+SELECT g::int AS g, (SELECT g FROM member x LIMIT 1) AS h
+FROM member a, generate_series(1, (SELECT max(x.id) FROM member x WHERE x.id = a.id)) g
+WHERE EXISTS (SELECT 1 FROM member x WHERE x.id = g)""")
+```
