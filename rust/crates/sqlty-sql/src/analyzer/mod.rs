@@ -61,8 +61,8 @@ mod typed;
 pub(crate) use api::load_schema;
 pub use api::{
     analyze_query, analyze_select, analyze_with_diagnostics, composite_columns, infer_type,
-    load_schema_with_overrides, load_schema_with_skipped, parse, parse_error, returns_rows,
-    row_type, statement_ranges, Parsed,
+    load_schema_on_pool, load_schema_with_overrides, load_schema_with_skipped, parse, parse_error,
+    returns_rows, row_type, statement_ranges, Parsed,
 };
 pub(crate) use api::{typed, view_columns};
 pub use complete::{complete, Candidate, CandidateKind, Completions};

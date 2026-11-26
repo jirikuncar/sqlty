@@ -1,7 +1,7 @@
 //! Reading schema statements into loader operations, and the [`load`] entry point.
 
 use std::rc::Rc;
-use std::sync::{Arc, LazyLock, OnceLock};
+use std::sync::{Arc, LazyLock};
 
 use rayon::prelude::*;
 use sqlparser::ast::{
@@ -85,15 +85,18 @@ impl<'a> Read<'a> {
 }
 
 /// Apply each statement in order; the ones waiting on a later definition are returned
-/// for [`Loader::run`]. On a rayon thread, batches of statements are parsed on the pool
-/// while the batch before them is applied, so at most two batches of parsed statements
-/// are held; elsewhere a statement lives only until it is applied.
+/// for [`Loader::run`]. When `parallel` on a rayon thread, batches of statements are
+/// parsed on the pool while the batch before them is applied, so at most two batches of
+/// parsed statements are held; otherwise a statement lives only until it is applied.
+/// A thread waiting on the pool runs other jobs, so `parallel` is only for a caller
+/// that holds no lock and runs inside no lazy initializer another job may wait on.
 pub(super) fn read_statements<'a>(
     source: &'a str,
     statements: impl IntoIterator<Item = ddl::Statement<'a>, IntoIter: Send>,
     dialect: SqlDialect,
     loader: &mut Loader,
     skipped: &mut Vec<SkippedObject>,
+    parallel: bool,
 ) -> Vec<Op> {
     let mut path = Rc::new(vec!["public".to_string()]);
     let mut pending = Vec::new();
@@ -126,7 +129,7 @@ pub(super) fn read_statements<'a>(
         true
     };
     let mut statements = statements.into_iter();
-    if rayon::current_thread_index().is_none() {
+    if !parallel || rayon::current_thread_index().is_none() {
         for stmt in statements {
             if !apply(Read::new(stmt, dialect)) {
                 break;
@@ -480,42 +483,37 @@ pub(super) const BUILTIN_SQL: &str = concat!(
 /// relations, `search_path` and functions; it, MySQL and SQLite follow `ALTER` and `DROP`.
 /// Other dialects read `CREATE TABLE`, `VIEW`, `DOMAIN` and `TYPE` only.
 pub(crate) fn load(schema_sql: &str, dialect: &str) -> (Catalog, Vec<SkippedObject>) {
-    load_with(schema_sql, dialect, Arc::default())
+    load_with(schema_sql, dialect, Arc::default(), false)
 }
 
-/// [`load`], with the Python types the project sets for SQL types and columns.
+/// [`load`], with the Python types the project sets for SQL types and columns, its
+/// statements parsed on the current rayon pool when `parallel` (see [`read_statements`]).
 pub(crate) fn load_with(
     schema_sql: &str,
     dialect: &str,
     overrides: Arc<TypeOverrides>,
+    parallel: bool,
 ) -> (Catalog, Vec<SkippedObject>) {
     // The built-ins are read once per process: parsing them costs more than most schemas.
-    // Not a `LazyLock`: a thread waiting on the pool while it reads them may take another
-    // load, which then reads its own copy instead of waiting on itself.
-    static BUILTIN: OnceLock<Loader> = OnceLock::new();
-    let builtin = || {
+    static BUILTIN: LazyLock<Loader> = LazyLock::new(|| {
         let mut loader = Loader::new(SqlDialect::Postgres);
         let builtin = ddl::statements(BUILTIN_SQL, false);
+        let mut skipped = Vec::new();
         let ops = read_statements(
             BUILTIN_SQL,
             builtin,
             SqlDialect::Postgres,
             &mut loader,
-            &mut Vec::new(),
+            &mut skipped,
+            false,
         );
         loader.run(ops);
         loader.search_path = vec!["public".to_string()];
         loader
-    };
+    });
     let dialect = SqlDialect::from_name(dialect);
     let mut loader = if dialect == SqlDialect::Postgres {
-        match BUILTIN.get() {
-            Some(loader) => loader.fork(),
-            None => {
-                let read = builtin();
-                BUILTIN.get_or_init(|| read).fork()
-            }
-        }
+        BUILTIN.fork()
     } else {
         Loader::new(dialect)
     };
@@ -523,7 +521,14 @@ pub(crate) fn load_with(
     loader.allow(schema_sql);
     let mut skipped = Vec::new();
     let statements = ddl::statements(schema_sql, dialect == SqlDialect::MySql);
-    let ops = read_statements(schema_sql, statements, dialect, &mut loader, &mut skipped);
+    let ops = read_statements(
+        schema_sql,
+        statements,
+        dialect,
+        &mut loader,
+        &mut skipped,
+        parallel,
+    );
     loader.run(ops);
     loader.resolve_foreign_keys();
     skipped.append(&mut loader.skipped);

@@ -476,16 +476,20 @@ impl Builder {
                     .is_none_or(|named| named.is_match(&known.text))
                     && IMPORT_AS.is_match(&known.text)
             };
-            let aliasing: Vec<&Arc<Module>> = match rayon::current_thread_index() {
+            let aliasing: Vec<&Arc<Source>> = match rayon::current_thread_index() {
                 Some(_) => self
                     .sources()
                     .par_iter()
                     .map(|(_, known)| known)
                     .filter(aliases)
+                    .filter_map(|known| known.source())
                     .collect(),
-                None => self.sources().values().filter(aliases).collect(),
+                None => {
+                    let sources = self.sources().values().filter(aliases);
+                    sources.filter_map(|known| known.source()).collect()
+                }
             };
-            for source in aliasing.into_iter().filter_map(|known| known.source()) {
+            for source in aliasing {
                 renamed.extend(
                     source
                         .targets()

@@ -179,7 +179,8 @@ fn a_schema_loads_on_a_pool_as_on_one_thread() {
     sql += "CREATE TABLE broken (;\nCREATE TABLE late (x int);\n";
     sql += "CREATE SCHEMA s;\nSET search_path TO s;\nCREATE TABLE inner_t (y text);\nSET search_path TO public;";
     let read = || {
-        let (schema, skipped) = analyzer::load_schema_with_skipped(&sql, "postgres");
+        let overrides = TypeOverrides::default();
+        let (schema, skipped) = analyzer::load_schema_on_pool(&sql, "postgres", overrides);
         let columns = |table: &str| {
             let sql = format!("SELECT * FROM {table}");
             let columns = analyzer::analyze_select(&sql, "postgres", Some(&schema));

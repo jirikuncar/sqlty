@@ -38,7 +38,21 @@ pub fn load_schema_with_overrides(
     dialect: &str,
     overrides: crate::catalog::TypeOverrides,
 ) -> (Schema, Vec<SkippedObject>) {
-    let (catalog, skipped) = crate::catalog::load_with(schema_sql, dialect, Arc::new(overrides));
+    let (catalog, skipped) =
+        crate::catalog::load_with(schema_sql, dialect, Arc::new(overrides), false);
+    (Arc::new(catalog), skipped)
+}
+
+/// [`load_schema_with_overrides`], its statements parsed on the current rayon pool while
+/// the ones before them are applied. Call it only from a thread that holds no lock and
+/// runs inside no lazy initializer: while it waits on the pool, it runs other jobs.
+pub fn load_schema_on_pool(
+    schema_sql: &str,
+    dialect: &str,
+    overrides: crate::catalog::TypeOverrides,
+) -> (Schema, Vec<SkippedObject>) {
+    let (catalog, skipped) =
+        crate::catalog::load_with(schema_sql, dialect, Arc::new(overrides), true);
     (Arc::new(catalog), skipped)
 }
 
