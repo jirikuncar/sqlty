@@ -16,6 +16,7 @@ CREATE TABLE tagged (id INTEGER PRIMARY KEY, kind TEXT NOT NULL, a TEXT, CHECK (
 CREATE VIEW tagged_view AS SELECT * FROM tagged;
 CREATE FUNCTION order_count() RETURNS INT LANGUAGE sql AS 'SELECT 1';
 CREATE TABLE pairs (a INTEGER REFERENCES orders, b INTEGER REFERENCES customers, PRIMARY KEY (a, b));
+CREATE TABLE pair_notes (a INTEGER, b INTEGER, FOREIGN KEY (a, b) REFERENCES pairs (a, b));
 CREATE FUNCTION tag_count(x INT, y nope) RETURNS INT LANGUAGE sql AS 'SELECT 1';
 CREATE FUNCTION all_orders() RETURNS SETOF orders LANGUAGE sql AS 'SELECT * FROM orders';
 CREATE VIEW lost AS SELECT * FROM nowhere;
@@ -178,6 +179,7 @@ const CASES: &[Case] = &[
     ("bigquery", "SELECT STRUCT(1 AS a).*, COUNT(*) FROM orders GROUP BY id", &["[unsupported-syntax] `<expression>.*` is not expanded"]),
     ("generic", "TABLE orders UNION TABLE orders", &[]),
     ("generic", "SELECT 1 UNION VALUES (2)", &["[unsupported-syntax] a VALUES list is not typed"]),
+    ("postgres", "SELECT n.a FROM pair_notes n WHERE EXISTS (SELECT p.*, p.b FROM pairs p WHERE p.a = n.a)", &[]),
     ("postgres", "SELECT * FROM orders o JOIN pairs q ON o.id = q.a JOIN pairs p ON p.a = q.b", &["[foreign-key-mismatch] pairs.a references orders.id, not pairs.b", "[entity-mismatch] pairs.a holds orders keys, pairs.b holds customers keys"]),
     ("postgres", "SELECT 1 FROM orders o WHERE o.id IN (SELECT p.id FROM payments p) AND o.id IN (SELECT id, order_id FROM payments)", &["[entity-mismatch] orders.id holds orders keys, payments.id holds payments keys"]),
     ("databricks", "SELECT stack(1, 2, 3) AS (a, b) FROM orders GROUP BY id", &["[unknown-function] function `stack` is not known to sqlty, so its result is untyped"]),

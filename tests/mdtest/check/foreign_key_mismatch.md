@@ -267,6 +267,7 @@ d = SQL[tuple[str]]("--sql\nSELECT w.code FROM stock s JOIN warehouses w ON w.re
 e = SQL[tuple[str]]("--sql\nSELECT s.code FROM stock s WHERE s.code IN (SELECT w.code FROM warehouses w WHERE w.region = s.region)")
 f = SQL[tuple[str]]("--sql\nSELECT s.code FROM stock s WHERE s.code IN (SELECT w.code FROM warehouses w WHERE w.region IS NOT DISTINCT FROM s.region)")
 g = SQL[tuple[str]]("--sql\nSELECT s.code FROM stock s WHERE s.region = 'eu' AND s.code IN (SELECT code FROM warehouses WHERE 'eu' = region)")
+h = SQL[tuple[str]]("--sql\nSELECT s.code FROM stock s WHERE EXISTS (SELECT w.*, w.code FROM warehouses w WHERE w.region = s.region)")
 ```
 
 A term read as no comparison that relates both rows may compare the rest of the key:
