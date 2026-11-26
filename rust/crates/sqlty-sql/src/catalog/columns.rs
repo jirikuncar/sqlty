@@ -254,7 +254,6 @@ fn checked(columns: &[RawColumn], expr: &Expr, dialect: SqlDialect) -> Vec<(usiz
 fn discriminates(check: &Expr) -> bool {
     fn leaves<'e>(expr: &'e Expr, into: &mut Vec<&'e Expr>) {
         match expr {
-            Expr::Nested(inner) => leaves(inner, into),
             Expr::BinaryOp {
                 left,
                 op: BinaryOperator::And | BinaryOperator::Or,

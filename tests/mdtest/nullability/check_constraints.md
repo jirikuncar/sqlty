@@ -237,6 +237,60 @@ CREATE TABLE mixed (
     CHECK (CASE lower(kind) WHEN 'c' THEN c IS NOT NULL END),
     CHECK (kind = 'd' AND num_nonnulls(a, b, c, d, id, kind) = 6 OR kind = 'e')
 );
+CREATE TABLE odd (
+    id SERIAL PRIMARY KEY,
+    kind TEXT NOT NULL,
+    a TEXT,
+    b TEXT,
+    c TEXT,
+    d TEXT,
+    e TEXT,
+    CHECK (CASE WHEN kind > 'a' THEN a IS NOT NULL END),
+    CHECK (kind = 'a' AND num_nonnulls(b, 1) = 1 OR kind = 'b'),
+    CHECK (kind = 'a' AND CURRENT_DATE = 1 AND c IS NOT NULL OR kind = 'b'),
+    CHECK (kind = 'a' AND length(d) = 1 AND d IS NOT NULL OR kind = 'b'),
+    CHECK (CASE kind
+                  WHEN '0' THEN e IS NOT NULL
+                  WHEN '1' THEN e IS NOT NULL
+                  WHEN '2' THEN e IS NOT NULL
+                  WHEN '3' THEN e IS NOT NULL
+                  WHEN '4' THEN e IS NOT NULL
+                  WHEN '5' THEN e IS NOT NULL
+                  WHEN '6' THEN e IS NOT NULL
+                  WHEN '7' THEN e IS NOT NULL
+                  WHEN '8' THEN e IS NOT NULL
+                  WHEN '9' THEN e IS NOT NULL
+                  WHEN '10' THEN e IS NOT NULL
+                  WHEN '11' THEN e IS NOT NULL
+                  WHEN '12' THEN e IS NOT NULL
+                  WHEN '13' THEN e IS NOT NULL
+                  WHEN '14' THEN e IS NOT NULL
+                  WHEN '15' THEN e IS NOT NULL
+                  WHEN '16' THEN e IS NOT NULL
+                  WHEN '17' THEN e IS NOT NULL
+                  WHEN '18' THEN e IS NOT NULL
+                  WHEN '19' THEN e IS NOT NULL
+                  WHEN '20' THEN e IS NOT NULL
+                  WHEN '21' THEN e IS NOT NULL
+                  WHEN '22' THEN e IS NOT NULL
+                  WHEN '23' THEN e IS NOT NULL
+                  WHEN '24' THEN e IS NOT NULL
+                  WHEN '25' THEN e IS NOT NULL
+                  WHEN '26' THEN e IS NOT NULL
+                  WHEN '27' THEN e IS NOT NULL
+                  WHEN '28' THEN e IS NOT NULL
+                  WHEN '29' THEN e IS NOT NULL
+                  WHEN '30' THEN e IS NOT NULL
+                  WHEN '31' THEN e IS NOT NULL
+                  WHEN '32' THEN e IS NOT NULL
+           END)
+);
+CREATE TABLE tagged (
+    id SERIAL PRIMARY KEY,
+    kind TEXT NOT NULL,
+    a TEXT,
+    CHECK (CASE kind WHEN 'a' THEN TRUE ELSE a IS NOT NULL END)
+);
 CREATE TABLE repeated (
     id SERIAL PRIMARY KEY,
     kind pay_kind NOT NULL,
@@ -291,8 +345,9 @@ SELECT iban FROM counted WHERE kind = 'iban'
 -- inferred: tuple[str | None]
 ```
 
-A `CASE` whose `WHEN`s test different columns or an expression, or list a value twice, an
-arm of another shape, or a count over more than five columns is not read.
+A `CASE` whose `WHEN`s test different columns, an expression or another operator, or
+list a value twice, or has more than 32 `WHEN`s is not read. Neither is an arm of another
+shape, another function, or a count over more than five columns or over something else.
 
 ```sql
 SELECT a FROM mixed WHERE kind = 'a'
@@ -312,6 +367,23 @@ SELECT c FROM mixed WHERE kind = 'c'
 ```sql
 SELECT d FROM mixed WHERE kind = 'd'
 -- inferred: tuple[str | None]
+```
+
+```sql
+SELECT a, b, c, d FROM odd WHERE kind = 'a'
+-- inferred: tuple[str | None, str | None, str | None, str | None]
+```
+
+```sql
+SELECT e FROM odd WHERE kind = '1'
+-- inferred: tuple[str | None]
+```
+
+A `THEN TRUE` arm requires nothing, and the `ELSE` covers the other values.
+
+```sql
+SELECT a FROM tagged WHERE kind = 'b'
+-- inferred: tuple[str]
 ```
 
 ```sql
