@@ -396,6 +396,11 @@ fn union_members(annotation: &Expr) -> Vec<Option<&Expr>> {
     }
 }
 
+/// `n parameter(s)`.
+fn parameters(n: usize) -> String {
+    format!("{n} parameter{}", plural(n))
+}
+
 /// The type a value annotated `expr` has, as argument
 /// types are spelled.
 fn annotation_type(expr: Option<&Expr>, imported: &Table) -> Option<String> {
@@ -752,15 +757,51 @@ impl<'a> Module<'a, '_> {
         params: &[analyzer::Param],
     ) -> Vec<String> {
         let name = unparse(declared, &self.source.text);
-        let (declared, source) = if shadowed {
+        let (resolved, source) = if shadowed {
             (declared, self.source)
         } else {
             self.unaliased(declared, self.source)
         };
+        let is_no_params =
+            dotted(declared).is_some_and(|d| d.rsplit('.').next() == Some("NoParams"));
+        match union_members(resolved).as_slice() {
+            members @ [_, _, ..] if !is_no_params => {
+                let mut found: Vec<String> = members
+                    .iter()
+                    .flat_map(|member| match member {
+                        Some(member) => self.member_params_diagnostics(
+                            &unparse(member, &source.text),
+                            member,
+                            source,
+                            params,
+                        ),
+                        None if !params.is_empty() => vec![format!(
+                            "None takes none but the query has {}",
+                            parameters(params.len())
+                        )],
+                        None => Vec::new(),
+                    })
+                    .collect();
+                found.dedup();
+                found
+            }
+            _ => self.member_params_diagnostics(&name, resolved, source, params),
+        }
+    }
+
+    /// [`Self::declared_params_diagnostics`] of `declared`, a type in `source` named `name`
+    /// that is not a union.
+    fn member_params_diagnostics(
+        &self,
+        name: &str,
+        declared: &Expr,
+        source: &Source,
+        params: &[analyzer::Param],
+    ) -> Vec<String> {
         let text = &source.text;
         let named = !params.is_empty() && params.iter().all(|p| p.name.is_some());
         let dotted_name = dotted(declared).unwrap_or_default();
-        let count = |n: usize| format!("{n} parameter{}", plural(n));
+        let count = parameters;
         // `(label, annotation, parameter, key)`
         let mut pairs: Vec<(String, &Expr, &analyzer::Param, String)> = Vec::new();
         let info = self.row_type_in(&unparse(declared, text), source, &self.ctx.type_defs);
