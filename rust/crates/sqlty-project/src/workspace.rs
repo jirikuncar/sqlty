@@ -1400,10 +1400,8 @@ mod tests {
             .into_iter()
             .map(|(_, settings)| settings.schema.clone().expect("loaded"))
             .collect();
-        let [own, lite, copy] = &schemas[..] else {
-            panic!("three databases: {}", schemas.len());
-        };
-        assert!(copy.shares_data(own) && !lite.shares_data(own));
+        assert_eq!(schemas.len(), 3);
+        assert!(schemas[2].shares_data(&schemas[0]) && !schemas[1].shares_data(&schemas[0]));
         let counts = workspace.statistics_all().expect("counts");
         assert_eq!(counts[0].get("typed"), Some(&1));
         assert_eq!(counts[0].get("partially typed"), Some(&1));
