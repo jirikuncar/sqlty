@@ -27,6 +27,14 @@ agent, and say in the pull request description which agent was used and for what
 
 ## Writing tests
 
+Tests go through the public API of the package they test: a Rust crate's from its
+`tests/` against its `pub` items, sqlty's from `sqlty`, `sqlty.core`, the CLI or
+`sqlty._core` (sqlty-ext's API), never a private `sqlty._*` module. Keep a test in `src/`
+only for what no public call can observe, such as an allocation or a catalog-entry count.
+`scripts/internal-tests.txt` counts what does not yet, per package (`#[test]`s in `src/`,
+private uses in pytest files);
+`tests/test_public_api_tests.py` fails when one rises and asks to lower it when one falls.
+
 Tests run in parallel and in random order. A test must not depend on another
 having run, nor on the working directory or global state another changes.
 A test that measures wall time is marked `timing`.
