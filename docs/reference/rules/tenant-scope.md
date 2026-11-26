@@ -82,9 +82,10 @@ from sqlty import SQL
 counts = SQL[tuple[int, int]]("--sql\nSELECT org_id, count(*)::INT FROM projects GROUP BY org_id")  # sqlty: ignore[tenant-scope]
 ```
 
-The tenant keys are the primary key of the tenant table and every column of a
-foreign key to it, less `exclude`, plus `columns`. A table with a tenant key is a
-tenant table. A tenant table's key is pinned when:
+The tenant keys are the primary key of the tenant table and every foreign key to
+it, less those with a column in `exclude`, plus each column of `columns`. A table
+with a tenant key is a tenant table. It is scoped when every column of one of its
+tenant keys is pinned, and a column is pinned when:
 
 - `WHERE`, or the `ON` of an inner join, compares it with a parameter: `= %s`,
   `IN (%s, %s)` or `= ANY(%s)`, cast or not;
@@ -94,6 +95,11 @@ tenant table. A tenant table's key is pinned when:
 A `LEFT JOIN`'s `ON` pins the joined table only, since every row of the left side is
 kept; a `RIGHT JOIN`'s pins the others, and a `FULL JOIN`'s none. A table with two
 tenant keys, such as `transfers (from_org, to_org)`, is pinned by either.
+
+A write must not move a row to another tenant either: an `INSERT` sets each tenant
+key column from a parameter (or, in `INSERT ... SELECT`, from a column of the query,
+which is judged itself), and an `UPDATE` or `ON CONFLICT DO UPDATE` that sets one
+sets it from a parameter or `EXCLUDED`.
 
 ## Why is this bad?
 
@@ -118,7 +124,10 @@ pinned tenant key of a table joined to it: `DELETE FROM events WHERE org = %s AN
 | `exclude` | `table.column` tenant keys of data shared across tenants, such as an audit log |
 | `columns` | `table.column` tenant ids that have no foreign key, such as those of a partitioned or external table |
 
-A table with `ENABLE ROW LEVEL SECURITY` is not judged: the database scopes it. An
+A table with `ENABLE ROW LEVEL SECURITY` is not judged: the database scopes it for
+every role but superusers, `BYPASSRLS` roles and, unless the table also has
+`FORCE ROW LEVEL SECURITY`, its owner. An
 `INSERT ... SELECT` is judged as the query it runs, and the tenant table itself may be
 inserted into freely. A CTE or derived table is judged by its own body: a pin in the query that reads it
-does not reach it, so pin the key inside the CTE. A view is not judged.
+does not reach it, so pin the key inside the CTE. Views and `MERGE` are not judged.
+The rule runs for PostgreSQL, MySQL and SQLite, the dialects whose names sqlty checks.

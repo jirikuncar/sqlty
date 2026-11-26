@@ -9,10 +9,12 @@
 use std::collections::{HashMap, HashSet};
 
 use sqlparser::ast::{
-    BinaryOperator, Expr, Ident, InTarget, JoinConstraint, JoinOperator, SetExpr, Spanned,
-    Statement, TableFactor, TableObject, TableWithJoins, Value,
+    Assignment, AssignmentTarget, BinaryOperator, Expr, Ident, InTarget, JoinConstraint,
+    JoinOperator, OnConflictAction, OnInsert, SetExpr, Spanned, Statement, TableFactor,
+    TableObject, TableWithJoins, Value,
 };
 
+use super::dml::{assigned_names, written_rows};
 use super::fanout::{conjuncts, strip};
 use super::names::{object_name, table_key};
 use super::query::Analyzer;
@@ -81,6 +83,7 @@ impl Analyzer<'_> {
         let (target, joined, selection, verb): (_, Vec<&TableWithJoins>, _, _) = match stmt {
             Statement::Insert(insert) => return self.check_tenant_insert(insert),
             Statement::Update(update) => {
+                self.check_tenant_update(update);
                 let from = update.from.iter().flat_map(|from| match from {
                     sqlparser::ast::UpdateTableFromKind::BeforeSet(tables)
                     | sqlparser::ast::UpdateTableFromKind::AfterSet(tables) => tables,
@@ -135,7 +138,9 @@ impl Analyzer<'_> {
     }
 
     /// An INSERT into a tenant table other than the tenant table itself must set each
-    /// tenant key it writes from a parameter, in every row of its `VALUES` or `SET`.
+    /// tenant key column from a parameter: in every row of its `VALUES` or `SET`, or in the
+    /// select list of its query, where a column also counts, as that query is judged itself.
+    /// Its `ON CONFLICT DO UPDATE` must set one from a parameter or `EXCLUDED`.
     fn check_tenant_insert(&self, insert: &sqlparser::ast::Insert) {
         let TableObject::TableName(name) = &insert.table else {
             return;
@@ -145,43 +150,66 @@ impl Analyzer<'_> {
         let Some(keys) = catalog.tenant_keys(&key) else {
             return;
         };
+        let short = object_name(name);
+        let mut tenant_columns: Vec<&str> = keys.iter().flatten().map(String::as_str).collect();
+        tenant_columns.sort_unstable();
+        tenant_columns.dedup();
+        if let Some(OnInsert::OnConflict(on_conflict)) = &insert.on {
+            if let OnConflictAction::DoUpdate(update) = &on_conflict.action {
+                let excluded = |value: &Expr| {
+                    matches!(strip(value), Expr::CompoundIdentifier(parts)
+                        if parts.len() == 2 && parts[0].value.eq_ignore_ascii_case("excluded"))
+                };
+                self.check_tenant_assignments(
+                    name,
+                    &short,
+                    &tenant_columns,
+                    &update.assignments,
+                    &excluded,
+                );
+            }
+        }
         if catalog.is_tenant_table(&key) {
             return;
         }
-        let columns: Vec<String> = match insert.columns.is_empty() {
-            false => insert.columns.iter().map(object_name).collect(),
-            true => (self.schema.table(&key).into_iter().flatten())
-                .filter(|column| !column.invisible)
-                .map(|column| column.name.to_lowercase())
-                .collect(),
+        let assigned = assigned_names(&insert.assignments);
+        let (columns, rows): (Vec<String>, Vec<Vec<&Expr>>) = match &insert.source {
+            None => (
+                assigned,
+                vec![insert.assignments.iter().map(|a| &a.value).collect()],
+            ),
+            Some(source) => {
+                let columns = match insert.columns.is_empty() {
+                    false => insert.columns.iter().map(object_name).collect(),
+                    true => (self.schema.table(&key).into_iter().flatten())
+                        .filter(|column| !column.invisible)
+                        .map(|column| column.name.to_lowercase())
+                        .collect(),
+                };
+                let mut rows = Vec::new();
+                written_rows(&source.body, &mut rows);
+                (columns, rows)
+            }
         };
-        let rows: Vec<Vec<&Expr>> = match insert.source.as_deref().map(|q| q.body.as_ref()) {
-            Some(SetExpr::Values(values)) => (values.rows.iter())
-                .map(|row| row.iter().collect())
-                .collect(),
-            // `INSERT ... SELECT` is judged as the query it runs.
-            Some(_) => return,
-            None => vec![insert.assignments.iter().map(|a| &a.value).collect()],
+        let query = !matches!(
+            insert.source.as_deref().map(|q| q.body.as_ref()),
+            None | Some(SetExpr::Values(_))
+        );
+        let tenant_value = |value: &Expr| {
+            is_parameter(value)
+                || query
+                    && matches!(
+                        strip(value),
+                        Expr::Identifier(_) | Expr::CompoundIdentifier(_)
+                    )
         };
-        let assigned: Vec<String> = (insert.assignments.iter())
-            .filter_map(|a| match &a.target {
-                sqlparser::ast::AssignmentTarget::ColumnName(column) => Some(object_name(column)),
-                sqlparser::ast::AssignmentTarget::Tuple(_) => None,
-            })
-            .collect();
-        let columns = if insert.source.is_none() {
-            assigned
-        } else {
-            columns
-        };
-        let short = object_name(name);
-        for tenant in keys {
+        for tenant in tenant_columns {
             let at = columns
                 .iter()
                 .position(|column| column.eq_ignore_ascii_case(tenant));
             let from_parameter = at.is_some_and(|at| {
                 rows.iter()
-                    .all(|row| row.get(at).is_some_and(|value| is_parameter(value)))
+                    .all(|row| row.get(at).is_some_and(|value| tenant_value(value)))
             });
             if !from_parameter {
                 let _at = self.diag.at(name.span());
@@ -189,6 +217,53 @@ impl Analyzer<'_> {
                     Rule::TenantScope,
                     format!("INSERT into `{short}` does not set `{tenant}` from a parameter"),
                 );
+            }
+        }
+    }
+
+    /// An UPDATE of a tenant table that sets a tenant key column must set it from a
+    /// parameter, or the row moves to a tenant the caller did not name.
+    fn check_tenant_update(&self, update: &sqlparser::ast::Update) {
+        let TableFactor::Table { name, .. } = &update.table.relation else {
+            return;
+        };
+        let key = table_key(name, self.dialect);
+        let Some(keys) = self.schema.catalog().tenant_keys(&key) else {
+            return;
+        };
+        let mut tenant_columns: Vec<&str> = keys.iter().flatten().map(String::as_str).collect();
+        tenant_columns.sort_unstable();
+        tenant_columns.dedup();
+        let short = object_name(name);
+        self.check_tenant_assignments(name, &short, &tenant_columns, &update.assignments, &|_| {
+            false
+        });
+    }
+
+    fn check_tenant_assignments(
+        &self,
+        name: &sqlparser::ast::ObjectName,
+        short: &str,
+        tenant_columns: &[&str],
+        assignments: &[Assignment],
+        also: &dyn Fn(&Expr) -> bool,
+    ) {
+        for assignment in assignments {
+            let AssignmentTarget::ColumnName(column) = &assignment.target else {
+                continue;
+            };
+            let column = object_name(column);
+            let tenant = tenant_columns
+                .iter()
+                .find(|key| key.eq_ignore_ascii_case(&column));
+            if let Some(tenant) = tenant {
+                if !is_parameter(&assignment.value) && !also(&assignment.value) {
+                    let _at = self.diag.at(name.span());
+                    self.diag.record(
+                        Rule::TenantScope,
+                        format!("UPDATE of `{short}` does not set `{tenant}` from a parameter"),
+                    );
+                }
             }
         }
     }
@@ -211,9 +286,10 @@ impl Analyzer<'_> {
             }
             let right = references(&join.relation);
             let (constraint, holds) = match &join.join_operator {
-                JoinOperator::Join(c) | JoinOperator::Inner(c) | JoinOperator::CrossJoin(c) => {
-                    (c, Holds::All)
-                }
+                JoinOperator::Join(c)
+                | JoinOperator::Inner(c)
+                | JoinOperator::CrossJoin(c)
+                | JoinOperator::StraightJoin(c) => (c, Holds::All),
                 JoinOperator::Left(c) | JoinOperator::LeftOuter(c) => (c, Holds::Only(&right)),
                 JoinOperator::Right(c) | JoinOperator::RightOuter(c) => (c, Holds::Except(&right)),
                 _ => {
@@ -298,7 +374,7 @@ impl Analyzer<'_> {
         let outer = !scope.iter().any(|source| source.reference == reference);
         let keyed = outer
             && (self.schema.catalog().tenant_keys(&table))
-                .is_some_and(|keys| keys.contains(&column.as_str()));
+                .is_some_and(|keys| keys.iter().flatten().any(|key| *key == column));
         Some(((reference, column), keyed))
     }
 
@@ -328,16 +404,23 @@ impl Analyzer<'_> {
             let Some(keys) = self.schema.catalog().tenant_keys(key) else {
                 continue;
             };
-            let pinned = keys
-                .iter()
-                .any(|column| reached.contains(&(reference.clone(), column.to_string())));
+            let pinned = keys.iter().any(|key| {
+                key.iter()
+                    .all(|column| reached.contains(&(reference.clone(), column.clone())))
+            });
             if pinned {
                 continue;
             }
             let short = object_name(name);
             let keys: Vec<String> = keys
                 .iter()
-                .map(|column| format!("`{short}.{column} = <parameter>`"))
+                .map(|key| {
+                    let pins: Vec<String> = key
+                        .iter()
+                        .map(|column| format!("`{short}.{column} = <parameter>`"))
+                        .collect();
+                    pins.join(" and ")
+                })
                 .collect();
             let _at = self.diag.at(factor.span());
             self.diag.record(

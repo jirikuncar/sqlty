@@ -4,7 +4,7 @@
 //! one relation when the loader updates the cached catalog in place.
 
 use std::ops::ControlFlow;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use rustc_hash::FxHashMap;
 
@@ -117,6 +117,7 @@ impl Loader {
             overrides: Arc::clone(&self.overrides),
             index: NameIndex::default(),
             databases: None,
+            tenants: OnceLock::new(),
         }
     }
 

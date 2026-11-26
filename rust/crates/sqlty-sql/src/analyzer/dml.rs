@@ -708,6 +708,17 @@ fn idents(name: &ObjectName) -> Option<Vec<Ident>> {
     name.0.iter().map(|part| part.as_ident().cloned()).collect()
 }
 
+/// The names of the columns `assignments` set one by one, in order.
+pub(super) fn assigned_names(assignments: &[Assignment]) -> Vec<String> {
+    assignments
+        .iter()
+        .filter_map(|assignment| match &assignment.target {
+            AssignmentTarget::ColumnName(column) => Some(object_name(column)),
+            AssignmentTarget::Tuple(_) => None,
+        })
+        .collect()
+}
+
 /// The columns `assignments` set, those of `(a, b) = ...` included.
 fn assigned_columns(assignments: &[Assignment]) -> Vec<ObjectName> {
     assignments
@@ -722,7 +733,7 @@ fn assigned_columns(assignments: &[Assignment]) -> Vec<ObjectName> {
 /// The expressions of each row `body`, an INSERT source, writes: the rows of `VALUES` and
 /// the items of a `SELECT`, of each side of `UNION` and the left of `EXCEPT` or `INTERSECT`.
 /// A `SELECT` with a `*` gives none; `TABLE t` is read as `SELECT * FROM t`.
-fn written_rows<'q>(body: &'q SetExpr, into: &mut Vec<Vec<&'q Expr>>) {
+pub(super) fn written_rows<'q>(body: &'q SetExpr, into: &mut Vec<Vec<&'q Expr>>) {
     match body {
         SetExpr::Values(values) => into.extend(values.rows.iter().map(|row| row.iter().collect())),
         SetExpr::SetOperation {

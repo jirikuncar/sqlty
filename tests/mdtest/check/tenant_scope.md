@@ -231,6 +231,66 @@ copied = SQL("--sql\nINSERT INTO invoices (org_id, project_id) SELECT org_id, id
 copied_all = SQL("--sql\nINSERT INTO invoices (org_id, project_id) SELECT org_id, id FROM projects")
 ```
 
+A query source sets the tenant key from its own columns, which that query pins; a
+constant in its select list is reported.
+
+```python
+from sqlty import SQL
+
+# error: [tenant-scope] "INSERT into `invoices` does not set `org_id` from a parameter"
+constant = SQL("--sql\nINSERT INTO invoices (org_id, project_id) SELECT 1, id FROM projects WHERE org_id = %s")
+```
+
+An upsert or an UPDATE that moves a row to another tenant is reported.
+
+```python
+from sqlty import SQL
+
+# error: [tenant-scope] "UPDATE of `projects` does not set `org_id` from a parameter"
+upsert = SQL("--sql\nINSERT INTO projects (id, org_id, name) VALUES (%s, %s, %s) ON CONFLICT (id) DO UPDATE SET org_id = 1")
+
+# error:
+upsert_excluded = SQL("--sql\nINSERT INTO projects (id, org_id, name) VALUES (%s, %s, %s) ON CONFLICT (id) DO UPDATE SET org_id = EXCLUDED.org_id")
+
+# error: [tenant-scope] "UPDATE of `projects` does not set `org_id` from a parameter"
+moved = SQL("--sql\nUPDATE projects SET org_id = 2 WHERE org_id = %s")
+
+# error:
+handed = SQL("--sql\nUPDATE projects SET org_id = %s WHERE org_id = %s AND id = %s")
+```
+
+### Composite keys
+
+Every column of a composite tenant key must be pinned.
+
+```toml
+[tool.sqlty]
+schema = "regions.sql"
+
+[tool.sqlty.tenancy]
+table = "orgs"
+```
+
+`regions.sql`:
+
+```sql
+CREATE TABLE orgs (id INTEGER, region TEXT, parent_id INTEGER, PRIMARY KEY (id, region));
+CREATE TABLE sites (id SERIAL PRIMARY KEY, org_id INTEGER NOT NULL, region TEXT NOT NULL, FOREIGN KEY (org_id, region) REFERENCES orgs);
+```
+
+```python
+from sqlty import SQL
+
+# error: [tenant-scope] "`sites` is read without `sites.org_id = <parameter>` and `sites.region = <parameter>`"
+by_region = SQL[tuple[int]]("--sql\nSELECT id FROM sites WHERE region = %s")
+
+# error:
+by_org = SQL[tuple[int]]("--sql\nSELECT id FROM sites WHERE org_id = %s AND region = %s")
+
+# error: [tenant-scope] "`orgs` is read without `orgs.id = <parameter>` and `orgs.region = <parameter>`"
+children = SQL[tuple[int]]("--sql\nSELECT id FROM orgs WHERE parent_id = %s")
+```
+
 ### Suppressed
 
 ```python
@@ -238,6 +298,35 @@ from sqlty import SQL
 
 # error:
 report = SQL[tuple[int]]("--sql\nSELECT count(*)::INT FROM projects")  # sqlty: ignore[tenant-scope]
+```
+
+## MySQL
+
+```toml
+[tool.sqlty]
+schema = "my.sql"
+dialect = "mysql"
+
+[tool.sqlty.tenancy]
+table = "orgs"
+```
+
+`my.sql`:
+
+```sql
+CREATE TABLE orgs (id INT PRIMARY KEY, name TEXT NOT NULL);
+CREATE TABLE projects (id INT PRIMARY KEY, org_id INT NOT NULL, name TEXT NOT NULL, FOREIGN KEY (org_id) REFERENCES orgs (id));
+CREATE TABLE invoices (id INT PRIMARY KEY, org_id INT NOT NULL, FOREIGN KEY (org_id) REFERENCES orgs (id));
+```
+
+```python
+from sqlty import SQL
+
+# error:
+straight = SQL[tuple[int]]("-- sql\nSELECT i.id FROM projects p STRAIGHT_JOIN invoices i ON i.org_id = p.org_id WHERE p.org_id = %s")
+
+# error: [tenant-scope] "INSERT into `projects` does not set `org_id` from a parameter"
+assigned = SQL("-- sql\nINSERT INTO projects SET id = %s, org_id = 1, name = %s")
 ```
 
 ## Other dialects

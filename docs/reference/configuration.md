@@ -441,8 +441,9 @@ columns = ["events.org"]
 | `exclude` | `table.column` keys of data shared across tenants |
 | `columns` | `table.column` tenant ids without a foreign key to `table` |
 
-The tenant keys are the primary key of `table` and each column of a foreign key to
-it, less `exclude`, plus `columns`. A schema in a name is dropped, as in
+The tenant keys are the primary key of `table` and each foreign key to it, less
+those with a column in `exclude`, plus each column of `columns`. `table` is looked
+up as a query names it; a schema in an `exclude` or `columns` key is dropped, as in
 [`types`](#types).
 
 ## `format-command`

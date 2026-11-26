@@ -49,7 +49,7 @@ pub(crate) use names::fold;
 pub(crate) use read::{load, load_with};
 
 use rustc_hash::FxHashMap;
-use std::sync::{Arc, LazyLock};
+use std::sync::{Arc, LazyLock, OnceLock};
 
 use sqlparser::ast::{DataType, Expr};
 
@@ -227,6 +227,8 @@ pub struct Catalog {
     index: NameIndex,
     /// The named databases queries are routed to, when the schema was loaded with them.
     pub(crate) databases: Option<Arc<crate::analyzer::Databases>>,
+    /// The tenant keys of each table, built on first use; see [`Catalog::tenant_keys`].
+    tenants: OnceLock<FxHashMap<Arc<str>, Vec<Vec<String>>>>,
 }
 
 /// Python types a project sets for SQL types or columns (`[tool.sqlty.types]`), for
@@ -245,8 +247,8 @@ pub struct TypeOverrides {
     tenancy: Option<Tenancy>,
 }
 
-/// `[tool.sqlty.tenancy]`: the table whose rows are the tenants, and the `table.column`
-/// keys it excludes or adds, folded and without a schema.
+/// `[tool.sqlty.tenancy]`: the table whose rows are the tenants, as written, and the
+/// `table.column` keys it excludes or adds, folded and without a schema.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 struct Tenancy {
     table: String,
@@ -329,7 +331,7 @@ impl TypeOverrides {
         for (key, python) in entries {
             if key == TENANCY {
                 let mut parts = python.split('\t');
-                let table = parts.next().map(short_name).unwrap_or_default();
+                let table = parts.next().unwrap_or_default().to_lowercase();
                 let mut list = || {
                     let part = parts.next().unwrap_or_default();
                     part.split(',')
@@ -506,47 +508,75 @@ impl Catalog {
         ))
     }
 
-    /// The tenant keys of the table `name`, in column order, as `[tool.sqlty.tenancy]` makes
-    /// them: the primary key of the tenant table and each column of a foreign key to it,
-    /// less `exclude`, plus `columns`. `None` without a tenancy, for a table that has none,
+    /// The tenant keys of the table `name`, as `[tool.sqlty.tenancy]` makes them: the
+    /// primary key of the tenant table and the columns of each foreign key to it, less the
+    /// keys `exclude` names, plus each column of `columns` as a key of its own. Pinning every
+    /// column of one key scopes a row. `None` without a tenancy, for a table that has none,
     /// and for one with row-level security, which the database scopes itself.
-    pub(crate) fn tenant_keys(&self, name: &str) -> Option<Vec<&str>> {
-        let tenancy = self.overrides.tenancy.as_ref()?;
-        let (key, table) = self.table_entry(name)?;
-        if table.row_security {
-            return None;
+    pub(crate) fn tenant_keys(&self, name: &str) -> Option<&[Vec<String>]> {
+        let key = self.table_id(name)?;
+        let keys = self.tenants.get_or_init(|| self.build_tenant_keys());
+        keys.get(key).map(Vec::as_slice)
+    }
+
+    /// The tenant keys of every table, once per schema.
+    fn build_tenant_keys(&self) -> FxHashMap<Arc<str>, Vec<Vec<String>>> {
+        let mut found = FxHashMap::default();
+        let Some(tenancy) = &self.overrides.tenancy else {
+            return found;
+        };
+        let tenant = self.table_id(&tenancy.table);
+        for (key, relation) in &self.relations {
+            let Relation::Table(table) = relation else {
+                continue;
+            };
+            if table.row_security {
+                continue;
+            }
+            let own = short_name(key);
+            let listed = |list: &[String], column: &str| {
+                let column = column.to_lowercase();
+                list.iter()
+                    .any(|listed| listed.split_once('.') == Some((own.as_str(), column.as_str())))
+            };
+            let primary: Vec<String> = table
+                .columns
+                .iter()
+                .filter(|column| column.primary_key)
+                .map(|column| column.name.clone())
+                .collect();
+            let referencing = table
+                .declared_foreign_keys
+                .iter()
+                .filter(|fk| Some(fk.table.as_str()) == tenant)
+                .map(|fk| fk.columns.clone());
+            let own_key = (Some(&**key) == tenant && !primary.is_empty()).then_some(primary);
+            let mut keys: Vec<Vec<String>> = own_key
+                .into_iter()
+                .chain(referencing)
+                .filter(|columns| !columns.iter().any(|c| listed(&tenancy.exclude, c)))
+                .collect();
+            let added = table
+                .columns
+                .iter()
+                .filter(|c| listed(&tenancy.columns, &c.name));
+            keys.extend(added.map(|column| vec![column.name.clone()]));
+            keys.sort();
+            keys.dedup();
+            if !keys.is_empty() {
+                found.insert(Arc::clone(key), keys);
+            }
         }
-        let own = short_name(key);
-        let tenant = own == tenancy.table;
-        let referencing = || {
-            let keys = table.declared_foreign_keys.iter();
-            keys.filter(|fk| short_name(&fk.table) == tenancy.table)
-        };
-        let listed = |list: &[String], column: &SchemaColumn| {
-            let name = column.name.to_lowercase();
-            let key = (own.as_str(), name.as_str());
-            list.iter()
-                .any(|listed| listed.split_once('.') == Some(key))
-        };
-        let keys: Vec<&str> = table
-            .columns
-            .iter()
-            .filter(|column| {
-                let keyed = (tenant && column.primary_key)
-                    || referencing().any(|fk| fk.columns.contains(&column.name));
-                (keyed && !listed(&tenancy.exclude, column)) || listed(&tenancy.columns, column)
-            })
-            .map(|column| column.name.as_str())
-            .collect();
-        (!keys.is_empty()).then_some(keys)
+        found
     }
 
     /// Whether `name` is the tenant table of `[tool.sqlty.tenancy]`.
     pub(crate) fn is_tenant_table(&self, name: &str) -> bool {
-        match (&self.overrides.tenancy, self.table_id(name)) {
-            (Some(tenancy), Some(key)) => short_name(key) == tenancy.table,
-            _ => false,
-        }
+        let tenancy = self.overrides.tenancy.as_ref();
+        tenancy.is_some_and(|t| {
+            self.table_id(name)
+                .is_some_and(|key| Some(key) == self.table_id(&t.table))
+        })
     }
 
     /// Whether `[tool.sqlty.tenancy]` is configured.
