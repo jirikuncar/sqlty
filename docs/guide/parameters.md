@@ -240,8 +240,20 @@ by_name = SQL[tuple[int], tuple[int, int]]("--sql\nSELECT id FROM users WHERE na
 
 `P` defaults to `Any`, so `SQL[R]` takes any parameters and every `SQL[R]` you
 already have stays valid. A query is typed like a function from `P` to `R`: a
-query that takes `str | None` fits where one that takes `str` is expected, not
-the other way around.
+query that takes `int | None` fits where one that takes `int` is expected, and
+one whose rows are `tuple[str]` fits where `tuple[str | None]` rows are
+expected, not the other way around:
+
+```python
+from sqlty import SQL
+
+
+def names(query: SQL[tuple[str | None], tuple[int]]) -> None: ...
+
+
+names(SQL[tuple[str], tuple[int | None]]("--sql\nSELECT name FROM users WHERE age = %s"))
+# error:
+```
 
 !!! warning "Type checkers become stricter than the driver"
     `P` says what the query needs, not everything psycopg accepts. A type
