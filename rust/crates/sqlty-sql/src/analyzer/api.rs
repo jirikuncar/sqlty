@@ -150,6 +150,26 @@ pub fn analyze_with_diagnostics(
     parse(sql, dialect).analyze_with_diagnostics(schema)
 }
 
+/// [`analyze_select`] and [`analyze_params`](super::analyze_params) of one parse of `sql`,
+/// as `check` asks both of a query.
+///
+/// ```
+/// use sqlty_sql::analyzer::analyze_query;
+///
+/// let (columns, params) = analyze_query("SELECT $1::int AS n", "postgres", None);
+/// assert_eq!(columns.unwrap()[0].name, "n");
+/// assert_eq!(params.unwrap()[0].python_type.as_deref(), Some("int"));
+/// ```
+pub fn analyze_query(
+    sql: &str,
+    dialect: &str,
+    schema: Option<&SchemaData>,
+) -> (Option<Vec<Column>>, Option<Vec<Param>>) {
+    let (dialect, schema) = super::route(sql, dialect, schema);
+    let parsed = parse(sql, dialect);
+    (parsed.columns(schema), parsed.params(sql, schema))
+}
+
 /// The byte range of each statement of `sql`: split on `;` outside quotes, comments and
 /// dollar-quoted bodies, without the space and comments around it.
 ///

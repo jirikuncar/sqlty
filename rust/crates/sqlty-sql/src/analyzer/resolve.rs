@@ -8,6 +8,8 @@
 use std::borrow::Cow;
 use std::rc::Rc;
 
+use rustc_hash::{FxHashMap, FxHashSet};
+
 use sqlparser::ast::{Expr, Ident, TableFactor, TableWithJoins};
 
 use crate::catalog::{fold, folded, lowercase};
@@ -40,16 +42,16 @@ fn sources<'s>(scope: &'s Scope, outer: &'s Scope) -> impl Iterator<Item = &'s S
 }
 
 /// A column found in one source, borrowed from where it is declared.
-enum ColumnRef<'s> {
+enum ColumnRef<'s, 'c> {
     /// A column of a CTE, derived table or table function (`local`), or of a schema view.
     Virtual { column: &'s Column, local: bool },
-    /// A column of a schema table.
-    Schema(&'s SchemaColumn),
+    /// A column of a schema table, borrowed from the catalog.
+    Schema(&'c SchemaColumn),
     /// A column every table has without declaring it.
     System(Typed),
 }
 
-impl ColumnRef<'_> {
+impl ColumnRef<'_, '_> {
     fn typed(&self, dialect: SqlDialect) -> Typed {
         match self {
             ColumnRef::Virtual { column, .. } => column.typed(),
@@ -70,14 +72,14 @@ impl ColumnRef<'_> {
 }
 
 /// A column reference resolved to the source it reads.
-pub(super) struct Resolved<'r> {
+pub(super) struct Resolved<'r, 'c> {
     /// The alias or table name the source is read by.
     pub(super) reference: Cow<'r, str>,
     /// The key of the source's table.
     pub(super) table: Cow<'r, str>,
     /// The column, as the resolver names it (case folded).
     pub(super) column: Cow<'r, str>,
-    found: ColumnRef<'r>,
+    found: ColumnRef<'r, 'c>,
 }
 
 impl<'a> Analyzer<'a> {
@@ -133,7 +135,8 @@ impl<'a> Analyzer<'a> {
         {
             return;
         }
-        let mut seen: Vec<(String, Option<String>)> = Vec::new();
+        // Per name: whether an alias or a derived table took it, and the tables read by it.
+        let mut seen: FxHashMap<String, (bool, FxHashSet<Cow<'_, str>>)> = FxHashMap::default();
         let names = relations(from).filter_map(|factor| match factor {
             TableFactor::Table {
                 alias: None, name, ..
@@ -153,10 +156,11 @@ impl<'a> Analyzer<'a> {
             _ => None,
         });
         for (ident, key) in names {
-            let name = fold(ident, self.dialect);
-            let clash = seen.iter().any(|(seen, seen_key)| {
-                *seen == name && (key.is_none() || seen_key.is_none() || *seen_key == key)
-            });
+            let (aliased, keys) = seen.entry(fold(ident, self.dialect)).or_default();
+            let clash = match &key {
+                None => *aliased || !keys.is_empty(),
+                Some(key) => *aliased || keys.contains(key),
+            };
             if clash {
                 let _at = self.diag.at(ident.span);
                 self.diag.record(
@@ -164,12 +168,17 @@ impl<'a> Analyzer<'a> {
                     format!("table name `{}` is specified more than once", ident.value),
                 );
             }
-            seen.push((name, key));
+            match key {
+                None => *aliased = true,
+                Some(key) => {
+                    keys.insert(key);
+                }
+            }
         }
     }
 
     /// A column of one source, when it has it.
-    fn find_column(&self, table: &str, column: &str) -> Option<ColumnRef<'_>> {
+    fn find_column(&self, table: &str, column: &str) -> Option<ColumnRef<'_, 'a>> {
         if let Some(found) = self.virtual_column(table, column) {
             return found.map(|column| ColumnRef::Virtual {
                 column,
@@ -183,7 +192,7 @@ impl<'a> Analyzer<'a> {
     }
 
     /// Where a column found in `table` comes from, for explaining why it is untyped.
-    fn origin(found: &ColumnRef<'_>, table: &str, column: &str) -> Origin {
+    fn origin(found: &ColumnRef<'_, '_>, table: &str, column: &str) -> Origin {
         let label = || format!("{table}.{column}");
         match found {
             ColumnRef::Virtual { local: false, .. } => Origin::View(label()),
@@ -217,7 +226,7 @@ impl<'a> Analyzer<'a> {
         &'r self,
         expr: &'r Expr,
         scope: &'r Scope,
-    ) -> Option<Resolved<'r>> {
+    ) -> Option<Resolved<'r, 'a>> {
         match expr {
             Expr::Identifier(ident) => {
                 let column = folded(ident, self.dialect);
@@ -236,9 +245,7 @@ impl<'a> Analyzer<'a> {
                 let qualifier = lowercase(&parts[parts.len() - 2].value);
                 let column = folded(&parts[parts.len() - 1], self.dialect);
                 for sources in [scope, &*self.outer] {
-                    if let Some(source) =
-                        sources.iter().find(|source| source.reference == qualifier)
-                    {
+                    if let Some(source) = sources.find(&qualifier) {
                         let table = source.table.named()?;
                         let found = self.find_column(table, &column)?;
                         return Some(Resolved {
@@ -291,27 +298,22 @@ impl<'a> Analyzer<'a> {
         self.resolve_reference(expr, scope).is_some()
     }
 
-    /// [`Self::locate_column`] of a schema table column, and whether the column is part of
-    /// a foreign key.
-    pub(super) fn locate_table_column(
-        &self,
-        expr: &Expr,
-        scope: &Scope,
-    ) -> Option<(String, String, String, bool)> {
+    /// [`Self::resolve_reference`] of a schema table column, and whether the column is part
+    /// of a foreign key.
+    pub(super) fn locate_table_column<'r>(
+        &'r self,
+        expr: &'r Expr,
+        scope: &'r Scope,
+    ) -> Option<(Resolved<'r, 'a>, &'a SchemaColumn)> {
         let found = self.resolve_reference(expr, scope)?;
         let ColumnRef::Schema(column) = found.found else {
             return None;
         };
-        Some((
-            found.reference.into_owned(),
-            found.table.into_owned(),
-            found.column.into_owned(),
-            column.foreign_key,
-        ))
+        Some((found, column))
     }
 
     /// Whether the source of `resolved` says its column can be NULL (see [`ColumnRef`]).
-    pub(super) fn declared_nullability(&self, resolved: &Resolved<'_>) -> Nullability {
+    pub(super) fn declared_nullability(&self, resolved: &Resolved<'_, '_>) -> Nullability {
         let (table, column) = (&*resolved.table, &*resolved.column);
         match &resolved.found {
             // `CHECK (column IS NOT NULL)` or `CHECK (num_nulls(column, ...) = 0)`.
@@ -321,7 +323,7 @@ impl<'a> Analyzer<'a> {
                 generated: Some(expr),
                 ..
             }) => {
-                let scope = vec![Source::named(table.to_string(), table.to_string())];
+                let scope = Scope::from(vec![Source::named(table.to_string(), table.to_string())]);
                 self.nullability(expr, &scope, &Facts::default())
             }
             found => found.nullability(),
@@ -428,11 +430,7 @@ impl<'a> Analyzer<'a> {
             return None;
         }
         let name = fold(ident, self.dialect);
-        let key = scope
-            .iter()
-            .find(|source| source.reference == name)?
-            .table
-            .named()?;
+        let key = scope.find(&name)?.table.named()?;
         self.schema.table(key).map(|_| key)
     }
 
@@ -787,7 +785,7 @@ impl<'a> Analyzer<'a> {
             return self.diag.explain_silently();
         }
         if let Some(reference) = &reference {
-            if !scope.iter().any(|source| source.reference == *reference) {
+            if !scope.reads(reference) {
                 return self.diag.record_about(
                     Rule::UnknownTable,
                     format!("`{reference}` in `{reference}.*` is not a table or alias in the FROM clause"),

@@ -21,18 +21,23 @@ pub(super) fn object_name(name: &ObjectName) -> String {
 
 /// The key a table reference is looked up by: `schema.name` when qualified, else `name`,
 /// each part folded as the dialect does (PostgreSQL keeps quoted case).
-pub(super) fn table_key(name: &ObjectName, dialect: SqlDialect) -> String {
+pub(super) fn table_key(name: &ObjectName, dialect: SqlDialect) -> Cow<'_, str> {
     let idents = || name.0.iter().filter_map(|part| part.as_ident());
     let skip = idents().count().saturating_sub(2);
-    let mut key =
-        String::with_capacity(idents().skip(skip).map(|ident| ident.value.len() + 1).sum());
-    for (at, ident) in idents().skip(skip).enumerate() {
-        if at > 0 {
-            key.push('.');
+    let mut parts = idents().skip(skip);
+    match (parts.next(), parts.next()) {
+        (Some(name), None) => folded(name, dialect),
+        (schema, name) => {
+            let mut key = String::new();
+            for (at, ident) in schema.into_iter().chain(name).enumerate() {
+                if at > 0 {
+                    key.push('.');
+                }
+                key.push_str(&folded(ident, dialect));
+            }
+            Cow::Owned(key)
         }
-        key.push_str(&folded(ident, dialect));
     }
-    key
 }
 
 /// PostgreSQL's name for an unquoted identifier is lowercase.
@@ -282,7 +287,7 @@ mod tests {
 
     #[test]
     fn table_key_keeps_at_most_schema_and_name() {
-        let key = |name: &str, dialect| table_key(&object(name), dialect);
+        let key = |name: &str, dialect| table_key(&object(name), dialect).into_owned();
         assert_eq!(key("users", SqlDialect::Postgres), "users");
         assert_eq!(key("public.users", SqlDialect::Postgres), "public.users");
         assert_eq!(key("db.public.users", SqlDialect::Postgres), "public.users");
@@ -290,7 +295,7 @@ mod tests {
 
     #[test]
     fn table_key_folds_by_dialect() {
-        let key = |name: &str, dialect| table_key(&object(name), dialect);
+        let key = |name: &str, dialect| table_key(&object(name), dialect).into_owned();
         assert_eq!(key("Users", SqlDialect::Postgres), "users");
         assert_eq!(key("\"Users\"", SqlDialect::Postgres), "Users");
         assert_eq!(key("\"Users\"", SqlDialect::MySql), "users");

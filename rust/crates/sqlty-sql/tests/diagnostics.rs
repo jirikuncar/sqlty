@@ -180,6 +180,15 @@ const CASES: &[Case] = &[
     ("generic", "TABLE orders UNION TABLE orders", &[]),
     ("generic", "SELECT 1 UNION VALUES (2)", &["[unsupported-syntax] a VALUES list is not typed"]),
     ("postgres", "SELECT n.a FROM pair_notes n WHERE EXISTS (SELECT p.*, p.b FROM pairs p WHERE p.a = n.a)", &[]),
+    ("postgres", "SELECT 1 FROM pair_notes n JOIN pairs p ON p.a = n.a", &["[foreign-key-mismatch] pair_notes (a, b) references pairs (a, b), compared with p on a only"]),
+    ("postgres", "SELECT 1 FROM pair_notes n JOIN pairs p ON p.a = n.a JOIN pairs q ON q.b = n.b", &["[foreign-key-mismatch] pair_notes (a, b) references one pairs row, compared with p.a and q.b"]),
+    ("postgres", "SELECT 1 FROM pair_notes n JOIN pairs p ON p.a = n.a AND p.b = n.a", &["[foreign-key-mismatch] pairs.b references customers.id, not pair_notes.a", "[entity-mismatch] pairs.b holds customers keys, pair_notes.a holds orders keys", "[foreign-key-mismatch] pair_notes (a, b) references pairs (a, b), compared with p on a only"]),
+    ("postgres", "SELECT 1 FROM pair_notes n JOIN pairs p ON (p.a, p.b) = (n.a, n.a)", &["[foreign-key-mismatch] pairs.b references customers.id, not pair_notes.a", "[entity-mismatch] pairs.b holds customers keys, pair_notes.a holds orders keys", "[foreign-key-mismatch] pair_notes (a, b) references pairs (a, b), compared with p on a only"]),
+    ("postgres", "SELECT 1 FROM pair_notes n JOIN pairs p USING (a)", &["[foreign-key-mismatch] pair_notes (a, b) references pairs (a, b), compared with p on a only"]),
+    ("postgres", "SELECT 1 FROM orders o WHERE EXISTS (SELECT 1 FROM payments p WHERE p.order_id = o.customer_id)", &["[foreign-key-mismatch] payments.order_id references orders.id, not orders.customer_id", "[entity-mismatch] payments.order_id holds orders keys, orders.customer_id holds customers keys"]),
+    ("postgres", "SELECT 1 FROM orders o WHERE o.id = 1 AND (SELECT p.order_id FROM payments p WHERE p.id = o.customer_id) = 2", &["[foreign-key-mismatch] orders.customer_id references customers.id, not payments.id", "[entity-mismatch] payments.id holds payments keys, orders.customer_id holds customers keys"]),
+    ("postgres", "SELECT 1 FROM pair_notes n WHERE (n.a, n.b) IN (SELECT p.a, p.a FROM pairs p)", &["[foreign-key-mismatch] pair_notes.b references pairs.b, not pairs.a", "[entity-mismatch] pair_notes.b holds customers keys, pairs.a holds orders keys", "[foreign-key-mismatch] pair_notes (a, b) references pairs (a, b), compared with p on a only"]),
+    ("postgres", "SELECT 1 FROM pair_notes n WHERE n.a IN (SELECT p.a FROM pairs p WHERE p.b = n.a)", &["[foreign-key-mismatch] pairs.b references customers.id, not pair_notes.a", "[entity-mismatch] pairs.b holds customers keys, pair_notes.a holds orders keys", "[foreign-key-mismatch] pair_notes (a, b) references pairs (a, b), compared with p on a only"]),
     ("postgres", "SELECT * FROM orders o JOIN pairs q ON o.id = q.a JOIN pairs p ON p.a = q.b", &["[foreign-key-mismatch] pairs.a references orders.id, not pairs.b", "[entity-mismatch] pairs.a holds orders keys, pairs.b holds customers keys"]),
     ("postgres", "SELECT 1 FROM orders o WHERE o.id IN (SELECT p.id FROM payments p) AND o.id IN (SELECT id, order_id FROM payments)", &["[entity-mismatch] orders.id holds orders keys, payments.id holds payments keys"]),
     ("databricks", "SELECT stack(1, 2, 3) AS (a, b) FROM orders GROUP BY id", &["[unknown-function] function `stack` is not known to sqlty, so its result is untyped"]),
@@ -206,6 +215,7 @@ const CASES: &[Case] = &[
 /// `(dialect, query, columns as "name: python (SQL)")`, against `SCHEMA`.
 #[rustfmt::skip]
 const COLUMNS: &[Case] = &[
+    ("postgres", "SELECT g FROM orders t0, orders t1, orders t2, orders t3, orders t4, orders t5, orders t6, orders t7, orders t8, generate_series(t0.id, 3) g, orders z", &["g: int (INT)"]),
     ("postgres", "SELECT t.a, (SELECT a FROM tagged WHERE kind = 'a' LIMIT 1) AS b FROM tagged t, generate_series(1, 2) AS g WHERE t.kind = 'a'", &["a: str (TEXT)", "b: str | None (TEXT)"]),
     ("postgres", "SELECT a FROM tagged_view WHERE kind = 'a'", &["a: str | None (TEXT)"]),
     ("postgres", "SELECT t.a FROM tagged t, (SELECT 1) WHERE t.kind = 'a'", &["a: str (TEXT)"]),
@@ -467,10 +477,21 @@ fn each_column_has_its_type() {
 }
 
 /// A parameter as `index name: python (SQL) nullability`, then `cast` and the type an
-/// untyped driver gets.
+/// untyped driver gets, read with the columns from one parse.
 fn params(dialect: &str, sql: &str) -> Vec<String> {
     let schema = schema(dialect);
-    analyzer::analyze_params(sql, dialect, Some(&schema))
+    let (columns, params) = analyzer::analyze_query(sql, dialect, Some(&schema));
+    assert_eq!(
+        columns,
+        analyzer::analyze_select(sql, dialect, Some(&schema)),
+        "{sql}"
+    );
+    assert_eq!(
+        params,
+        analyzer::analyze_params(sql, dialect, Some(&schema)),
+        "{sql}"
+    );
+    params
         .unwrap_or_default()
         .into_iter()
         .map(|p| {

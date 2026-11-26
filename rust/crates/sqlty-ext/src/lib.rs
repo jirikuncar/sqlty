@@ -6,7 +6,7 @@
 //! that `sqlty/core.py` wraps into dataclasses.
 //!
 //! - Inference: `infer_type`, `analyze_select`, `analyze_columns`, `analyze_params`,
-//!   `explain_select`, `expand_star`, `returns_rows`.
+//!   `analyze_query`, `explain_select`, `expand_star`, `returns_rows`.
 //! - Source: `rewrite_source`, `add_param_types`, `strip_source`, `fix_source`, `check_source`,
 //!   `wrapped_queries`, `query_sites`.
 //! - Schema: `load_schema`, `schema_skipped_objects`, `name_rules`, `rules`.
@@ -414,12 +414,14 @@ fn analyze_select(
     let columns = detach(py, || {
         analyzer::analyze_select(sql, dialect, schema(schema_sql, dialect).as_deref())
     });
-    columns.map(|columns| {
-        columns
-            .into_iter()
-            .map(|col| (col.name.clone(), col.display_type(), col.sql_type))
-            .collect()
-    })
+    columns.map(column_tuples)
+}
+
+fn column_tuples(columns: Vec<analyzer::Column>) -> Vec<ColumnTuple> {
+    columns
+        .into_iter()
+        .map(|col| (col.name.clone(), col.display_type(), col.sql_type))
+        .collect()
 }
 
 /// `(id, reference, reasoning)` of an inference rule.
@@ -512,22 +514,40 @@ fn analyze_params(
     let params = detach(py, || {
         analyzer::analyze_params(sql, dialect, schema(schema_sql, dialect).as_deref())
     })?;
-    Some(
-        params
-            .into_iter()
-            .map(|param| {
-                (
-                    param.index,
-                    param.name,
-                    param.python_type,
-                    param.sql_type,
-                    nullable(param.nullability),
-                    param.cast,
-                    param.untyped_sql_type,
-                )
-            })
-            .collect(),
-    )
+    Some(param_tuples(params))
+}
+
+fn param_tuples(params: Vec<analyzer::Param>) -> Vec<ParamTuple> {
+    params
+        .into_iter()
+        .map(|param| {
+            (
+                param.index,
+                param.name,
+                param.python_type,
+                param.sql_type,
+                nullable(param.nullability),
+                param.cast,
+                param.untyped_sql_type,
+            )
+        })
+        .collect()
+}
+
+/// `analyze_select` and `analyze_params` of one parse of the query, as `check` asks both.
+#[pyfunction]
+#[pyo3(signature = (sql, *, dialect = DialectArg::POSTGRES, schema_sql = None))]
+fn analyze_query(
+    py: Python<'_>,
+    sql: &str,
+    dialect: DialectArg,
+    schema_sql: Option<SchemaArg>,
+) -> (Option<Vec<ColumnTuple>>, Option<Vec<ParamTuple>>) {
+    let dialect = dialect.0;
+    let (columns, params) = detach(py, || {
+        analyzer::analyze_query(sql, dialect, schema(schema_sql, dialect).as_deref())
+    });
+    (columns.map(column_tuples), params.map(param_tuples))
 }
 
 /// Every Python type an inferred column can have, one union member at a time.
@@ -2147,6 +2167,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(explain_select, m)?)?;
     m.add_function(wrap_pyfunction!(analyze_columns, m)?)?;
     m.add_function(wrap_pyfunction!(analyze_params, m)?)?;
+    m.add_function(wrap_pyfunction!(analyze_query, m)?)?;
     m.add_function(wrap_pyfunction!(name_rules, m)?)?;
     m.add_function(wrap_pyfunction!(rules, m)?)?;
     m.add_function(wrap_pyfunction!(python_types, m)?)?;

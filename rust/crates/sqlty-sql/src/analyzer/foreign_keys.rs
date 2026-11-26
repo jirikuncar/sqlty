@@ -9,9 +9,11 @@
 //!
 //! The comparisons read here are judged by `entity-mismatch` too (see `entities.rs`).
 
+use std::borrow::Cow;
 use std::cell::LazyCell;
-use std::collections::HashMap;
 use std::ops::ControlFlow;
+
+use rustc_hash::FxHashMap;
 
 use sqlparser::ast::{
     BinaryOperator, Expr, Ident, InTarget, Query, Select, SelectItem, SetExpr, Spanned,
@@ -26,88 +28,134 @@ use super::scope::{relation_name, Scope};
 use crate::catalog::ForeignKey;
 use crate::diagnostics::{Diagnostics, Rule};
 
-/// A schema table column a comparison reads.
+/// A name a comparison reads, borrowed from the query where it can be.
+type Name<'n> = Cow<'n, str>;
+
+/// A schema table column a comparison reads: names of the query (`'n`), and of the
+/// catalog (`'s`).
 #[derive(Clone)]
-struct Column<'s> {
+struct Column<'s, 'n> {
     /// The row it is read from: its source's reference, behind the `IN` subquery it is
     /// read in.
-    row: String,
+    row: Name<'n>,
     /// Its source's reference, for messages.
-    reference: String,
+    reference: Name<'n>,
     /// The catalog key of its table.
     table: &'s str,
-    name: String,
+    name: &'s str,
     /// The foreign keys its table declares.
     keys: Vec<&'s ForeignKey>,
     /// Read from an enclosing query, which may compare the rest of a key.
     outer: bool,
 }
 
-impl Column<'_> {
+impl<'s> Column<'s, '_> {
     fn qualified(&self) -> String {
         format!("{}.{}", short(self.table), self.name)
     }
 
     /// The `(table key, column)` each foreign key of the column references it to.
-    fn targets(&self) -> Vec<(&str, &str)> {
-        self.keys
-            .iter()
-            .filter_map(|fk| {
-                let at = fk.columns.iter().position(|c| *c == self.name)?;
-                Some((fk.table.as_str(), fk.referred.get(at)?.as_str()))
-            })
-            .collect()
+    fn targets(&self) -> impl Iterator<Item = (&'s str, &'s str)> + Clone + '_ {
+        self.keys.iter().filter_map(|fk| {
+            let at = fk.columns.iter().position(|c| *c == self.name)?;
+            Some((fk.table.as_str(), fk.referred.get(at)?.as_str()))
+        })
+    }
+
+    fn into_owned(self) -> Column<'s, 'static> {
+        Column {
+            row: owned(self.row),
+            reference: owned(self.reference),
+            table: self.table,
+            name: self.name,
+            keys: self.keys,
+            outer: self.outer,
+        }
     }
 }
 
+fn owned(name: Name<'_>) -> Name<'static> {
+    Cow::Owned(name.into_owned())
+}
+
 /// A column located in its scope, before its table's keys are looked up.
-struct Located {
+struct Located<'s, 'n> {
     outer: bool,
-    row: String,
-    reference: String,
-    table: String,
-    name: String,
+    row: Name<'n>,
+    reference: Name<'n>,
+    table: &'s str,
+    name: &'s str,
     foreign_key: bool,
+}
+
+impl<'s> Located<'s, '_> {
+    fn into_owned(self) -> Located<'s, 'static> {
+        Located {
+            outer: self.outer,
+            row: owned(self.row),
+            reference: owned(self.reference),
+            table: self.table,
+            name: self.name,
+            foreign_key: self.foreign_key,
+        }
+    }
 }
 
 /// Two columns compared, and where.
 #[derive(Clone)]
-struct Pair<'s> {
-    left: Column<'s>,
-    right: Column<'s>,
+struct Pair<'s, 'n> {
+    left: Column<'s, 'n>,
+    right: Column<'s, 'n>,
     span: Span,
 }
 
 /// A comparison of two schema table columns: the foreign keys and the entities it reads.
 #[derive(Clone)]
-struct Compared<'s> {
-    keys: Option<Pair<'s>>,
-    entities: Option<(Side, Side)>,
+struct Compared<'s, 'n> {
+    keys: Option<Pair<'s, 'n>>,
+    entities: Option<(Side<'s>, Side<'s>)>,
     span: Span,
 }
 
+impl<'s> Compared<'s, '_> {
+    fn into_owned(self) -> Compared<'s, 'static> {
+        Compared {
+            keys: self.keys.map(|pair| Pair {
+                left: pair.left.into_owned(),
+                right: pair.right.into_owned(),
+                span: pair.span,
+            }),
+            entities: self.entities,
+            span: self.span,
+        }
+    }
+}
+
+/// A column of a row.
+type RowColumn<'n> = (Name<'n>, Name<'n>);
+
 /// Comparisons that hold together: the terms of one `AND`.
 #[derive(Default)]
-struct Group<'s> {
-    pairs: Vec<Compared<'s>>,
+struct Group<'s, 'r> {
+    pairs: Vec<Compared<'s, 'r>>,
     /// The pairs before it come from the enclosing `AND`, judged one by one there.
     seeded: usize,
     /// `(row, column, value)` of each column equal to a constant or parameter.
-    pinned: Vec<(String, String, String)>,
+    pinned: Vec<(Name<'r>, Name<'r>, String)>,
     /// `(row, column)` of each column `IS NULL`.
-    nulls: Vec<(String, String)>,
+    nulls: Vec<RowColumn<'r>>,
     /// `(row, column)` pairs of each column `=` another, keys or not, subqueries' included.
-    equal: Vec<[(String, String); 2]>,
+    equal: Vec<[RowColumn<'r>; 2]>,
     /// The rows each term that is no comparison reads: `lower(a.code) = lower(b.code)`.
-    unread: Vec<Vec<String>>,
+    unread: Vec<Vec<Name<'r>>>,
     /// Split into alternatives (`OR` branches, `IN` list items), each judging the keys
     /// with this group's terms.
     split: bool,
 }
 
-impl<'s> Group<'s> {
+impl<'s, 'r> Group<'s, 'r> {
     /// An alternative of this group: its terms, and more.
-    fn alternative(&self) -> Group<'s> {
+    fn alternative(&self) -> Group<'s, 'r> {
         Group {
             pairs: self.pairs.clone(),
             seeded: self.pairs.len(),
@@ -119,49 +167,68 @@ impl<'s> Group<'s> {
         }
     }
 
+    /// This group, owning what it borrowed from the expressions it read.
+    fn into_owned(self) -> Group<'s, 'static> {
+        let pair = |(row, column): RowColumn<'_>| (owned(row), owned(column));
+        Group {
+            pairs: self.pairs.into_iter().map(Compared::into_owned).collect(),
+            seeded: self.seeded,
+            pinned: self
+                .pinned
+                .into_iter()
+                .map(|(row, column, value)| (owned(row), owned(column), value))
+                .collect(),
+            nulls: self.nulls.into_iter().map(pair).collect(),
+            equal: self
+                .equal
+                .into_iter()
+                .map(|[a, b]| [pair(a), pair(b)])
+                .collect(),
+            unread: self
+                .unread
+                .into_iter()
+                .map(|rows| rows.into_iter().map(owned).collect())
+                .collect(),
+            split: self.split,
+        }
+    }
+
     /// The columns and values `=` holds equal, each named by its class.
-    fn classes(&self) -> Classes {
+    fn classes(&self) -> Classes<'_> {
         let mut classes = Classes::default();
         for [a, b] in &self.equal {
-            classes.union(
-                &Node::Column(a.0.clone(), a.1.clone()),
-                &Node::Column(b.0.clone(), b.1.clone()),
-            );
+            classes.union(Node::Column(&a.0, &a.1), Node::Column(&b.0, &b.1));
         }
         for (row, column, value) in &self.pinned {
-            classes.union(
-                &Node::Column(row.clone(), column.clone()),
-                &Node::Value(value.clone()),
-            );
+            classes.union(Node::Column(row, column), Node::Value(value));
         }
         classes
     }
 }
 
 /// A column of a row, or a constant or parameter.
-#[derive(Clone, PartialEq, Eq, Hash)]
-enum Node {
-    Column(String, String),
-    Value(String),
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+enum Node<'g> {
+    Column(&'g str, &'g str),
+    Value(&'g str),
 }
 
 /// Equality classes of [`Node`]s, a union-find.
 #[derive(Default)]
-struct Classes {
-    parent: HashMap<Node, Node>,
+struct Classes<'g> {
+    parent: FxHashMap<Node<'g>, Node<'g>>,
 }
 
-impl Classes {
-    fn find(&self, node: &Node) -> Node {
-        let mut node = node.clone();
-        while let Some(parent) = self.parent.get(&node) {
-            node = parent.clone();
+impl<'g> Classes<'g> {
+    fn root(&self, mut node: Node<'g>) -> Node<'g> {
+        while let Some(&parent) = self.parent.get(&node) {
+            node = parent;
         }
         node
     }
 
-    fn union(&mut self, a: &Node, b: &Node) {
-        let (a, b) = (self.find(a), self.find(b));
+    fn union(&mut self, a: Node<'g>, b: Node<'g>) {
+        let (a, b) = (self.root(a), self.root(b));
         if a != b {
             self.parent.insert(a, b);
         }
@@ -169,8 +236,14 @@ impl Classes {
 
     /// Whether `column` of `row` equals `other` of `other_row`.
     fn equal(&self, (row, column): (&str, &str), (other_row, other): (&str, &str)) -> bool {
-        let node = |row: &str, column: &str| Node::Column(row.to_string(), column.to_string());
-        self.find(&node(row, column)) == self.find(&node(other_row, other))
+        fn find<'x>(parent: &FxHashMap<Node<'x>, Node<'x>>, mut node: Node<'x>) -> Node<'x> {
+            while let Some(&next) = parent.get(&node) {
+                node = next;
+            }
+            node
+        }
+        find(&self.parent, Node::Column(row, column))
+            == find(&self.parent, Node::Column(other_row, other))
     }
 }
 
@@ -204,7 +277,7 @@ impl<'s> Analyzer<'s> {
                 .filter_map(|item| match item {
                     SelectItem::UnnamedExpr(expr) | SelectItem::ExprWithAlias { expr, .. } => {
                         let column = self.locate(expr, scope, "")?;
-                        Some((column.row, column.name))
+                        Some((column.row, Cow::Borrowed(column.name)))
                     }
                     _ => None,
                 })
@@ -234,29 +307,29 @@ impl<'s> Analyzer<'s> {
         }
     }
 
-    fn using_comparisons(
-        &self,
+    fn using_comparisons<'r>(
+        &'r self,
         using: &[Ident],
         right: &TableFactor,
-        scope: &Scope,
-        into: &mut Group<'s>,
+        scope: &'r Scope,
+        into: &mut Group<'s, 'r>,
     ) {
-        let Some(at) = relation_name(right)
-            .and_then(|name| scope.iter().position(|source| source.reference == name))
-        else {
+        let Some(at) = relation_name(right).and_then(|name| scope.position(&name)) else {
             return;
         };
         let qualified = |reference: &str, ident: &Ident| {
             Expr::CompoundIdentifier(vec![Ident::new(reference), ident.clone()])
         };
         for ident in using {
-            let right = self.locate(&qualified(&scope[at].reference, ident), scope, "");
+            let right = self
+                .locate(&qualified(&scope[at].reference, ident), scope, "")
+                .map(Located::into_owned);
             let left = scope[..at]
                 .iter()
                 .rev()
                 .map(|source| qualified(&source.reference, ident))
                 .find(|column| self.resolves(column, scope))
-                .and_then(|column| self.locate(&column, scope, ""));
+                .and_then(|column| self.locate(&column, scope, "").map(Located::into_owned));
             if let (Some(left), Some(right)) = (left, right) {
                 into.pairs.extend(self.compared(left, right, ident.span));
             }
@@ -264,7 +337,12 @@ impl<'s> Analyzer<'s> {
     }
 
     /// The schema table column `expr` reads in `scope`, its row behind `subquery`.
-    fn locate(&self, expr: &Expr, scope: &Scope, subquery: &str) -> Option<Located> {
+    fn locate<'r>(
+        &'r self,
+        expr: &'r Expr,
+        scope: &'r Scope,
+        subquery: &str,
+    ) -> Option<Located<'s, 'r>> {
         let expr = match strip(expr) {
             Expr::Cast { expr, .. } => strip(expr),
             expr => expr,
@@ -272,27 +350,33 @@ impl<'s> Analyzer<'s> {
         if !matches!(expr, Expr::Identifier(_) | Expr::CompoundIdentifier(_)) {
             return None;
         }
-        let (reference, table, name, foreign_key) = self.locate_table_column(expr, scope)?;
-        let inner = scope.iter().any(|source| source.reference == reference);
+        let (found, column) = self.locate_table_column(expr, scope)?;
+        let table = self.schema.catalog().table_id(&found.table)?;
+        let inner = scope.reads(&found.reference);
         Some(Located {
             outer: !inner,
-            row: if inner {
-                format!("{subquery}{reference}")
+            row: if inner && !subquery.is_empty() {
+                Cow::Owned(format!("{subquery}{}", found.reference))
             } else {
-                reference.clone()
+                found.reference.clone()
             },
-            reference,
+            reference: found.reference,
             table,
-            name,
-            foreign_key,
+            name: &column.name,
+            foreign_key: column.foreign_key,
         })
     }
 
     /// `left` compared with `right`, when either holds keys.
-    fn compared(&self, left: Located, right: Located, span: Span) -> Option<Compared<'s>> {
+    fn compared<'n>(
+        &self,
+        left: Located<'s, 'n>,
+        right: Located<'s, 'n>,
+        span: Span,
+    ) -> Option<Compared<'s, 'n>> {
         let entities = self
-            .entity_side(&left.table, &left.name)
-            .zip(self.entity_side(&right.table, &right.name));
+            .entity_side(left.table, left.name)
+            .zip(self.entity_side(right.table, right.name));
         let keys = self.pair(left, right, span);
         (keys.is_some() || entities.is_some()).then_some(Compared {
             keys,
@@ -302,15 +386,17 @@ impl<'s> Analyzer<'s> {
     }
 
     /// `left` compared with `right`, when either is part of a foreign key.
-    fn pair(&self, left: Located, right: Located, span: Span) -> Option<Pair<'s>> {
+    fn pair<'n>(
+        &self,
+        left: Located<'s, 'n>,
+        right: Located<'s, 'n>,
+        span: Span,
+    ) -> Option<Pair<'s, 'n>> {
         if !left.foreign_key && !right.foreign_key {
             return None;
         }
-        let column = |located: Located| {
-            let (table, keys) = self
-                .schema
-                .catalog()
-                .declared_foreign_keys(&located.table)?;
+        let column = |located: Located<'s, 'n>| {
+            let (table, keys) = self.schema.catalog().declared_foreign_keys(located.table)?;
             Some(Column {
                 row: located.row,
                 reference: located.reference,
@@ -329,33 +415,38 @@ impl<'s> Analyzer<'s> {
 
     /// A foreign key column may be compared with itself, the column it references, or a
     /// column holding the same keys. Returns whether it reports the pair.
-    fn judge_pair(&self, pair: &Pair) -> bool {
+    fn judge_pair(&self, pair: &Pair<'s, '_>) -> bool {
         let (left, right) = (&pair.left, &pair.right);
         let (to_left, to_right) = (left.targets(), right.targets());
+        let (left_empty, right_empty) = (
+            to_left.clone().next().is_none(),
+            to_right.clone().next().is_none(),
+        );
         let is = |column: &Column, (table, name): (&str, &str)| {
             column.table == table && column.name == name
         };
-        let entity = |column: &Column| self.schema.entity(column.table, &column.name);
+        let catalog = self.schema.catalog();
+        let entity = |column: &Column<'s, '_>| catalog.entity(column.table, column.name);
         // A column of the same name that is no key, of a log or audit table say.
-        let unkeyed = |column: &Column, targets: &[(&str, &str)]| {
-            targets.is_empty() && entity(column).is_none()
-        };
+        let unkeyed = |column: &Column<'s, '_>, empty: bool| empty && entity(column).is_none();
         let allowed = (left.table == right.table && left.name == right.name)
-            || to_left.iter().any(|&target| is(right, target))
-            || to_right.iter().any(|&target| is(left, target))
-            || to_left.iter().any(|target| to_right.contains(target))
+            || to_left.clone().any(|target| is(right, target))
+            || to_right.clone().any(|target| is(left, target))
+            || to_left
+                .clone()
+                .any(|target| to_right.clone().any(|other| other == target))
             || entity(left).is_some_and(|root| Some(root) == entity(right))
-            || left.name == right.name && (unkeyed(left, &to_left) || unkeyed(right, &to_right));
-        if allowed || to_left.is_empty() && to_right.is_empty() {
+            || left.name == right.name
+                && (unkeyed(left, left_empty) || unkeyed(right, right_empty));
+        if allowed || left_empty && right_empty {
             return false;
         }
-        let (column, targets, other) = if to_left.is_empty() {
+        let (column, targets, other) = if left_empty {
             (right, to_right, left)
         } else {
             (left, to_left, right)
         };
         let targets: Vec<String> = targets
-            .iter()
             .map(|(table, name)| format!("{}.{name}", short(table)))
             .collect();
         let _at = self.diag.at(pair.span);
@@ -374,10 +465,10 @@ impl<'s> Analyzer<'s> {
     /// Each composite key of a row compared with its referenced columns: all of them, of
     /// one row. A key column and its referenced column both equal to a constant or
     /// parameter count as compared.
-    fn judge_composites(
+    fn judge_composites<'r>(
         &self,
-        group: &Group<'s>,
-        projected: &LazyCell<Vec<(String, String)>, impl FnOnce() -> Vec<(String, String)>>,
+        group: &Group<'s, 'r>,
+        projected: &LazyCell<Vec<RowColumn<'r>>, impl FnOnce() -> Vec<RowColumn<'r>>>,
     ) {
         let mut matches: Vec<Match> = Vec::new();
         let pairs = group.pairs.iter().enumerate();
@@ -389,18 +480,18 @@ impl<'s> Analyzer<'s> {
                     };
                     if fk.columns.len() < 2
                         || other.table != fk.table
-                        || fk.referred.get(at) != Some(&other.name)
+                        || fk.referred.get(at).map(String::as_str) != Some(other.name)
                     {
                         continue;
                     }
                     let found = matches
                         .iter()
-                        .position(|m| m.row == column.row && std::ptr::eq(m.fk, fk));
+                        .position(|m| *m.row == *column.row && std::ptr::eq(m.fk, fk));
                     let at_match = found.unwrap_or_else(|| {
                         matches.push(Match {
                             row: column.row.clone(),
                             table: column.table,
-                            siblings: column.keys.clone(),
+                            siblings: &column.keys,
                             outer: false,
                             fk,
                             columns: Vec::new(),
@@ -409,7 +500,7 @@ impl<'s> Analyzer<'s> {
                         matches.len() - 1
                     });
                     matches[at_match].outer |= column.outer || other.outer;
-                    matches[at_match].columns.push((at, other.clone(), index));
+                    matches[at_match].columns.push((at, other, index));
                 }
             }
         }
@@ -425,7 +516,7 @@ impl<'s> Analyzer<'s> {
                 .filter(|(m, complete)| !self.across_rows(m) && !**complete)
                 .map(|(m, _)| m)
                 .filter(|m| {
-                    let other = m.columns[0].1.row.as_str();
+                    let other = &*m.columns[0].1.row;
                     // `p.tree = n.tree` of a self-referencing key reads both ways: the other
                     // way is part of a complete match.
                     let within = matches.iter().zip(&complete).any(|(whole, complete)| {
@@ -433,7 +524,7 @@ impl<'s> Analyzer<'s> {
                             && *complete
                             && (m.columns.iter().all(|(_, _, index)| {
                                 whole.columns.iter().any(|(_, _, i)| i == index)
-                            }) || whole.columns[0].1.row == other)
+                            }) || *whole.columns[0].1.row == *other)
                     });
                     // `a.tenant_id = b.tenant_id`, which every key of the tenant shares, a
                     // row of an enclosing query, which may compare the rest, or a term read as
@@ -442,7 +533,7 @@ impl<'s> Analyzer<'s> {
                         && !m.shared()
                         && !(m.outer && m.selects_rest(projected))
                         && !group.unread.iter().any(|rows| {
-                            rows.contains(&m.row) && rows.iter().any(|row| row == other)
+                            rows.contains(&m.row) && rows.iter().any(|row| *row == *other)
                         })
                 })
                 .collect();
@@ -534,27 +625,23 @@ impl<'s> Analyzer<'s> {
 }
 
 /// The columns of a row's composite key compared with their referenced columns.
-struct Match<'s> {
-    row: String,
+struct Match<'s, 'n, 'g> {
+    row: Name<'n>,
     table: &'s str,
     /// The foreign keys of `table`, `fk` among them.
-    siblings: Vec<&'s ForeignKey>,
+    siblings: &'g [&'s ForeignKey],
     /// A row of an enclosing query is compared, which may compare the rest of the key.
     outer: bool,
     fk: &'s ForeignKey,
     /// The position in the key of each column compared, what it is compared with, and
     /// the index of the pair comparing them.
-    columns: Vec<(usize, Column<'s>, usize)>,
+    columns: Vec<(usize, &'g Column<'s, 'n>, usize)>,
     span: Span,
 }
 
-impl Match<'_> {
+impl Match<'_, '_, '_> {
     fn rows(&self) -> Vec<&str> {
-        let mut rows: Vec<&str> = self
-            .columns
-            .iter()
-            .map(|(_, c, _)| c.row.as_str())
-            .collect();
+        let mut rows: Vec<&str> = self.columns.iter().map(|(_, c, _)| &*c.row).collect();
         rows.sort_unstable();
         rows.dedup();
         rows
@@ -564,12 +651,12 @@ impl Match<'_> {
     /// to it through other columns, constants or parameters, or one is NULL, so the key
     /// references no row.
     fn complete(&self, group: &Group, classes: &Classes) -> bool {
-        let other = self.columns[0].1.row.as_str();
+        let other = &*self.columns[0].1.row;
         let null = |column: &String| {
             group
                 .nulls
                 .iter()
-                .any(|(r, c)| *r == self.row && c == column)
+                .any(|(r, c)| *r == self.row && **c == **column)
         };
         self.fk.columns.iter().any(null)
             || self.fk.columns.iter().enumerate().all(|(at, column)| {
@@ -582,13 +669,13 @@ impl Match<'_> {
 
     /// Whether the query selects the referenced columns not compared, as `IN (SELECT ...)`
     /// compares them with the rest of the key of an enclosing query's row.
-    fn selects_rest(&self, projected: &[(String, String)]) -> bool {
+    fn selects_rest(&self, projected: &[RowColumn]) -> bool {
         let other = &self.columns[0].1.row;
         self.fk.referred.iter().enumerate().all(|(at, referred)| {
             self.columns.iter().any(|(i, _, _)| *i == at)
                 || projected
                     .iter()
-                    .any(|(row, column)| row == other && column == referred)
+                    .any(|(row, column)| row == other && **column == **referred)
         })
     }
 
@@ -614,19 +701,20 @@ fn list(columns: &[String]) -> String {
 }
 
 /// Reads the comparisons of conditions into groups of terms that hold together.
-struct Reader<'a, 's> {
-    analyzer: &'a Analyzer<'s>,
-    scope: &'a Scope,
+struct Reader<'r, 's> {
+    analyzer: &'r Analyzer<'s>,
+    scope: &'r Scope,
     subqueries: usize,
     /// The groups of `OR` branches and `IN` list items, each an alternative.
-    groups: Vec<Group<'s>>,
+    groups: Vec<Group<'s, 'r>>,
 }
 
-impl<'s> Reader<'_, 's> {
+impl<'r, 's> Reader<'r, 's> {
     /// Reads the terms of one `AND` into `group`, then each `OR` branch and `IN` list item
     /// into an alternative of it.
-    fn conjunction(&mut self, terms: Vec<&Expr>, group: &mut Group<'s>) {
+    fn conjunction(&mut self, terms: Vec<&'r Expr>, group: &mut Group<'s, 'r>) {
         let (mut branches, mut lists) = (Vec::new(), Vec::new());
+        let mut alternatives = Vec::new();
         for term in terms {
             match term {
                 Expr::BinaryOp {
@@ -639,7 +727,9 @@ impl<'s> Reader<'_, 's> {
                     target: InTarget::List(list),
                     ..
                 } if list.len() != 1 => lists.push((expr, list, term.span())),
-                _ if self.comparison(term, group) => {}
+                _ if self.comparison(term, group, &mut alternatives) => {
+                    self.groups.append(&mut alternatives);
+                }
                 _ => {
                     group.unread.push(self.rows(&[term]));
                     let _ = term.visit(&mut Nested {
@@ -658,12 +748,22 @@ impl<'s> Reader<'_, 's> {
         }
         for (expr, list, span) in lists {
             let _at = self.analyzer.diag.at(span);
-            self.in_list(expr, list, group);
+            self.in_list(expr, list, group, &mut alternatives);
+            self.groups.append(&mut alternatives);
         }
     }
 
-    /// Reads `expr` into `group` when it is a comparison.
-    fn comparison(&mut self, expr: &Expr, group: &mut Group<'s>) -> bool {
+    /// Reads `expr` into `group` when it is a comparison, and the alternatives of an `IN`
+    /// list into `alternatives`.
+    fn comparison<'g>(
+        &mut self,
+        expr: &'g Expr,
+        group: &mut Group<'s, 'g>,
+        alternatives: &mut Vec<Group<'s, 'g>>,
+    ) -> bool
+    where
+        'r: 'g,
+    {
         let _at = self.analyzer.diag.at(expr.span());
         match expr {
             Expr::BinaryOp {
@@ -684,7 +784,7 @@ impl<'s> Reader<'_, 's> {
                 ..
             } => match list.as_slice() {
                 [item] => self.compare(left, item, !negated, expr.span(), group),
-                _ => self.in_list(left, list, group),
+                _ => self.in_list(left, list, group, alternatives),
             },
             Expr::In {
                 expr: left,
@@ -693,7 +793,7 @@ impl<'s> Reader<'_, 's> {
             } => self.subquery(left, subquery, group),
             Expr::IsNull(column) => {
                 if let Some(column) = self.analyzer.locate(column, self.scope, "") {
-                    group.nulls.push((column.row, column.name));
+                    group.nulls.push((column.row, Cow::Borrowed(column.name)));
                 }
             }
             _ => return false,
@@ -701,17 +801,34 @@ impl<'s> Reader<'_, 's> {
         true
     }
 
-    fn in_list(&mut self, left: &Expr, list: &[Expr], group: &Group<'s>) {
+    fn in_list<'g>(
+        &self,
+        left: &'g Expr,
+        list: &'g [Expr],
+        group: &Group<'s, 'g>,
+        alternatives: &mut Vec<Group<'s, 'g>>,
+    ) where
+        'r: 'g,
+    {
         for item in list {
             let mut alternative = group.alternative();
             let span = left.span().union(&item.span());
             self.compare(left, item, false, span, &mut alternative);
-            self.groups.push(alternative);
+            alternatives.push(alternative);
         }
     }
 
     /// Reads `left = right` (`pin`) or `left <> right` into `group`, row values by position.
-    fn compare(&self, left: &Expr, right: &Expr, pin: bool, span: Span, group: &mut Group<'s>) {
+    fn compare<'g>(
+        &self,
+        left: &'g Expr,
+        right: &'g Expr,
+        pin: bool,
+        span: Span,
+        group: &mut Group<'s, 'g>,
+    ) where
+        'r: 'g,
+    {
         match (strip(left), strip(right)) {
             (Expr::Tuple(lefts), Expr::Tuple(rights)) if lefts.len() == rights.len() => {
                 for (left, right) in lefts.iter().zip(rights) {
@@ -731,16 +848,16 @@ impl<'s> Reader<'_, 's> {
             (Some(left), Some(right)) => {
                 if pin {
                     group.equal.push([
-                        (left.row.clone(), left.name.clone()),
-                        (right.row.clone(), right.name.clone()),
+                        (left.row.clone(), Cow::Borrowed(left.name)),
+                        (right.row.clone(), Cow::Borrowed(right.name)),
                     ]);
                 }
                 group.pairs.extend(analyzer.compared(left, right, span));
             }
             (a, b) => match constant_of(a, right).or_else(|| constant_of(b, left)) {
-                Some((column, value)) => group
-                    .pinned
-                    .extend(pinned(pin, value).map(|v| (column.row, column.name, v))),
+                Some((column, value)) => group.pinned.extend(
+                    pinned(pin, value).map(|v| (column.row, Cow::Borrowed(column.name), v)),
+                ),
                 // `lower(w.code) = lower(s.code)`
                 None => group.unread.push(self.rows(&[left, right])),
             },
@@ -748,7 +865,7 @@ impl<'s> Reader<'_, 's> {
     }
 
     /// The rows the columns of `exprs` are read from, outside subqueries.
-    fn rows(&self, exprs: &[&Expr]) -> Vec<String> {
+    fn rows<'g>(&self, exprs: &[&Expr]) -> Vec<Name<'g>> {
         let mut rows = Rows {
             reader: self,
             queries: 0,
@@ -762,7 +879,10 @@ impl<'s> Reader<'_, 's> {
 
     /// `expr IN (SELECT ...)`: each column of `expr` with the subquery's column at its
     /// position, read in the subquery's scope.
-    fn subquery(&mut self, expr: &Expr, subquery: &Query, group: &mut Group<'s>) {
+    fn subquery<'g>(&mut self, expr: &'g Expr, subquery: &Query, group: &mut Group<'s, 'g>)
+    where
+        'r: 'g,
+    {
         let SetExpr::Select(inner) = subquery.body.as_ref() else {
             return;
         };
@@ -794,7 +914,9 @@ impl<'s> Reader<'_, 's> {
             let span = left.span().union(&right.span());
             if let (Some(left), Some(right)) = (
                 self.analyzer.locate(left, self.scope, ""),
-                analyzer.locate(right, &inner_scope, &row),
+                analyzer
+                    .locate(right, &inner_scope, &row)
+                    .map(Located::into_owned),
             ) {
                 group
                     .pairs
@@ -813,14 +935,21 @@ impl<'s> Reader<'_, 's> {
             else {
                 continue;
             };
-            let located = |expr: &Expr| analyzer.locate(expr, &inner_scope, &row);
+            let located = |expr: &Expr| {
+                analyzer
+                    .locate(expr, &inner_scope, &row)
+                    .map(Located::into_owned)
+            };
             match (located(left), located(right)) {
-                (Some(a), Some(b)) => group.equal.push([(a.row, a.name), (b.row, b.name)]),
+                (Some(a), Some(b)) => group.equal.push([
+                    (a.row, Cow::Borrowed(a.name)),
+                    (b.row, Cow::Borrowed(b.name)),
+                ]),
                 (a, b) => group.pinned.extend(
                     constant_of(a, right)
                         .or_else(|| constant_of(b, left))
                         .and_then(|(column, value)| {
-                            Some((column.row, column.name, pinned(true, value)?))
+                            Some((column.row, Cow::Borrowed(column.name), pinned(true, value)?))
                         }),
                 ),
             }
@@ -829,7 +958,10 @@ impl<'s> Reader<'_, 's> {
 }
 
 /// `column` compared with `expr`, when `expr` is a constant or parameter.
-fn constant_of(column: Option<Located>, expr: &Expr) -> Option<(Located, &ValueWithSpan)> {
+fn constant_of<'s, 'n, 'e>(
+    column: Option<Located<'s, 'n>>,
+    expr: &'e Expr,
+) -> Option<(Located<'s, 'n>, &'e ValueWithSpan)> {
     match strip(expr) {
         Expr::Value(value) => Some((column?, value)),
         _ => None,
@@ -873,8 +1005,11 @@ impl Visitor for Nested<'_, '_, '_> {
                 split: true,
                 ..Group::default()
             };
-            if self.reader.comparison(expr, &mut group) {
-                self.reader.groups.push(group);
+            let mut alternatives = Vec::new();
+            if self.reader.comparison(expr, &mut group, &mut alternatives) {
+                for group in alternatives.into_iter().chain([group]) {
+                    self.reader.groups.push(group.into_owned());
+                }
             }
         }
         ControlFlow::Continue(())
@@ -882,13 +1017,13 @@ impl Visitor for Nested<'_, '_, '_> {
 }
 
 /// Collects the rows of the columns an expression reads, outside subqueries.
-struct Rows<'r, 'a, 's> {
+struct Rows<'r, 'a, 's, 'g> {
     reader: &'r Reader<'a, 's>,
     queries: usize,
-    rows: Vec<String>,
+    rows: Vec<Name<'g>>,
 }
 
-impl Visitor for Rows<'_, '_, '_> {
+impl Visitor for Rows<'_, '_, '_, '_> {
     type Break = ();
 
     fn pre_visit_query(&mut self, _query: &Query) -> ControlFlow<()> {
@@ -905,8 +1040,11 @@ impl Visitor for Rows<'_, '_, '_> {
         if self.queries == 0 {
             if let Expr::Identifier(_) | Expr::CompoundIdentifier(_) = expr {
                 let (analyzer, scope) = (self.reader.analyzer, self.reader.scope);
-                self.rows
-                    .extend(analyzer.locate(expr, scope, "").map(|column| column.row));
+                self.rows.extend(
+                    analyzer
+                        .locate(expr, scope, "")
+                        .map(|column| Cow::Owned(column.row.into_owned())),
+                );
             }
         }
         ControlFlow::Continue(())

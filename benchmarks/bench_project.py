@@ -132,8 +132,9 @@ def worker_schema_load(schema_path: str) -> None:
 
 
 def micro(tables: int, rounds: int = 200) -> dict[str, float]:
-    """Microseconds per ``analyze_select``/``analyze_params`` call, per query kind (schema cached)."""
-    from sqlty import core
+    """Microseconds per ``analyze_select``/``analyze_params`` call, and per ``analyze_query``,
+    both of one parse as ``check`` asks them, per query kind (schema cached)."""
+    from sqlty import _core, core
 
     schema = synth.schema_sql(tables)
     i = min(7, tables - 1)
@@ -144,6 +145,7 @@ def micro(tables: int, rounds: int = 200) -> dict[str, float]:
         for fn_name, fn in (
             ("analyze_select", core.analyze_select),
             ("analyze_params", core.analyze_params),
+            ("analyze_query", _core.analyze_query),
         ):
             best = float("inf")
             for _ in range(5):
@@ -379,9 +381,10 @@ def flatten(result: dict) -> dict[str, tuple[str, float]]:
         if "rss_mb" in m:
             flat[f"{name}.rss"] = ("rss", m["rss_mb"])
     # Per-kind microsecond timings are too noisy to budget one by one: budget the sums.
-    for fn in ("analyze_select", "analyze_params"):
-        total_us = sum(us for name, us in result["micro_us"].items() if name.startswith(fn + "."))
-        flat[f"micro.{fn}.total"] = ("time", total_us * 1e-6 / cal)
+    for fn in ("analyze_select", "analyze_params", "analyze_query"):
+        timings = [us for name, us in result["micro_us"].items() if name.startswith(fn + ".")]
+        if timings:
+            flat[f"micro.{fn}.total"] = ("time", sum(timings) * 1e-6 / cal)
     return flat
 
 
@@ -405,13 +408,13 @@ def compare(result: dict, baseline: dict, time_tol: float, rss_tol: float) -> li
 
 def over_budget(result: dict) -> list[str]:
     """Lines for the inference slower than its budget (AGENTS.md "Check budget"): SQL of
-    a query than a database round trip, Python of a file than ``ruff check`` of it."""
+    a query (``analyze_query``) than a database round trip, Python of a file than
+    ``ruff check`` of it."""
     limit = ROUND_TRIP_US * result["calibration_s"] / ROUND_TRIP_CALIBRATION_S
-    micro_us = result["micro_us"]
     failures = [
-        f"sql.{kind}: {us:.0f} us > round trip {limit:.0f} us"
-        for kind in sorted(n.split(".", 1)[1] for n in micro_us if n.startswith("analyze_select."))
-        if (us := micro_us[f"analyze_select.{kind}"] + micro_us[f"analyze_params.{kind}"]) > limit
+        f"sql.{name.split('.', 1)[1]}: {us:.0f} us > round trip {limit:.0f} us"
+        for name, us in sorted(result["micro_us"].items())
+        if name.startswith("analyze_query.") and us > limit
     ]
     python = result["python_us_per_file"]
     if python["mean"] > python["ruff_mean"]:

@@ -177,7 +177,7 @@ impl<'a> Analyzer<'a> {
                                 analyzer.facts.join(analyzer.null_extended(from));
                                 analyzer.facts.join(unmatched_sources(stmt, self.dialect));
                                 if merged.is_some() {
-                                    scope.rotate_left(1);
+                                    scope.rotate_first_last();
                                 }
                                 (analyzer, scope)
                             }

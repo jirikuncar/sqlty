@@ -71,9 +71,9 @@ uv run python benchmarks/bench_project.py --size ci --exe path/to/sqlty  # a nat
 
 The `bench` job in `.github/workflows/tests.yml` builds the release extension
 and runs `make bench-ci` (about 20 s). It fails when inference is over its budget
-(AGENTS.md "Check budget"): SQL when any query kind's `analyze_select` +
-`analyze_params` is slower than a database round trip (100 µs, scaled by the
-calibration loop over its 20 ms), Python when the `python_us_per_file` mean is over
+(AGENTS.md "Check budget"): SQL when any query kind's `analyze_query` (one parse
+typed for columns and parameters) is slower than a database round trip (100 µs,
+scaled by the calibration loop over its 20 ms), Python when the `python_us_per_file` mean is over
 `ruff_mean`. It also fails when a metric is over its budget in `baseline.json`:
 
 - **Times** are divided by a calibration loop (a fixed pure-Python loop, best of

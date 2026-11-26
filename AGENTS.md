@@ -91,7 +91,7 @@ pass over the module, as a lint does.
 
 | Inference | Measured as | Budget | Guarded by |
 |-----------|-------------|--------|------------|
-| SQL, per query | `analyze_select` + `analyze_params`, schema loaded | 100 µs | `bench-ci` (fails) |
+| SQL, per query | `analyze_query`: one parse typed for columns and parameters, as `check` does, schema loaded | 100 µs | `bench-ci` (fails) |
 | Python, per file | `check_source` minus the SQL of its queries, schema loaded | `ruff check` per file | `bench-ci` `python_us_per_file` mean (fails) |
 
 Cost grows at most linearly with input size: files, queries, tables, columns, statements,

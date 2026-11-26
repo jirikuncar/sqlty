@@ -320,10 +320,7 @@ impl Analyzer<'_> {
     /// The column of a source of `scope` (not of an enclosing query) that `expr` reads.
     fn local_node(&self, expr: &Expr, scope: &Scope) -> Option<Node> {
         let (node, _) = self.tenant_node(expr, scope)?;
-        scope
-            .iter()
-            .any(|source| source.reference == node.0)
-            .then_some(node)
+        scope.reads(&node.0).then_some(node)
     }
 
     /// Pins the outputs a CTE or derived table of `scope` pins itself.
@@ -659,7 +656,7 @@ impl Analyzer<'_> {
             expr => expr,
         };
         let (reference, table, column) = self.locate_column(expr, scope)?;
-        let outer = !scope.iter().any(|source| source.reference == reference);
+        let outer = !scope.reads(&reference);
         let (column, keyed) = match self.virtuals.carried(&table) {
             Some(carried) => {
                 let column = self.column_key(&column);

@@ -46,15 +46,15 @@ use rustc_hash::FxHashSet;
 #[derive(Clone, Default, PartialEq, Eq)]
 pub(super) struct Learned {
     /// `(reference, column)` pairs.
-    columns: HashSet<(String, String)>,
+    columns: FxHashSet<(String, String)>,
     /// References whose relation has a row, because a column of it is not NULL.
-    present: HashSet<String>,
+    present: FxHashSet<String>,
     /// Expressions such as `doc -> 'k'`.
     exprs: FxHashSet<ExprKey>,
     /// `(reference, column, values)`: the values `col = 'x'` or `col IN (...)` leaves.
     values: Vec<ColumnValues>,
     /// `(reference, column)` pairs proven NULL, by `col IS NULL`.
-    null: HashSet<(String, String)>,
+    null: FxHashSet<(String, String)>,
 }
 
 /// `into` with `other` added, moving the smaller set into the larger.
@@ -336,6 +336,9 @@ impl<'a> Analyzer<'a> {
         let mut cases = vec![Learned::default()];
         for cond in conditions(select) {
             cases = both(cases, self.learn_cases(cond, true, scope));
+        }
+        if !cases.iter().any(Learned::limits_values) && !facts.limits_values() {
+            return facts.with_cases(cases);
         }
         // What all cases prove makes an outer join's row present, so its `CHECK`s hold.
         let proven = facts.with(merge(cases.clone()));
@@ -718,10 +721,7 @@ impl<'a> Analyzer<'a> {
             return Learned::default();
         };
         let Ok((inner, sources)) = self.correlated(scope).scope_of(&select.from);
-        let outer = |reference: &String| {
-            !sources.iter().any(|source| source.reference == *reference)
-                && scope.iter().any(|source| source.reference == *reference)
-        };
+        let outer = |reference: &String| !sources.reads(reference) && scope.reads(reference);
         let learned = inner.learn(selection, true, &sources);
         Learned {
             columns: learned

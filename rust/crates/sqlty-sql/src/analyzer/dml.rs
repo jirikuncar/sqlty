@@ -133,9 +133,13 @@ pub(super) fn dml_scope(stmt: &Statement, dialect: SqlDialect) -> Scope {
                     || object_name(name),
                     |alias| alias.alias.value.to_lowercase(),
                 );
-                vec![Source::named(reference, table_key(name, dialect))]
+                vec![Source::named(
+                    reference,
+                    table_key(name, dialect).into_owned(),
+                )]
+                .into()
             }
-            _ => Vec::new(),
+            _ => Scope::new(),
         },
         Statement::Update(update) => {
             let mut scope = table_scope(&update.table.relation, dialect);
@@ -161,7 +165,7 @@ pub(super) fn dml_scope(stmt: &Statement, dialect: SqlDialect) -> Scope {
             }
             scope
         }
-        _ => Vec::new(),
+        _ => Scope::new(),
     }
 }
 
@@ -458,7 +462,7 @@ impl Analyzer<'_> {
                             let mut upsert = scope.clone();
                             upsert.push(Source::named(
                                 "excluded".to_string(),
-                                table_key(name, self.dialect),
+                                table_key(name, self.dialect).into_owned(),
                             ));
                             let check = |expr| analyzer.check_references(expr, &upsert);
                             update.assignments.iter().for_each(|a| check(&a.value));

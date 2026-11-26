@@ -178,9 +178,7 @@ impl Analyzer<'_> {
             return None;
         }
         let (reference, _, column) = self.locate_column(expr, scope)?;
-        let node = scope
-            .iter()
-            .position(|source| source.reference == reference)?;
+        let node = scope.position(&reference)?;
         Some((node, column))
     }
 
@@ -209,8 +207,7 @@ impl Analyzer<'_> {
     /// Records the equalities `JOIN right USING (columns)` makes, each with the source
     /// before `right` that has the column.
     fn using_pairs(&self, using: &[Ident], right: &TableFactor, scope: &Scope, graph: &mut Graph) {
-        let Some(right) = super::scope::relation_name(right)
-            .and_then(|name| scope.iter().position(|source| source.reference == name))
+        let Some(right) = super::scope::relation_name(right).and_then(|name| scope.position(&name))
         else {
             return;
         };
