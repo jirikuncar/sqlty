@@ -217,7 +217,7 @@ impl Catalog {
 }
 
 /// The names of each kind, sorted for prefix lookups.
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub(super) struct NameIndex {
     relations: Sorted,
     functions: Sorted,
@@ -243,7 +243,7 @@ impl NameIndex {
 }
 
 /// `schema.name` keys, sorted by `(schema, name)` and by `(name, key)`.
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct Sorted {
     by_key: Vec<Arc<str>>,
     by_name: Vec<Arc<str>>,

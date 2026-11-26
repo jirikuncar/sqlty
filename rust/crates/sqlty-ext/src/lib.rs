@@ -255,19 +255,10 @@ fn load_schema(
                 absent,
                 others,
             };
-            #[expect(
-                clippy::expect_used,
-                reason = "nothing else holds a schema just loaded"
-            )]
-            let LoadedSchema { schema, skipped } =
-                Arc::into_inner(loaded).expect("a schema just loaded is not shared");
-            #[expect(
-                clippy::expect_used,
-                reason = "nothing else holds a schema just loaded"
-            )]
-            let schema = analyzer::SchemaData::with_databases(schema, databases)
-                .expect("a schema just loaded is not shared");
-            Arc::new(LoadedSchema { schema, skipped })
+            Arc::new(LoadedSchema {
+                schema: analyzer::SchemaData::with_databases(&loaded.schema, databases),
+                skipped: loaded.skipped.clone(),
+            })
         }
     };
     let absent = loaded

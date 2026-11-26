@@ -1,8 +1,10 @@
 //! The analyzer's public entry points: type inference, column analysis, parse checks.
 
+use std::collections::HashMap;
+use std::ops::ControlFlow;
 use std::sync::Arc;
 
-use sqlparser::ast::Statement;
+use sqlparser::ast::{visit_expressions, visit_expressions_mut, Expr, Statement, Value};
 use sqlparser::parser::Parser;
 use sqlparser::tokenizer::{Location, Span};
 
@@ -11,7 +13,7 @@ use crate::diagnostics::{Diagnostics, NameDiagnostic};
 use super::dialect::SqlDialect;
 use super::dml::statement_returns_rows;
 use super::expr::from_sql_type;
-use super::input::{parser_input, Input};
+use super::input::{parser_input, Input, PSYCOPG};
 use super::names::alias_name;
 use super::params::{params_of, Param};
 use super::preprocess::{parse_input_as_written, parse_query, too_deep, MAX_DEPTH};
@@ -272,8 +274,8 @@ impl Parsed {
     }
 
     /// [`analyze_params`](super::analyze_params) of `sql`, the text given to [`parse`],
-    /// against `schema` as [`route`](super::route) chose it. The tree is shared when the query has no
-    /// placeholder that needs rewriting (`$1` and none), else the rewritten text is parsed.
+    /// against `schema` as [`route`](super::route) chose it. The tree is shared, its
+    /// placeholders numbered where `sql` has some that need it (`%s`, `:name`, `?`).
     ///
     /// ```
     /// use sqlty_sql::analyzer::parse;
@@ -283,8 +285,86 @@ impl Parsed {
     /// assert!(parse("SELEC", "postgres").params("SELEC", None).is_none());
     /// ```
     pub fn params(&self, sql: &str, schema: Option<&SchemaData>) -> Option<Vec<Param>> {
-        let shared = if self.as_written { self.first() } else { None };
-        params_of(sql, self.dialect, schema, shared)
+        params_of(
+            sql,
+            self.dialect,
+            schema,
+            Some(self).filter(|p| p.as_written),
+        )
+    }
+
+    /// The first statement with the placeholder at each range of `sql` in `numbered`
+    /// spelled as `spell` numbers it; `None` when one of them is not a placeholder of the
+    /// tree, or one of the tree's runs past it (`%sabc`).
+    pub(super) fn numbered(
+        &self,
+        sql: &str,
+        numbered: &[(std::ops::Range<usize>, usize)],
+        spell: impl Fn(usize) -> String,
+    ) -> Option<Statement> {
+        let mut stmt = self.first()?.clone();
+        let mut starts = Vec::new();
+        let _ = visit_expressions(&stmt, |expr| {
+            if let Expr::Value(value) = expr {
+                if let Value::Placeholder(text) = &value.value {
+                    starts.push((value.span.start, text.clone()));
+                }
+            }
+            ControlFlow::<()>::Continue(())
+        });
+        starts.sort_unstable();
+        let locations: Vec<Location> = starts.iter().map(|(at, _)| *at).collect();
+        let offsets = self.offsets(&locations)?;
+        let number: HashMap<usize, (&std::ops::Range<usize>, usize)> = numbered
+            .iter()
+            .map(|(range, n)| (range.start, (range, *n)))
+            .collect();
+        let by_start: HashMap<Location, usize> = starts
+            .into_iter()
+            .zip(offsets)
+            .filter_map(|((start, text), offset)| {
+                let (range, n) = number.get(&offset)?;
+                (PSYCOPG.contains(&text.as_str()) || sql.get((*range).clone()) == Some(&text))
+                    .then_some((start, *n))
+            })
+            .collect();
+        if by_start.len() != numbered.len() {
+            return None;
+        }
+        let _ = visit_expressions_mut(&mut stmt, |expr| {
+            if let Expr::Value(value) = expr {
+                if let (Value::Placeholder(text), Some(n)) =
+                    (&mut value.value, by_start.get(&value.span.start))
+                {
+                    *text = spell(*n);
+                }
+            }
+            ControlFlow::<()>::Continue(())
+        });
+        Some(stmt)
+    }
+
+    /// The byte of the query at each of `sorted`, distinct locations of the text sqlparser
+    /// read, in one pass; `None` when one is not in it.
+    fn offsets(&self, sorted: &[Location]) -> Option<Vec<usize>> {
+        let text = self.input.text();
+        let mut wanted = sorted.iter().peekable();
+        let mut found = Vec::with_capacity(sorted.len());
+        let (mut line, mut column) = (1, 1);
+        for (i, c) in text.char_indices().chain([(text.len(), '\n')]) {
+            if wanted
+                .next_if(|at| (at.line, at.column) == (line, column))
+                .is_some()
+            {
+                found.push(i);
+            }
+            if c == '\n' {
+                (line, column) = (line + 1, 1);
+            } else {
+                column += 1;
+            }
+        }
+        (found.len() == sorted.len()).then(|| self.input.originals(&found))
     }
 
     /// [`analyze_with_diagnostics`] of the query.
@@ -362,7 +442,7 @@ impl Parsed {
         Some(stars)
     }
 
-    fn first(&self) -> Option<&Statement> {
+    pub(super) fn first(&self) -> Option<&Statement> {
         self.stmts.as_ref()?.first()
     }
 }

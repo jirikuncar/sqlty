@@ -187,6 +187,8 @@ EVERYTHING = [
     "scripts/ci_changes.py",
     "scripts/coverage.sh",
     "scripts/coverage-floors.txt",
+    "scripts/slowest.py",
+    "rust/.config/**",
     "rust/Cargo.toml",
     "rust/clippy.toml",
     "rust-toolchain.toml",

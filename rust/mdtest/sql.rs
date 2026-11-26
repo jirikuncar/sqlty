@@ -172,7 +172,9 @@ pub fn schema(section: &Section, types: &[(String, String)]) -> Result<Option<Sc
         absent: sql.is_none(),
         others,
     };
-    Ok(analyzer::SchemaData::with_databases(schema, databases))
+    Ok(Some(analyzer::SchemaData::with_databases(
+        &schema, databases,
+    )))
 }
 
 /// A JSON shape as `sqlty._json_shape.render` writes it.
