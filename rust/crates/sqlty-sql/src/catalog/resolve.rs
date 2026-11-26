@@ -503,6 +503,8 @@ impl<'a> Resolver<'a> {
                         .map(|key| key.columns.clone())
                         .collect(),
                     row_security: table.row_security,
+                    force_row_security: table.force_row_security,
+                    policies: table.policies.clone(),
                     by_name: Vec::new(),
                 }
                 .indexed(),

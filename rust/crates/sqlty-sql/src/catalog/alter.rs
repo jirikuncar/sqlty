@@ -19,6 +19,7 @@ use super::columns::{
 };
 use super::loader::{AlterFail, Loader, RawTable, Rel, Taint, TypeDef, LARGE_ENUM};
 use super::names::{fold, parts};
+use super::policies;
 
 impl Loader {
     /// Returns `false` when the table (or a column it changes) is not defined yet.
@@ -402,6 +403,7 @@ pub(super) fn alter_op(
                             .retain(|fk| !fk.key.columns.contains(&name));
                         // PostgreSQL drops the constraints that read the column.
                         table.checks.retain(|check| !reads(check, &name, dialect));
+                        policies::drop_column(&mut table.policies, &name, dialect);
                     }
                     None if !if_exists => missing()?,
                     None => {}
@@ -417,6 +419,7 @@ pub(super) fn alter_op(
                 let old = std::mem::replace(&mut table.columns[at].name, name.clone());
                 rename_in_foreign_keys(table, &old, &name);
                 table.checks.retain(|check| !reads(check, &old, dialect));
+                policies::rename_column(&mut table.policies, &old, &name, dialect);
                 let column = &mut table.columns[at];
                 column.ident = match new_column_name.quote_style {
                     Some(_) => new_column_name.to_string(),
@@ -522,6 +525,8 @@ pub(super) fn alter_op(
         }
         AlterTableOperation::EnableRowLevelSecurity => table.row_security = true,
         AlterTableOperation::DisableRowLevelSecurity => table.row_security = false,
+        AlterTableOperation::ForceRowLevelSecurity => table.force_row_security = true,
+        AlterTableOperation::NoForceRowLevelSecurity => table.force_row_security = false,
         AlterTableOperation::SwapWith { .. } => return Err(AlterFail::Unsupported),
         // Storage, options, tablespace, triggers, RLS, partitions, comments and the like
         // never change a column.

@@ -28,6 +28,8 @@ CREATE TABLE events (id BIGSERIAL PRIMARY KEY, org INTEGER NOT NULL, payload JSO
 CREATE TABLE transfers (id SERIAL PRIMARY KEY, from_org INTEGER NOT NULL REFERENCES orgs, to_org INTEGER NOT NULL REFERENCES orgs);
 CREATE TABLE secrets (id SERIAL PRIMARY KEY, org_id INTEGER NOT NULL REFERENCES orgs, value TEXT NOT NULL);
 ALTER TABLE secrets ENABLE ROW LEVEL SECURITY;
+ALTER TABLE secrets FORCE ROW LEVEL SECURITY;
+CREATE POLICY tenant ON secrets USING (org_id = current_setting('app.org_id')::int);
 CREATE TABLE tags (id SERIAL PRIMARY KEY, name TEXT NOT NULL);
 ```
 
@@ -379,4 +381,143 @@ from sqlty import SQL
 
 # error:
 names = SQL[tuple[str]]("--sql\nSELECT name FROM projects")
+```
+
+## Row-level security policies
+
+A policy that compares a column to a session value makes the column a tenant key, with
+or without `[tool.sqlty.tenancy]`. A table is left to the database only when its
+policies are forced and pin a tenant key for every command.
+
+```toml
+[tool.sqlty]
+schema = "rls.sql"
+
+[tool.sqlty.tenancy]
+columns = ["dropped.org_id"]
+session-functions = ["auth.uid"]
+```
+
+`rls.sql`:
+
+```sql
+CREATE TABLE projects (id SERIAL PRIMARY KEY, org_id INTEGER NOT NULL, name TEXT NOT NULL);
+ALTER TABLE projects ENABLE ROW LEVEL SECURITY;
+ALTER TABLE projects FORCE ROW LEVEL SECURITY;
+CREATE POLICY tenant ON projects USING (org_id = current_setting('app.org_id')::int);
+
+CREATE TABLE unforced (id SERIAL PRIMARY KEY, org_id INTEGER NOT NULL);
+ALTER TABLE unforced ENABLE ROW LEVEL SECURITY;
+CREATE POLICY tenant ON unforced USING (org_id = current_setting('app.org_id')::int);
+
+CREATE TABLE invoices (id SERIAL PRIMARY KEY, org_id INTEGER NOT NULL);
+ALTER TABLE invoices ENABLE ROW LEVEL SECURITY, FORCE ROW LEVEL SECURITY;
+CREATE POLICY tenant ON invoices FOR ALL USING (org_id = current_setting('app.org_id')::int) WITH CHECK (true);
+
+CREATE TABLE notes (id SERIAL PRIMARY KEY, owner UUID NOT NULL, body TEXT);
+ALTER TABLE notes ENABLE ROW LEVEL SECURITY;
+ALTER TABLE notes FORCE ROW LEVEL SECURITY;
+CREATE POLICY own ON notes USING (owner = (SELECT auth.uid()));
+
+CREATE TABLE open_to_all (id SERIAL PRIMARY KEY, org_id INTEGER NOT NULL);
+ALTER TABLE open_to_all ENABLE ROW LEVEL SECURITY;
+ALTER TABLE open_to_all FORCE ROW LEVEL SECURITY;
+CREATE POLICY tenant ON open_to_all USING (org_id = current_setting('app.org_id')::int);
+CREATE POLICY everyone ON open_to_all FOR SELECT USING (true);
+
+CREATE TABLE narrowed (id SERIAL PRIMARY KEY, org_id INTEGER NOT NULL);
+ALTER TABLE narrowed ENABLE ROW LEVEL SECURITY;
+ALTER TABLE narrowed FORCE ROW LEVEL SECURITY;
+CREATE POLICY everyone ON narrowed USING (true);
+CREATE POLICY tenant ON narrowed AS RESTRICTIVE USING (org_id = current_setting('app.org_id')::int);
+
+CREATE TABLE dropped (id SERIAL PRIMARY KEY, org_id INTEGER NOT NULL);
+ALTER TABLE dropped ENABLE ROW LEVEL SECURITY;
+ALTER TABLE dropped FORCE ROW LEVEL SECURITY;
+CREATE POLICY tenant ON dropped USING (org_id = current_setting('app.org_id')::int);
+ALTER POLICY tenant ON dropped USING (true);
+```
+
+### Forced policies that pin the key for every command
+
+```python
+from sqlty import SQL
+
+# error:
+names = SQL[tuple[str]]("--sql\nSELECT name FROM projects")
+
+# error:
+narrowed = SQL[tuple[int]]("--sql\nSELECT id FROM narrowed")
+```
+
+### Policies the database does not enforce for every role or command
+
+The owner of a table without `FORCE ROW LEVEL SECURITY` skips its policies.
+`WITH CHECK (true)` lets an `INSERT` write a row of another tenant, and a permissive
+`USING (true)` for `SELECT` shows every row.
+
+```python
+from sqlty import SQL
+
+# error: [tenant-scope] "`unforced` is read without `unforced.org_id = <parameter>`"
+unforced = SQL[tuple[int]]("--sql\nSELECT id FROM unforced")
+
+# error: [tenant-scope] "`invoices` is read without `invoices.org_id = <parameter>`"
+invoices = SQL[tuple[int]]("--sql\nSELECT id FROM invoices")
+
+# error: [tenant-scope] "`open_to_all` is read without `open_to_all.org_id = <parameter>`"
+open_to_all = SQL[tuple[int]]("--sql\nSELECT id FROM open_to_all")
+
+# error:
+scoped = SQL[tuple[int]]("--sql\nSELECT id FROM unforced WHERE org_id = %s")
+```
+
+### Session functions
+
+`session-functions` names the functions a policy reads the session's tenant from, such
+as Supabase's `auth.uid()`.
+
+```python
+from sqlty import SQL
+
+# error:
+notes = SQL[tuple[str | None]]("--sql\nSELECT body FROM notes")
+```
+
+### ALTER POLICY
+
+`ALTER POLICY` replaces the condition: the policy no longer pins `org_id`, which
+`columns` makes a tenant key.
+
+```python
+from sqlty import SQL
+
+# error: [tenant-scope] "`dropped` is read without `dropped.org_id = <parameter>`"
+dropped = SQL[tuple[int]]("--sql\nSELECT id FROM dropped")
+```
+
+## Policies without a tenancy
+
+```toml
+[tool.sqlty]
+schema = "policy.sql"
+```
+
+`policy.sql`:
+
+```sql
+CREATE TABLE projects (id SERIAL PRIMARY KEY, org_id INTEGER NOT NULL, name TEXT NOT NULL);
+ALTER TABLE projects ENABLE ROW LEVEL SECURITY;
+CREATE POLICY tenant ON projects USING (org_id = current_setting('app.org_id')::int);
+ALTER TABLE projects RENAME COLUMN org_id TO tenant_id;
+```
+
+```python
+from sqlty import SQL
+
+# error: [tenant-scope] "`projects` is read without `projects.tenant_id = <parameter>`"
+names = SQL[tuple[str]]("--sql\nSELECT name FROM projects")
+
+# error:
+mine = SQL[tuple[str]]("--sql\nSELECT name FROM projects WHERE tenant_id = %s")
 ```

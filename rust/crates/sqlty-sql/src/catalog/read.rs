@@ -17,6 +17,7 @@ use super::columns::{add_values, unique_key};
 use super::index::NameIndex;
 use super::loader::{Loader, Op, OpKind, Taint, TypeDef};
 use super::names::{fold, parts};
+use super::policies::Change;
 use super::Catalog;
 use super::TypeOverrides;
 
@@ -232,6 +233,13 @@ pub(super) fn read_statements<'a>(
                     stmt.name_parts_after("function"),
                 )),
             }
+        } else if postgres && stmt.creates("policy") {
+            if let Some(Statement::CreatePolicy(create)) =
+                parse_ddl(&stmt.sql(), dialect).and_then(|stmts| stmts.into_iter().next())
+            {
+                let table = parts(&create.table_name, dialect);
+                push(OpKind::Policy(table, Box::new(Change::Create(create))));
+            }
         } else if stmt.creates("index") {
             if let Some(Statement::CreateIndex(index)) =
                 parse_ddl(&stmt.sql(), dialect).and_then(|stmts| stmts.into_iter().next())
@@ -318,6 +326,10 @@ pub(super) fn read_alter_or_drop(
             }
             ("table", _) => {}
             ("type", Some(Statement::AlterType(alter))) => push(OpKind::AlterType(alter)),
+            ("policy", Some(Statement::AlterPolicy(alter))) if dialect == SqlDialect::Postgres => {
+                let table = parts(&alter.table_name, dialect);
+                push(OpKind::Policy(table, Box::new(Change::Alter(alter))));
+            }
             // A constraint added to or dropped from a domain changes the values it allows.
             ("domain", _) if action.iter().any(|w| w == "constraint") => {
                 push(OpKind::Taint(Taint::Type, name));
@@ -340,6 +352,10 @@ pub(super) fn read_alter_or_drop(
                 | Statement::DropDomain(_)),
             ) => {
                 push(OpKind::Drop(Box::new(drop)));
+            }
+            Some(Statement::DropPolicy(drop)) if dialect == SqlDialect::Postgres => {
+                let table = parts(&drop.table_name, dialect);
+                push(OpKind::Policy(table, Box::new(Change::Drop(drop.name))));
             }
             Some(Statement::DropTrigger(drop)) => push(OpKind::DropTrigger(
                 parts(&drop.trigger_name, dialect),

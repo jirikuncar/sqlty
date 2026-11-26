@@ -37,6 +37,7 @@ mod joins;
 mod loader;
 mod lookup;
 mod names;
+mod policies;
 mod read;
 mod resolve;
 
@@ -165,6 +166,8 @@ struct TableRelation {
     /// Columns of each `UNIQUE` constraint or unique index.
     unique: Vec<Vec<String>>,
     row_security: bool,
+    force_row_security: bool,
+    policies: Vec<policies::Policy>,
     /// Positions in `columns`, by name and then position, so that a column is found in
     /// O(log width).
     by_name: Vec<u32>,
@@ -247,30 +250,43 @@ pub struct TypeOverrides {
     tenancy: Option<Tenancy>,
 }
 
-/// `[tool.sqlty.tenancy]`: the table whose rows are the tenants, as written, and the
-/// `table.column` keys it excludes or adds, folded and without a schema.
+/// `[tool.sqlty.tenancy]`: the table whose rows are the tenants, as written (empty for
+/// none), the `table.column` keys it excludes or adds, folded and without a schema, and
+/// the functions whose result is the session's tenant, folded.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 struct Tenancy {
     table: String,
     exclude: Vec<String>,
     columns: Vec<String>,
+    session_functions: Vec<String>,
 }
 
 /// The key of the tenancy among the `types` pairs of [`TypeOverrides::new`]; the value is
-/// `table\texclude\tcolumns`, each list comma-separated.
+/// `table\texclude\tcolumns\tsession-functions`, each list comma-separated.
 const TENANCY: &str = "&tenancy";
 
 /// The `types` pair [`TypeOverrides::new`] reads as `[tool.sqlty.tenancy]`: the tenant
-/// table, and the `table.column` tenant keys it excludes and adds.
+/// table (`""` for none), the `table.column` tenant keys it excludes and adds, and the
+/// functions a row-level security policy reads the session's tenant from.
 ///
 /// ```
 /// use sqlty_sql::analyzer::tenancy_type;
 ///
-/// let pair = tenancy_type("orgs", &["audit_log.org_id"], &["events.org"]);
-/// assert_eq!(pair, ("&tenancy".to_string(), "orgs\taudit_log.org_id\tevents.org".to_string()));
+/// let pair = tenancy_type("orgs", &["audit_log.org_id"], &["events.org"], &["auth.uid"]);
+/// assert_eq!(pair, ("&tenancy".to_string(), "orgs\taudit_log.org_id\tevents.org\tauth.uid".to_string()));
 /// ```
-pub fn tenancy_type(table: &str, exclude: &[&str], columns: &[&str]) -> (String, String) {
-    let value = format!("{table}\t{}\t{}", exclude.join(","), columns.join(","));
+pub fn tenancy_type(
+    table: &str,
+    exclude: &[&str],
+    columns: &[&str],
+    session_functions: &[&str],
+) -> (String, String) {
+    let value = format!(
+        "{table}\t{}\t{}\t{}",
+        exclude.join(","),
+        columns.join(","),
+        session_functions.join(",")
+    );
     (TENANCY.to_string(), value)
 }
 
@@ -339,10 +355,17 @@ impl TypeOverrides {
                         .map(column_key)
                         .collect()
                 };
+                let (exclude, columns) = (list(), list());
+                let functions = parts.next().unwrap_or_default().to_lowercase();
                 overrides.tenancy = Some(Tenancy {
                     table,
-                    exclude: list(),
-                    columns: list(),
+                    exclude,
+                    columns,
+                    session_functions: functions
+                        .split(',')
+                        .filter(|name| !name.is_empty())
+                        .map(String::from)
+                        .collect(),
                 });
                 continue;
             }
@@ -508,29 +531,33 @@ impl Catalog {
         ))
     }
 
-    /// The tenant keys of the table `name`, as `[tool.sqlty.tenancy]` makes them: the
-    /// primary key of the tenant table and the columns of each foreign key to it, less the
-    /// keys `exclude` names, plus each column of `columns` as a key of its own. Pinning every
-    /// column of one key scopes a row. `None` without a tenancy, for a table that has none,
-    /// and for one with row-level security, which the database scopes itself.
+    /// The tenant keys of the table `name`: the primary key of the tenant table of
+    /// `[tool.sqlty.tenancy]` and the columns of each foreign key to it, and each column a
+    /// PostgreSQL policy pins to a session value, less the keys `exclude` names, plus each
+    /// column of `columns`. Pinning every column of one key scopes a row. `None` for a table
+    /// that has none, and for one whose forced policies pin one for every command, which
+    /// the database scopes itself.
     pub(crate) fn tenant_keys(&self, name: &str) -> Option<&[Vec<String>]> {
         let key = self.table_id(name)?;
-        let keys = self.tenants.get_or_init(|| self.build_tenant_keys());
-        keys.get(key).map(Vec::as_slice)
+        self.tenants().get(key).map(Vec::as_slice)
+    }
+
+    fn tenants(&self) -> &FxHashMap<Arc<str>, Vec<Vec<String>>> {
+        self.tenants.get_or_init(|| self.build_tenant_keys())
     }
 
     /// The tenant keys of every table, once per schema.
     fn build_tenant_keys(&self) -> FxHashMap<Arc<str>, Vec<Vec<String>>> {
         let mut found = FxHashMap::default();
-        let Some(tenancy) = &self.overrides.tenancy else {
-            return found;
-        };
+        let none = Tenancy::default();
+        let tenancy = self.overrides.tenancy.as_ref().unwrap_or(&none);
         let tenant = self.table_id(&tenancy.table);
+        let functions = &tenancy.session_functions;
         for (key, relation) in &self.relations {
             let Relation::Table(table) = relation else {
                 continue;
             };
-            if table.row_security {
+            if tenant.is_none() && table.policies.is_empty() && tenancy.columns.is_empty() {
                 continue;
             }
             let own = short_name(key);
@@ -554,9 +581,14 @@ impl Catalog {
             // The tenant table's own keys to itself (`parent_id`) name another tenant.
             let referencing = referencing.filter(|_| !is_tenant);
             let own_key = (is_tenant && !primary.is_empty()).then_some(primary);
+            let names: Vec<String> = table.columns.iter().map(|c| c.name.clone()).collect();
+            let policed = (table.policies.iter())
+                .flat_map(|policy| policy.session_columns(&names, functions))
+                .map(|column| vec![column.clone()]);
             let mut keys: Vec<Vec<String>> = own_key
                 .into_iter()
                 .chain(referencing)
+                .chain(policed)
                 .filter(|columns| !columns.iter().any(|c| listed(&tenancy.exclude, c)))
                 .collect();
             let added = table
@@ -566,7 +598,10 @@ impl Catalog {
             keys.extend(added.map(|column| vec![column.name.clone()]));
             keys.sort();
             keys.dedup();
-            if !keys.is_empty() {
+            let enforced = table.row_security
+                && table.force_row_security
+                && policies::enforce(&table.policies, &keys, functions);
+            if !keys.is_empty() && !enforced {
                 found.insert(Arc::clone(key), keys);
             }
         }
@@ -582,9 +617,9 @@ impl Catalog {
         })
     }
 
-    /// Whether `[tool.sqlty.tenancy]` is configured.
+    /// Whether a table has a tenant key, configured or read from its policies.
     pub(crate) fn has_tenancy(&self) -> bool {
-        self.overrides.tenancy.is_some()
+        !self.tenants().is_empty()
     }
 
     /// The keys of the table `name`: its primary key, then each `UNIQUE` constraint or
