@@ -184,6 +184,21 @@ pub fn one_query_cases() -> Vec<(String, String)> {
         let sql = format!("SELECT j0.id, j{joins}.name FROM app.t0000 j0{chain} WHERE j0.id = $1");
         cases.push((format!("joins/{joins}"), sql));
     }
+    for subqueries in [4, 64] {
+        let chain: String = (1..=subqueries)
+            .map(|i| format!(" JOIN app.t{i:04} j{i} ON j{i}.parent_id = j{}.id", i - 1))
+            .collect();
+        let exists: String = (1..=subqueries)
+            .map(|i| {
+                format!(
+                    " AND EXISTS (SELECT 1 FROM app.t{i:04} b WHERE b.parent_id = j{}.id)",
+                    i - 1
+                )
+            })
+            .collect();
+        let sql = format!("SELECT j0.id FROM app.t0000 j0{chain} WHERE j0.id = $1{exists}");
+        cases.push((format!("correlated/{subqueries}"), sql));
+    }
     for columns in [4, 32, WIDE_COLUMNS] {
         let sql = format!(
             "SELECT {} FROM app.wide WHERE c000 = $1",
@@ -244,7 +259,7 @@ mod tests {
             analyzer::load_schema_with_skipped(&one_query_schema(65), "postgres");
         assert!(skipped.is_empty(), "{skipped:?}");
         let cases = one_query_cases();
-        assert_eq!(cases.len(), 16);
+        assert_eq!(cases.len(), 18);
         assert_eq!(cases[3].0, "typical/aggregate");
         for (name, sql) in &cases {
             let (columns, diagnostics) =
