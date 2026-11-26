@@ -63,11 +63,15 @@ impl Inner {
         for (item, span) in self.items.split_off(start) {
             if keep(item.rule) {
                 self.items.push((item, span));
-            } else if let Some(rules) = self.recorded.get_mut(item.message.as_str()) {
-                rules.retain(|rule| *rule != item.rule);
-                if rules.is_empty() {
-                    self.recorded.remove(item.message.as_str());
-                }
+            } else if self
+                .recorded
+                .get_mut(item.message.as_str())
+                .is_none_or(|rules| {
+                    rules.retain(|rule| *rule != item.rule);
+                    rules.is_empty()
+                })
+            {
+                self.recorded.remove(item.message.as_str());
             }
         }
     }
