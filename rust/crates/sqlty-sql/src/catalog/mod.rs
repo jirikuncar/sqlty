@@ -550,7 +550,10 @@ impl Catalog {
                 .iter()
                 .filter(|fk| Some(fk.table.as_str()) == tenant)
                 .map(|fk| fk.columns.clone());
-            let own_key = (Some(&**key) == tenant && !primary.is_empty()).then_some(primary);
+            let is_tenant = Some(&**key) == tenant;
+            // The tenant table's own keys to itself (`parent_id`) name another tenant.
+            let referencing = referencing.filter(|_| !is_tenant);
+            let own_key = (is_tenant && !primary.is_empty()).then_some(primary);
             let mut keys: Vec<Vec<String>> = own_key
                 .into_iter()
                 .chain(referencing)

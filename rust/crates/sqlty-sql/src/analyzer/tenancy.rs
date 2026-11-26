@@ -9,8 +9,8 @@
 use std::collections::{HashMap, HashSet};
 
 use sqlparser::ast::{
-    Assignment, AssignmentTarget, BinaryOperator, Expr, Ident, InTarget, JoinConstraint,
-    JoinOperator, OnConflictAction, OnInsert, SetExpr, Spanned, Statement, TableFactor,
+    Assignment, AssignmentTarget, BinaryOperator, Expr, Ident, InTarget, Insert, JoinConstraint,
+    JoinOperator, ObjectName, OnConflictAction, OnInsert, SetExpr, Spanned, Statement, TableFactor,
     TableObject, TableWithJoins, Value,
 };
 
@@ -81,7 +81,12 @@ impl Analyzer<'_> {
             return;
         }
         let (target, joined, selection, verb): (_, Vec<&TableWithJoins>, _, _) = match stmt {
-            Statement::Insert(insert) => return self.check_tenant_insert(insert),
+            Statement::Insert(
+                insert @ Insert {
+                    table: TableObject::TableName(name),
+                    ..
+                },
+            ) => return self.check_tenant_insert(insert, name),
             Statement::Update(update) => {
                 self.check_tenant_update(update);
                 let from = update.from.iter().flat_map(|from| match from {
@@ -90,7 +95,7 @@ impl Analyzer<'_> {
                 });
                 let joined = std::iter::once(&update.table).chain(from).collect();
                 (
-                    &update.table.relation,
+                    Some(&update.table.relation),
                     joined,
                     update.selection.as_ref(),
                     "updated",
@@ -99,12 +104,9 @@ impl Analyzer<'_> {
             Statement::Delete(delete) => {
                 let (sqlparser::ast::FromTable::WithFromKeyword(tables)
                 | sqlparser::ast::FromTable::WithoutKeyword(tables)) = &delete.from;
-                let Some(first) = tables.first() else {
-                    return;
-                };
                 let joined = tables.iter().chain(delete.using.iter().flatten()).collect();
                 (
-                    &first.relation,
+                    tables.first().map(|table| &table.relation),
                     joined,
                     delete.selection.as_ref(),
                     "deleted from",
@@ -123,7 +125,7 @@ impl Analyzer<'_> {
         for term in selection.into_iter().flat_map(conjuncts) {
             analyzer.read_term(term, &scope, Holds::All, &mut pins);
         }
-        let target = relation_name(target);
+        let target = target.and_then(relation_name);
         let factors = tables.iter().flat_map(factors);
         self.report_unpinned(factors, &scope, &pins, |reference| {
             match Some(reference) == target.as_deref() {
@@ -141,10 +143,7 @@ impl Analyzer<'_> {
     /// tenant key column from a parameter: in every row of its `VALUES` or `SET`, or in the
     /// select list of its query, where a column also counts, as that query is judged itself.
     /// Its `ON CONFLICT DO UPDATE` must set one from a parameter or `EXCLUDED`.
-    fn check_tenant_insert(&self, insert: &sqlparser::ast::Insert) {
-        let TableObject::TableName(name) = &insert.table else {
-            return;
-        };
+    fn check_tenant_insert(&self, insert: &Insert, name: &ObjectName) {
         let key = table_key(name, self.dialect);
         let catalog = self.schema.catalog();
         let Some(keys) = catalog.tenant_keys(&key) else {
@@ -242,7 +241,7 @@ impl Analyzer<'_> {
 
     fn check_tenant_assignments(
         &self,
-        name: &sqlparser::ast::ObjectName,
+        name: &ObjectName,
         short: &str,
         tenant_columns: &[&str],
         assignments: &[Assignment],
@@ -305,17 +304,16 @@ impl Analyzer<'_> {
                 }
                 JoinConstraint::Using(names) => {
                     for ident in names.iter().filter_map(|name| name.0.last()?.as_ident()) {
-                        let joined = right.first();
+                        let node = |reference: &String| {
+                            self.tenant_node(&qualified(reference, ident), scope)
+                        };
                         let earlier = left
                             .iter()
                             .rev()
                             .find(|reference| self.resolves(&qualified(reference, ident), scope));
-                        if let (Some(a), Some(b)) = (earlier, joined) {
-                            let a = self.tenant_node(&qualified(a, ident), scope);
-                            let b = self.tenant_node(&qualified(b, ident), scope);
-                            if let (Some(a), Some(b)) = (a, b) {
-                                pins.link(&a, &b, holds);
-                            }
+                        let a = earlier.and_then(node);
+                        if let (Some(a), Some(b)) = (a, right.first().and_then(node)) {
+                            pins.link(&a, &b, holds);
                         }
                     }
                 }
@@ -328,31 +326,31 @@ impl Analyzer<'_> {
     /// Reads one conjunct: `column = parameter`, `column IN (parameters)`, `column = ANY
     /// (parameter)` and `column = column`.
     fn read_term(&self, term: &Expr, scope: &Scope, holds: Holds, pins: &mut Pins) {
-        let (left, rights): (&Expr, Vec<&Expr>) = match strip(term) {
+        let (left, right): (&Expr, &Expr) = match strip(term) {
             Expr::BinaryOp {
                 left,
                 op: BinaryOperator::Eq,
                 right,
             }
-            | Expr::IsNotDistinctFrom(left, right) => (left, vec![right]),
+            | Expr::IsNotDistinctFrom(left, right) => (left, right),
             Expr::AnyOp {
                 left,
                 compare_op: BinaryOperator::Eq,
                 right,
                 ..
-            } if is_parameter(right) => (left, vec![right]),
+            } if is_parameter(right) => (left, right),
             Expr::In {
                 expr,
                 target: InTarget::List(list),
                 negated: false,
                 ..
-            } if !list.is_empty() && list.iter().all(is_parameter) => {
-                (expr, list.iter().take(1).collect())
-            }
+            } => match list.as_slice() {
+                [first, rest @ ..] if is_parameter(first) && rest.iter().all(is_parameter) => {
+                    (expr, first)
+                }
+                _ => return,
+            },
             _ => return,
-        };
-        let [right] = rights.as_slice() else {
-            return;
         };
         let node = |expr: &Expr| self.tenant_node(expr, scope);
         match (node(left), node(right)) {
@@ -387,21 +385,19 @@ impl Analyzer<'_> {
     ) {
         let reached = pins.reached();
         for factor in factors {
-            let (TableFactor::Table { name, .. }, Some(reference)) =
-                (factor, relation_name(factor))
-            else {
+            let TableFactor::Table { name, alias, .. } = factor else {
                 continue;
             };
-            let Some(source) = scope.iter().find(|source| source.reference == reference) else {
-                continue;
-            };
-            let Some(key) = source.table.named() else {
-                continue;
-            };
-            if self.virtual_columns(key).is_some() {
-                continue;
-            }
-            let Some(keys) = self.schema.catalog().tenant_keys(key) else {
+            let reference = alias.as_ref().map_or_else(
+                || object_name(name),
+                |alias| alias.name.value.to_lowercase(),
+            );
+            let keys = (scope.iter())
+                .find(|source| source.reference == reference)
+                .and_then(|source| source.table.named())
+                .filter(|key| self.virtual_columns(key).is_none())
+                .and_then(|key| self.schema.catalog().tenant_keys(key));
+            let Some(keys) = keys else {
                 continue;
             };
             let pinned = keys.iter().any(|key| {
