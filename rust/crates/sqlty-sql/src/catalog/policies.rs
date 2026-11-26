@@ -223,6 +223,11 @@ impl Policy {
         &self.name
     }
 
+    /// Whether it has a `WITH CHECK` of its own.
+    pub(super) fn checks(&self) -> bool {
+        self.with_check.is_some()
+    }
+
     /// The bytes of the latest statement that set it.
     pub(super) fn at(&self) -> Range<usize> {
         self.at.clone()

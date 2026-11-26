@@ -67,6 +67,19 @@ CREATE POLICY open ON tags USING (true);
 CREATE POLICY tenant ON tags AS RESTRICTIVE USING (org_id = current_setting('app.org_id')::int);
 ```
 
+Row-level security is set on each table: a partition does not take it from its parent,
+and `USING (true)` lets every row through for each command it covers:
+
+```sql schema
+CREATE TABLE events (id INT, org_id INT NOT NULL) PARTITION BY RANGE (id);
+CREATE TABLE events_1 PARTITION OF events FOR VALUES FROM (0) TO (1000);
+ALTER TABLE events ENABLE ROW LEVEL SECURITY;
+ALTER TABLE events FORCE ROW LEVEL SECURITY;
+-- error: [tenant-policy] "policy `open` on `events` does not filter SELECT, UPDATE, DELETE or check INSERT by `org_id`; compare it to the session in USING and WITH CHECK"
+CREATE POLICY open ON events USING (true) WITH CHECK (true);
+CREATE POLICY tenant ON events FOR SELECT USING (org_id = current_setting('app.org_id')::int);
+```
+
 Until then, [`tenant-scope`](tenant-scope.md) judges the table's queries. Open this
 example in the playground to see both, the policy in `schema.sql`:
 
@@ -134,4 +147,5 @@ Only the PostgreSQL dialect reads policies. Policies for some roles only (`TO ap
 count as permissive policies for every role when they let rows through, and as nothing
 when they are restrictive, since sqlty does not know which role the application uses.
 `sqlty check` reads the schema files from disk: an editor shows a schema file's
-diagnostics once it is saved.
+diagnostics once it is saved. VS Code for the Web and Restricted Mode, which run the
+bundled engine instead of `sqlty server`, don't check schema files.

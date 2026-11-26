@@ -471,9 +471,10 @@ impl Workspace {
     }
 
     /// The schema checks (`tenant-policy`) of the schema files of the configurations under
-    /// the paths: each file once, as `(path, diagnostics, text)`, the path resolved. A file
-    /// changed on disk since its schema was loaded is left out.
-    fn schema_checks(&mut self) -> Result<Vec<CheckedSchema>, String> {
+    /// the paths, or of those that load `only`: each file once, as `(path, diagnostics,
+    /// text)`, the path resolved. A file changed on disk since its schema was loaded is left
+    /// out.
+    fn schema_checks(&mut self, only: Option<&Path>) -> Result<Vec<CheckedSchema>, String> {
         let mut seen = HashSet::new();
         let mut found = Vec::new();
         for source in self.schema_sources()? {
@@ -481,7 +482,14 @@ impl Workspace {
             let (Some(schema), Some(sql)) = (&settings.schema, &settings.schema_sql) else {
                 continue;
             };
-            if settings.dialect != "postgres" || !seen.insert(settings.schema_files.clone()) {
+            let loads = |only: &Path| {
+                let mut files = settings.schema_files.iter();
+                files.any(|path| self.files.canonical(path) == only)
+            };
+            if settings.dialect != "postgres"
+                || only.is_some_and(|only| !loads(only))
+                || !seen.insert(settings.schema_files.clone())
+            {
                 continue;
             }
             let texts: Option<Vec<Arc<str>>> = (settings.schema_files.iter())
@@ -509,7 +517,7 @@ impl Workspace {
         let roots: Vec<PathBuf> = self.paths.iter().map(|path| self.resolved(path)).collect();
         let cwd = self.files.canonical(&self.flags.cwd);
         let mut found: Vec<_> = self
-            .schema_checks()?
+            .schema_checks(None)?
             .into_iter()
             .filter(|(path, ..)| roots.iter().any(|root| path.starts_with(root)))
             .map(|(path, diagnostics, text)| {
@@ -861,16 +869,14 @@ impl Workspace {
     }
 
     /// The diagnostics of `text`, the buffer of `path`: a Python module, or a `.sql` file
-    /// whose project's `queries` name it (any other has none).
+    /// of named queries or of a schema while it is saved (any other has none).
     pub fn check(&mut self, path: &Path, text: &str) -> Result<Vec<Diagnostic>, String> {
         let settings = self.settings(path)?;
         if path.extension().is_some_and(|extension| extension == "sql") {
             let mut found = self.check_queries(path, text)?;
             let resolved = self.resolved(path);
-            let schema = self
-                .schema_checks()?
-                .into_iter()
-                .find(|(file, ..)| *file == resolved);
+            let schema = self.schema_checks(Some(&resolved))?;
+            let schema = schema.into_iter().find(|(file, ..)| *file == resolved);
             if let Some((_, diagnostics, _)) = schema.filter(|(.., checked)| **checked == *text) {
                 found.extend(diagnostics);
             }

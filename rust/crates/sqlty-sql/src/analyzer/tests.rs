@@ -1345,8 +1345,8 @@ fn tenant_scope_reads_row_level_security_policies() {
         policies,
         [
             (gap("u", "loose_update", &format!("does not check `org_id` on UPDATE{check}")), "CREATE POLICY u ON loose_update"),
-            (gap("a", "for_admins", &format!("does not filter SELECT, UPDATE, DELETE by `org_id`{filter}")), "CREATE POLICY a ON for_admins"),
-            (gap("b", "dropped", &format!("does not filter SELECT, UPDATE, DELETE by `org_id`{filter}")), "CREATE POLICY b ON dropped"),
+            (gap("a", "for_admins", &format!("does not filter SELECT, UPDATE, DELETE or check INSERT by `org_id`{filter}")), "CREATE POLICY a ON for_admins"),
+            (gap("b", "dropped", &format!("does not filter SELECT, UPDATE, DELETE or check INSERT by `org_id`{filter}")), "CREATE POLICY b ON dropped"),
             ("`unforced` has row-level security without `FORCE ROW LEVEL SECURITY`, so its owner sees every tenant".to_string(), "ALTER TABLE unforced NO FORCE"),
             ("sqlty can't read this policy on `unread`, so it counts as letting every tenant's rows through".to_string(), "CREATE POLICY b ON unread"),
             ("sqlty can't read this policy on `unread_alter`, so it counts as letting every tenant's rows through".to_string(), "ALTER POLICY a ON unread_alter"),

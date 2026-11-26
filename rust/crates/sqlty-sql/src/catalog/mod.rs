@@ -664,14 +664,21 @@ impl Catalog {
                     listed.join(", ")
                 };
                 let (read, written) = (commands(false), commands(true));
-                let message = match policy.name() {
-                    "" => format!("sqlty can't read this policy on `{name}`, so it counts as letting every tenant's rows through"),
-                    own if !read.is_empty() => format!(
+                let message = match (policy.name(), read.is_empty(), written.is_empty()) {
+                    ("", ..) => format!("sqlty can't read this policy on `{name}`, so it counts as letting every tenant's rows through"),
+                    (own, false, true) => format!(
                         "policy `{own}` on `{name}` does not filter {read} by {named}; compare it to the session in USING"
                     ),
-                    own => format!(
+                    (own, true, _) => format!(
                         "policy `{own}` on `{name}` does not check {named} on {written}; compare it to the session in WITH CHECK"
                     ),
+                    (own, false, false) => {
+                        let clauses = match policy.checks() {
+                            true => "USING and WITH CHECK",
+                            false => "USING",
+                        };
+                        format!("policy `{own}` on `{name}` does not filter {read} or check {written} by {named}; compare it to the session in {clauses}")
+                    }
                 };
                 found.push(finding(policy.at(), message));
             }

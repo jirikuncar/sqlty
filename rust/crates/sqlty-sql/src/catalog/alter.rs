@@ -93,7 +93,7 @@ impl Loader {
         if unsupported {
             self.skipped.push(("table", alter.name.to_string()));
         }
-        let row_security = alter.operations.iter().any(|op| {
+        let row_security = |op: &AlterTableOperation| {
             matches!(
                 op,
                 AlterTableOperation::EnableRowLevelSecurity
@@ -101,8 +101,8 @@ impl Loader {
                     | AlterTableOperation::ForceRowLevelSecurity
                     | AlterTableOperation::NoForceRowLevelSecurity
             )
-        });
-        if row_security {
+        };
+        if alter.operations.iter().any(row_security) {
             root.row_security_at = self.at.clone();
         }
         let mut changed = vec![(key.clone(), root)];
@@ -112,7 +112,8 @@ impl Loader {
                 Some((child, table))
             });
             for (child, mut table) in children {
-                for op in &alter.operations {
+                // Row-level security is set on each table, partitions included.
+                for op in alter.operations.iter().filter(|op| !row_security(op)) {
                     let _ = alter_op(&mut table, op, false, &mut None, self.dialect);
                 }
                 changed.push((child, table));
