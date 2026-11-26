@@ -946,6 +946,8 @@ fn tenant_scope_reports_statements_that_do_not_pin_the_tenant_key() {
         CREATE TABLE secrets (id SERIAL PRIMARY KEY, org_id INT REFERENCES orgs);
         CREATE TABLE tags (id SERIAL PRIMARY KEY, name TEXT);
         ALTER TABLE secrets ENABLE ROW LEVEL SECURITY;
+        ALTER TABLE secrets FORCE ROW LEVEL SECURITY;
+        CREATE POLICY tenant ON secrets USING (org_id = current_setting('app.org_id')::int);
         CREATE TABLE regions (id INT, region TEXT, PRIMARY KEY (id, region));
         CREATE TABLE sites (id INT, org_id INT, region TEXT, FOREIGN KEY (org_id, region) REFERENCES regions);
         CREATE VIEW names AS SELECT name FROM projects;";
@@ -954,6 +956,7 @@ fn tenant_scope_reports_statements_that_do_not_pin_the_tenant_key() {
             table,
             &["audit_log.org_id"],
             &["public.events.org"],
+            &[],
         )];
         let overrides = TypeOverrides::new(&types, "postgres").unwrap();
         assert!(!overrides.is_empty());
@@ -1121,7 +1124,7 @@ fn tenant_scope_reports_statements_that_do_not_pin_the_tenant_key() {
 
 #[test]
 fn tenant_scope_reads_mysql_joins_and_assignments() {
-    let types = [tenancy_type("orgs", &[], &[])];
+    let types = [tenancy_type("orgs", &[], &[], &[])];
     let overrides = TypeOverrides::new(&types, "mysql").unwrap();
     let schema = "CREATE TABLE orgs (id INT PRIMARY KEY);
         CREATE TABLE projects (id INT PRIMARY KEY, org_id INT NOT NULL, FOREIGN KEY (org_id) REFERENCES orgs (id));
@@ -1154,5 +1157,126 @@ fn tenant_scope_reads_mysql_joins_and_assignments() {
     assert_eq!(
         found("UPDATE projects p JOIN invoices i ON i.org_id = p.org_id SET p.id = ? WHERE p.org_id = ?"),
         Vec::<String>::new()
+    );
+}
+
+#[test]
+fn tenant_scope_reads_row_level_security_policies() {
+    let rls = |name: &str, policies: &str| {
+        format!(
+            "CREATE TABLE {name} (id INT PRIMARY KEY, org_id INT, owner TEXT);
+            ALTER TABLE {name} ENABLE ROW LEVEL SECURITY;
+            ALTER TABLE {name} FORCE ROW LEVEL SECURITY;
+            {policies}"
+        )
+    };
+    let tenant = "current_setting('app.org_id')::int";
+    let schema = [
+        rls("per_command", &format!(
+            "CREATE POLICY s ON per_command FOR SELECT USING (org_id = {tenant});
+            CREATE POLICY i ON per_command FOR INSERT WITH CHECK ({tenant} = org_id);
+            CREATE POLICY u ON per_command FOR UPDATE USING (org_id = {tenant}) WITH CHECK (org_id = {tenant});
+            CREATE POLICY d ON per_command FOR DELETE USING ((org_id) = ({tenant}));"
+        )),
+        rls("no_delete", &format!("CREATE POLICY s ON no_delete FOR SELECT USING (org_id = {tenant});")),
+        rls("loose_update", &format!(
+            "CREATE POLICY a ON loose_update USING (org_id = {tenant});
+            CREATE POLICY u ON loose_update FOR UPDATE USING (org_id = {tenant}) WITH CHECK (true);"
+        )),
+        rls("for_admins", &format!(
+            "CREATE POLICY a ON for_admins USING (true);
+            CREATE POLICY r ON for_admins AS RESTRICTIVE TO admin USING (org_id = {tenant});"
+        )),
+        rls("users", "CREATE POLICY a ON users AS PERMISSIVE TO PUBLIC USING (owner = session_user AND id > 0 AND owner::text = current_user);"),
+        rls("renamed", &format!(
+            "CREATE POLICY a ON renamed USING (org_id = {tenant});
+            ALTER POLICY a ON renamed RENAME TO b;
+            ALTER POLICY b ON renamed TO admin;
+            ALTER POLICY missing ON renamed USING (true);
+            DROP POLICY a ON renamed;"
+        )),
+        rls("restored", &format!(
+            "CREATE POLICY a ON restored TO admin USING (org_id = {tenant});
+            ALTER POLICY a ON restored TO public;"
+        )),
+        rls("dropped", &format!(
+            "CREATE POLICY a ON dropped USING (org_id = {tenant});
+            CREATE POLICY b ON dropped USING (true);
+            DROP POLICY a ON dropped;"
+        )),
+        rls("unforced", &format!(
+            "CREATE POLICY a ON unforced USING (org_id = {tenant});
+            ALTER TABLE unforced NO FORCE ROW LEVEL SECURITY;"
+        )),
+        rls("lost_column", &format!(
+            "CREATE POLICY a ON lost_column USING (org_id = {tenant});
+            CREATE POLICY b ON lost_column USING (owner = (SELECT 1, 2));
+            CREATE POLICY c ON lost_column USING (owner = (SELECT current_user UNION SELECT 'x'));
+            CREATE POLICY d ON lost_column USING (owner = lower('x') OR id = id);
+            ALTER TABLE lost_column DROP COLUMN org_id;"
+        )),
+        rls("supabase", "CREATE POLICY a ON supabase USING (owner = (SELECT auth.uid()) AND org_id = (SELECT 1) AND id = 'x' AND org_id = (VALUES (1)));
+            ALTER TABLE supabase RENAME COLUMN owner TO user_id;
+            ALTER TABLE supabase RENAME COLUMN id TO key;"),
+        rls("unread", &format!(
+            "CREATE POLICY a ON unread USING (org_id = {tenant});
+            CREATE POLICY b ON unread USING (id = ANY (SELECT 1 WINDOW w AS ()));"
+        )),
+        rls("unread_alter", &format!(
+            "CREATE POLICY a ON unread_alter USING (unread_alter.org_id = {tenant});
+            ALTER POLICY a ON unread_alter USING (id = ANY (SELECT 1 WINDOW w AS ()));"
+        )),
+        rls("quoted", &format!(
+            "CREATE POLICY a ON quoted USING (quoted.org_id = {tenant} AND owner = (SELECT auth.uid() AS uid));
+            ALTER TABLE quoted RENAME COLUMN org_id TO \"OrgId\";
+            ALTER TABLE quoted NO FORCE ROW LEVEL SECURITY;"
+        )),
+        "CREATE TABLE soft (id INT, owner TEXT);
+            CREATE POLICY a ON soft USING (owner = auth.uid()::text);".to_string(),
+    ]
+    .join("\n");
+    let types = [tenancy_type("", &[], &["dropped.org_id"], &["Auth.UID"])];
+    let overrides = TypeOverrides::new(&types, "postgres").unwrap();
+    let (schema, _) = load_schema_with_overrides(&schema, "postgres", overrides);
+    let found = |sql: &str| -> Vec<String> {
+        analyze_with_diagnostics(sql, "postgres", Some(&schema))
+            .1
+            .into_iter()
+            .filter(|found| found.rule == crate::diagnostics::Rule::TenantScope)
+            .map(|found| found.message)
+            .collect()
+    };
+    let read = |table: &str, column: &str| {
+        vec![format!(
+            "`{table}` is read without `{table}.{column} = <parameter>`"
+        )]
+    };
+    assert_eq!(found("SELECT id FROM per_command"), Vec::<String>::new());
+    assert_eq!(found("SELECT id FROM no_delete"), Vec::<String>::new());
+    assert_eq!(found("SELECT id FROM restored"), Vec::<String>::new());
+    assert_eq!(found("SELECT id FROM lost_column"), Vec::<String>::new());
+    assert_eq!(
+        found("SELECT id FROM loose_update"),
+        read("loose_update", "org_id")
+    );
+    assert_eq!(
+        found("SELECT id FROM for_admins"),
+        read("for_admins", "org_id")
+    );
+    assert_eq!(found("SELECT id FROM renamed"), Vec::<String>::new());
+    assert_eq!(found("SELECT id FROM dropped"), read("dropped", "org_id"));
+    assert_eq!(found("SELECT id FROM unforced"), read("unforced", "org_id"));
+    assert_eq!(found("SELECT id FROM users"), Vec::<String>::new());
+    assert_eq!(found("DELETE FROM users"), Vec::<String>::new());
+    assert_eq!(found("SELECT key FROM supabase"), Vec::<String>::new());
+    assert_eq!(found("SELECT id FROM soft"), read("soft", "owner"));
+    assert_eq!(found("SELECT id FROM unread"), read("unread", "org_id"));
+    assert_eq!(
+        found("SELECT id FROM unread_alter"),
+        read("unread_alter", "org_id")
+    );
+    assert_eq!(
+        found("SELECT id FROM quoted"),
+        ["`quoted` is read without `quoted.OrgId = <parameter>` or `quoted.owner = <parameter>`"]
     );
 }

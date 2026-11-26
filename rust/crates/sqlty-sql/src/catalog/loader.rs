@@ -28,6 +28,7 @@ use super::columns::{
     mark_primary_key, merge_columns, nonnull_groups, raw_column, unique_key, RawColumn,
 };
 use super::names::{fold, key_of, lookup_key, parts, schema_for_new, type_key};
+use super::policies::{self, Policy};
 use super::{Catalog, ForeignKey, TypeOverrides};
 use crate::MAX_COLUMNS;
 
@@ -49,6 +50,9 @@ pub(super) struct RawTable {
     pub(super) unique: Vec<RawUnique>,
     /// `ENABLE ROW LEVEL SECURITY`: a query may not see every row.
     pub(super) row_security: bool,
+    /// `FORCE ROW LEVEL SECURITY`: the policies hold for the table's owner too.
+    pub(super) force_row_security: bool,
+    pub(super) policies: Vec<Policy>,
 }
 
 /// Columns no two rows share a value of (NULLs aside), and the name of the constraint or
@@ -137,6 +141,8 @@ pub(super) enum OpKind {
     UniqueIndex(Vec<String>, RawUnique),
     /// `DROP TRIGGER name [ON table]`.
     DropTrigger(Vec<String>, Option<Vec<String>>),
+    /// `CREATE`, `ALTER` or `DROP POLICY` on the table it names.
+    Policy(Vec<String>, Box<policies::Change>),
     /// A statement that changes the named relation, type or function in a way this
     /// module cannot follow.
     Taint(Taint, Vec<String>),
@@ -451,6 +457,16 @@ impl Loader {
                     }
                     table.row_triggers.retain(|(other, _)| *other != name);
                     table.row_triggers.push((name, trigger.events));
+                });
+                false
+            }
+            OpKind::Policy(table, stmt) => {
+                let Some(key) = self.table_key(table, &path) else {
+                    return false;
+                };
+                let dialect = self.dialect;
+                self.change_table(key, |table| {
+                    policies::apply(&mut table.policies, stmt, dialect);
                 });
                 false
             }

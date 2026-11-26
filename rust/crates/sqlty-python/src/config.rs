@@ -586,13 +586,13 @@ fn check_deprecated(columns: &Value) -> Result<(), String> {
 }
 
 /// Keys of `[tool.sqlty.tenancy]`.
-pub const TENANCY_KEYS: [&str; 3] = ["table", "exclude", "columns"];
+pub const TENANCY_KEYS: [&str; 4] = ["table", "exclude", "columns", "session-functions"];
 
 fn check_tenancy(tenancy: &Value) -> Result<(), String> {
     let place = "[tool.sqlty.tenancy]";
     let Some(tenancy) = tenancy.as_table() else {
         return Err(format!(
-            "{place} must be a table of table, exclude and columns"
+            "{place} must be a table of table, exclude, columns and session-functions"
         ));
     };
     for (key, value) in tenancy {
@@ -603,16 +603,25 @@ fn check_tenancy(tenancy: &Value) -> Result<(), String> {
                 TENANCY_KEYS.join(", ")
             ));
         }
-        let columns = || value.as_array().into_iter().flatten().map(Value::as_str);
-        let listed = value.is_array() && columns().all(|c| c.is_some_and(|c| c.contains('.')));
-        if key != "table" && !listed {
-            return Err(format!("{place} {key} must be a list of table.column"));
+        let named = |name: &str| !name.is_empty() && !name.contains(['\t', ',']);
+        let names = || value.as_array().into_iter().flatten().map(Value::as_str);
+        let listed = |valid: &dyn Fn(&str) -> bool| {
+            value.is_array() && names().all(|name| name.is_some_and(valid))
+        };
+        match key.as_str() {
+            "table" if !value.as_str().is_some_and(named) => {
+                return Err(format!("{place} table must name the tenant table"));
+            }
+            "session-functions" if !listed(&named) => {
+                return Err(format!("{place} {key} must be a list of function names"));
+            }
+            "exclude" | "columns" if !listed(&|name| named(name) && name.contains('.')) => {
+                return Err(format!("{place} {key} must be a list of table.column"));
+            }
+            _ => {}
         }
     }
-    match tenancy.get("table").and_then(Value::as_str) {
-        Some(table) if !table.is_empty() && !table.contains(['\t', ',']) => Ok(()),
-        _ => Err(format!("{place} table must name the tenant table")),
-    }
+    Ok(())
 }
 
 /// The `deprecated-columns` and `tenancy` of a checked table as the `types` pairs
@@ -627,10 +636,9 @@ pub fn deprecated_types(table: &Table) -> Vec<(String, String)> {
             sqlty_sql::analyzer::deprecated_type(key, part("use"), part("remove-after"))
         })
         .collect();
-    let tenancy = table.get("tenancy").and_then(Value::as_table);
-    if let Some(table) = tenancy.and_then(|t| t.get("table")).and_then(Value::as_str) {
+    if let Some(tenancy) = table.get("tenancy").and_then(Value::as_table) {
         let list = |key: &str| -> Vec<&str> {
-            let listed = tenancy.and_then(|t| t.get(key)).and_then(Value::as_array);
+            let listed = tenancy.get(key).and_then(Value::as_array);
             listed
                 .into_iter()
                 .flatten()
@@ -638,9 +646,13 @@ pub fn deprecated_types(table: &Table) -> Vec<(String, String)> {
                 .collect()
         };
         types.push(sqlty_sql::analyzer::tenancy_type(
-            table,
+            tenancy
+                .get("table")
+                .and_then(Value::as_str)
+                .unwrap_or_default(),
             &list("exclude"),
             &list("columns"),
+            &list("session-functions"),
         ));
     }
     types
@@ -763,7 +775,10 @@ mod tests {
             .table;
         assert_eq!(
             deprecated_types(&table),
-            [("&tenancy".to_string(), "public.orgs\ta.b,c.d\t".to_string())]
+            [(
+                "&tenancy".to_string(),
+                "public.orgs\ta.b,c.d\t\t".to_string()
+            )]
         );
     }
 
@@ -852,9 +867,10 @@ mod tests {
             ),
             ("tenancy = 'orgs'", "tenancy] must be a table"),
             ("[tenancy]\ntabel = 'orgs'", "did you mean 'table'?"),
+            ("[tenancy]\ntable = ''", "table must name the tenant table"),
             (
-                "[tenancy]\nexclude = ['a.b']",
-                "table must name the tenant table",
+                "[tenancy]\nsession-functions = ['']",
+                "session-functions must be a list of function names",
             ),
             (
                 "[tenancy]\ntable = 'a,b'",

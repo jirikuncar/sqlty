@@ -15,8 +15,9 @@ Default severity: **error**
 
 Reports a statement that reads, updates or deletes rows of a tenant table without
 pinning its tenant key to a parameter, and an `INSERT` that does not set the tenant
-key from one. It runs only when [`tenancy`](../configuration.md#tenancy) names the
-tenant table.
+key from one. It runs when [`tenancy`](../configuration.md#tenancy) names the
+tenant table, or when a PostgreSQL row-level security policy compares a column to the
+session's tenant.
 
 ```toml
 [tool.sqlty]
@@ -123,11 +124,54 @@ pinned tenant key of a table joined to it: `DELETE FROM events WHERE org = %s AN
 | `table` | The tenant table, whose primary key is the tenant id |
 | `exclude` | `table.column` tenant keys of data shared across tenants, such as an audit log |
 | `columns` | `table.column` tenant ids that have no foreign key, such as those of a partitioned or external table |
+| `session-functions` | Functions a row-level security policy reads the session's tenant from, such as `auth.uid` |
 
-A table with `ENABLE ROW LEVEL SECURITY` is not judged: the database scopes it for
-every role but superusers, `BYPASSRLS` roles and, unless the table also has
-`FORCE ROW LEVEL SECURITY`, its owner. An
-`INSERT ... SELECT` is judged as the query it runs, and the tenant table itself may be
+## Row-level security
+
+In PostgreSQL, a policy that compares a column to a session value makes the column a
+tenant key, with or without `[tool.sqlty.tenancy]`. Session values are
+`current_setting(...)`, `current_user`, `session_user` and the functions of
+`session-functions`, cast or not, or alone in a subquery: `(SELECT auth.uid())`.
+
+```toml
+[tool.sqlty]
+schema = "schema.sql"
+```
+
+`schema.sql`:
+
+```sql
+CREATE TABLE notes (id SERIAL PRIMARY KEY, org_id INTEGER NOT NULL, body TEXT);
+ALTER TABLE notes ENABLE ROW LEVEL SECURITY;
+CREATE POLICY tenant ON notes USING (org_id = current_setting('app.org_id')::int);
+```
+
+```python
+from sqlty import SQL
+
+# error: [tenant-scope] "`notes` is read without `notes.org_id = <parameter>`"
+notes = SQL[tuple[str | None]]("--sql\nSELECT body FROM notes")
+```
+
+The query is reported because the database does not enforce the policy for every role:
+superusers, `BYPASSRLS` roles and the owner of a table without
+`FORCE ROW LEVEL SECURITY` skip it. A table is left to the database only when it has
+`ENABLE` and `FORCE ROW LEVEL SECURITY`, and for each of `SELECT`, `INSERT`, `UPDATE`
+and `DELETE` a restrictive policy for every role pins a tenant key, or each permissive
+policy does. A row an `INSERT` or `UPDATE` writes must pass `WITH CHECK`, or `USING`
+when the policy has none, so `WITH CHECK (true)` lets an `INSERT` write a row of
+another tenant and the table is still judged.
+
+```sql
+ALTER TABLE notes FORCE ROW LEVEL SECURITY;
+```
+
+With it, `SELECT body FROM notes` is not reported. Superusers and `BYPASSRLS` roles
+still skip the policy: connect as a role that has neither.
+
+## Limits
+
+An `INSERT ... SELECT` is judged as the query it runs, and the tenant table itself may be
 inserted into freely. A CTE or derived table is judged by its own body: a pin in the query that reads it
 does not reach it, so pin the key inside the CTE. Views and `MERGE` are not judged.
 The rule runs for PostgreSQL, MySQL and SQLite, the dialects whose names sqlty checks.

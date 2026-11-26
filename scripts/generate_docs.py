@@ -158,7 +158,7 @@ KEY_DOCS: dict[str, KeyDoc] = {
         "Columns scheduled for removal: `deprecated-column` reports every read",
     ),
     "tenancy": KeyDoc(
-        "table of `table`, `exclude`, `columns`",
+        "table of `table`, `exclude`, `columns`, `session-functions`",
         "none",
         "`check`",
         "The tenant table: `tenant-scope` reports queries that do not filter by its key",
