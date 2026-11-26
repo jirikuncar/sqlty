@@ -40,28 +40,22 @@ SELECT EXISTS (SELECT 1 FROM member WHERE false) AS has_any,
 
 ## Correlated subqueries read every relation before them
 
-The subqueries of one clause share their outer scope, and a join that adds a relation
-gives the subqueries after it a scope that reads it too.
+The subqueries of one clause share their outer scope, and a relation added after one
+subquery is read by the subqueries after it.
 
 ```sql
-SELECT (SELECT a.first_name FROM member x LIMIT 1) AS from_a,
-       (SELECT c.first_name FROM member x LIMIT 1) AS from_c
-FROM member a
-JOIN member b ON EXISTS (SELECT 1 FROM member x WHERE x.id = b.id)
-JOIN member c ON EXISTS (SELECT 1 FROM member x WHERE x.id = c.id AND x.id = a.id)
-WHERE EXISTS (SELECT 1 FROM member x WHERE x.id = c.id)
--- inferred: tuple[str | None, str | None]
+SELECT g::int AS g, (SELECT g FROM member x LIMIT 1) AS h
+FROM member a, generate_series(1, (SELECT max(x.id) FROM member x WHERE x.id = a.id)) g
+WHERE EXISTS (SELECT 1 FROM member x WHERE x.id = g)
+-- inferred: tuple[int, int | None]
 ```
 
 ```python
 from sqlty import SQL
 
 # error:
-q = SQL[tuple[str | None, str | None]]("""--sql
-SELECT (SELECT a.first_name FROM member x LIMIT 1) AS from_a,
-       (SELECT c.first_name FROM member x LIMIT 1) AS from_c
-FROM member a
-JOIN member b ON EXISTS (SELECT 1 FROM member x WHERE x.id = b.id)
-JOIN member c ON EXISTS (SELECT 1 FROM member x WHERE x.id = c.id AND x.id = a.id)
-WHERE EXISTS (SELECT 1 FROM member x WHERE x.id = c.id)""")
+q = SQL[tuple[int, int | None]]("""--sql
+SELECT g::int AS g, (SELECT g FROM member x LIMIT 1) AS h
+FROM member a, generate_series(1, (SELECT max(x.id) FROM member x WHERE x.id = a.id)) g
+WHERE EXISTS (SELECT 1 FROM member x WHERE x.id = g)""")
 ```
