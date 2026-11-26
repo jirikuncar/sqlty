@@ -616,12 +616,11 @@ impl Catalog {
     /// queries are judged by `tenant-scope` meanwhile.
     pub fn tenant_policies(&self) -> Vec<crate::migrations::Finding> {
         use crate::migrations::Finding;
-        use sqlparser::ast::CreatePolicyCommand::{All, Delete, Insert, Select, Update};
         let functions = self.overrides.tenancy.as_ref();
         let functions = functions.map_or(&[][..], |tenancy| &tenancy.session_functions);
         let mut found = Vec::new();
-        for (key, keys) in self.tenants() {
-            let Some(Relation::Table(table)) = self.relations.get(key) else {
+        for (key, relation) in &self.relations {
+            let (Relation::Table(table), Some(keys)) = (relation, self.tenants().get(key)) else {
                 continue;
             };
             if !table.row_security {
@@ -650,16 +649,10 @@ impl Catalog {
             policies.dedup_by(|a, b| std::ptr::eq(*a, *b));
             for policy in policies {
                 let commands = |written: bool| {
-                    let listed: Vec<&str> = gaps
+                    let listed: Vec<String> = gaps
                         .iter()
                         .filter(|gap| std::ptr::eq(gap.policy, policy) && gap.written == written)
-                        .map(|gap| match gap.command {
-                            Select => "SELECT",
-                            Insert => "INSERT",
-                            Update => "UPDATE",
-                            Delete => "DELETE",
-                            All => "ALL",
-                        })
+                        .map(|gap| gap.command.to_string())
                         .collect();
                     listed.join(", ")
                 };

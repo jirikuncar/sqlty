@@ -479,9 +479,6 @@ impl Workspace {
         let mut found = Vec::new();
         for source in self.schema_sources()? {
             let settings = &source.settings;
-            let (Some(schema), Some(sql)) = (&settings.schema, &settings.schema_sql) else {
-                continue;
-            };
             let loads = |only: &Path| {
                 let mut files = settings.schema_files.iter();
                 files.any(|path| self.files.canonical(path) == only)
@@ -495,7 +492,9 @@ impl Workspace {
             let texts: Option<Vec<Arc<str>>> = (settings.schema_files.iter())
                 .map(|path| self.files.text(path).map(Arc::from))
                 .collect();
-            let Some(texts) = texts.filter(|texts| texts.join("\n") == **sql) else {
+            let loaded =
+                |texts: &Vec<Arc<str>>| Some(&*texts.join("\n")) == settings.schema_sql.as_deref();
+            let (Some(schema), Some(texts)) = (&settings.schema, texts.filter(loaded)) else {
                 continue;
             };
             let rules: Vec<_> = (source.files.iter())

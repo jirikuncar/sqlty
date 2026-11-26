@@ -1321,6 +1321,16 @@ fn tenant_scope_reads_row_level_security_policies() {
             ALTER TABLE quoted RENAME COLUMN org_id TO \"OrgId\";
             ALTER TABLE quoted NO FORCE ROW LEVEL SECURITY;"
         )),
+        rls("narrowed", &format!(
+            "CREATE POLICY a ON narrowed USING (true) WITH CHECK (true);
+            CREATE POLICY r ON narrowed AS RESTRICTIVE USING (org_id = {tenant});
+            CREATE POLICY d ON narrowed FOR DELETE USING (true);"
+        )),
+        rls("checked_open", &format!(
+            "CREATE POLICY a ON checked_open USING (true) WITH CHECK (true);
+            CREATE POLICY d ON checked_open FOR DELETE USING (true);
+            CREATE POLICY i ON checked_open FOR INSERT WITH CHECK (org_id = {tenant});"
+        )),
         "CREATE TABLE soft (id INT, owner TEXT);
             CREATE POLICY a ON soft USING (owner = auth.uid()::text);".to_string(),
     ]
@@ -1351,6 +1361,8 @@ fn tenant_scope_reads_row_level_security_policies() {
             ("sqlty can't read this policy on `unread`, so it counts as letting every tenant's rows through".to_string(), "CREATE POLICY b ON unread"),
             ("sqlty can't read this policy on `unread_alter`, so it counts as letting every tenant's rows through".to_string(), "ALTER POLICY a ON unread_alter"),
             ("`quoted` has row-level security without `FORCE ROW LEVEL SECURITY`, so its owner sees every tenant".to_string(), "ALTER TABLE quoted NO FORCE"),
+            (gap("a", "checked_open", "does not filter SELECT, UPDATE, DELETE or check INSERT by `org_id`; compare it to the session in USING and WITH CHECK"), "CREATE POLICY a ON checked_open"),
+            (gap("d", "checked_open", &format!("does not filter DELETE by `org_id`{filter}")), "CREATE POLICY d ON checked_open"),
         ]
         .map(|(message, at)| (message, at.to_string()))
     );
