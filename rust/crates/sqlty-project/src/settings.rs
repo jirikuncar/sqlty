@@ -337,7 +337,7 @@ impl Directory {
                 .and_then(Value::as_array)
                 .is_some_and(|all| !all.is_empty())
         });
-        if !overrides {
+        if !overrides || (route.rules.is_empty() && self.cli_rules.is_empty()) {
             return Arc::clone(settings);
         }
         let mut rules = settings.rules.clone();
