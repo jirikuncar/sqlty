@@ -98,7 +98,8 @@ What makes a column nullable or not:
   `COALESCE(a, b)` non-null. A `CHECK` that ties columns to a discriminator, an `OR` of
   `AND`s of `kind = 'card'`, `kind IN (...)` and `col IS [NOT] NULL`, narrows them where a
   `WHERE` or a `CASE` branch picks one of its arms: under `kind = 'card'`, the columns that
-  arm requires are non-null.
+  arm requires are non-null. The same `CHECK` written as `CASE kind WHEN 'card' THEN ...
+  END`, or with `num_nonnulls(a, b) = 1` and `num_nulls(a, b) = 2` in an arm, narrows too.
   A generated column is as nullable as its expression, unless it reads another generated
   column.
 - **Outer joins.** The optional side of `LEFT`, `RIGHT` and `FULL` joins (also nested)

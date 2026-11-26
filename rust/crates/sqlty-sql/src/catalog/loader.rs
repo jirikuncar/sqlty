@@ -24,7 +24,7 @@ use crate::ddl::{RowEvents, RowTrigger};
 use crate::values::{self, Value};
 
 use super::columns::{
-    apply_check, column_named, discriminates, is_rowid_type, mark_loose_primary_key,
+    apply_check, column_named, discriminating, is_rowid_type, mark_loose_primary_key,
     mark_primary_key, merge_columns, nonnull_groups, raw_column, unique_key, RawColumn,
 };
 use super::names::{fold, key_of, lookup_key, parts, schema_for_new, type_key};
@@ -623,9 +623,7 @@ impl Loader {
                     table
                         .nonnull_groups
                         .extend(nonnull_groups(&check.expr, self.dialect));
-                    table
-                        .checks
-                        .extend(discriminates(&check.expr).then(|| (*check.expr).clone()));
+                    table.checks.extend(discriminating(&check.expr));
                 }
             }
         }
@@ -635,9 +633,7 @@ impl Loader {
                 table
                     .nonnull_groups
                     .extend(nonnull_groups(&check.expr, self.dialect));
-                table
-                    .checks
-                    .extend(discriminates(&check.expr).then(|| (*check.expr).clone()));
+                table.checks.extend(discriminating(&check.expr));
             }
             if let TableConstraint::PrimaryKey(pk) = constraint {
                 // SQLite fills a sole `INTEGER PRIMARY KEY`, the rowid, on INSERT.
