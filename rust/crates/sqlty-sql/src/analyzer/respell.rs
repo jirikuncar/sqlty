@@ -47,6 +47,9 @@ pub(super) fn respell(sql: &str, tokens: &[Token], dialect: SqlDialect, edits: &
                 edits.push((start, end, integer));
             }
         }
+        if !may_respell(sql, &tokens[i], dialect) {
+            continue;
+        }
         if dialect != SqlDialect::MySql
             && word(i, "EXCLUDE")
             && (word(i + 1, "GROUP")
@@ -210,6 +213,48 @@ pub(super) fn respell(sql: &str, tokens: &[Token], dialect: SqlDialect, edits: &
                 edits.push((tokens[close].start, tokens[close].start, ")".to_string()));
             }
         }
+    }
+}
+
+/// The words that start a respelled construct.
+const STARTS: &[&str] = &[
+    "AT",
+    "BETWEEN",
+    "CHAR",
+    "COLLATION",
+    "EXCLUDE",
+    "INTERVAL",
+    "ISNULL",
+    "JSON_ARRAY",
+    "JSON_EXISTS",
+    "JSON_QUERY",
+    "JSON_VALUE",
+    "LOCK",
+    "MOD",
+    "SOUNDS",
+    "SUBSTRING",
+    "UPDATE",
+    "XMLATTRIBUTES",
+    "XMLELEMENT",
+    "XMLEXISTS",
+    "XMLPARSE",
+    "XMLPI",
+    "XMLROOT",
+    "XMLSERIALIZE",
+    "XMLTABLE",
+];
+
+/// Whether `token` can start a construct [`respell`] edits: one of [`STARTS`], the `)`
+/// of PostgreSQL's `(composite).*`, or MySQL's `!`.
+fn may_respell(sql: &str, token: &Token, dialect: SqlDialect) -> bool {
+    let text = &sql[token.start..token.end];
+    match token.kind {
+        Kind::Word => STARTS
+            .iter()
+            .any(|start| start.len() == text.len() && start.eq_ignore_ascii_case(text)),
+        Kind::Close => dialect == SqlDialect::Postgres,
+        Kind::Other => dialect == SqlDialect::MySql && text == "!",
+        Kind::Open | Kind::Comma => false,
     }
 }
 
