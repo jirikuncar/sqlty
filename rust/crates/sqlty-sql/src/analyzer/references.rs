@@ -57,6 +57,7 @@ impl Analyzer<'_> {
                     | Rule::ForeignKeyMismatch
                     | Rule::EntityMismatch
                     | Rule::DeprecatedColumn
+                    | Rule::TenantScope
             )
         });
     }

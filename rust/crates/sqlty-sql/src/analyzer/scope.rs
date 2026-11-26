@@ -19,6 +19,7 @@ use super::names::{alias_name, object_name, table_key};
 use super::nullability::Nullability;
 use super::query::{rename_columns, Analyzer, Column};
 use super::table_functions::table_args;
+use super::tenancy::Carried;
 use super::typed::Typed;
 use super::{Inferred, SchemaColumn};
 
@@ -303,6 +304,8 @@ pub(super) struct Virtuals {
     names: Rc<HashMap<String, Rc<NameIndex>>>,
     /// Output columns no two rows of a table share, when known (see `output_key`).
     keys: Rc<HashMap<String, Vec<String>>>,
+    /// What a CTE or derived table tells the query reading it about tenant keys.
+    tenancy: Rc<HashMap<String, Rc<Carried>>>,
     /// Subqueries analyzed against exactly these tables; any insert starts a fresh memo.
     pub(super) memo: SubqueryMemo,
 }
@@ -318,6 +321,9 @@ impl Virtuals {
 
     pub(super) fn insert(&mut self, table: String, columns: Vec<Column>) {
         self.set_key(&table, None);
+        if self.tenancy.contains_key(&table) {
+            Rc::make_mut(&mut self.tenancy).remove(&table);
+        }
         match NameIndex::of(&columns) {
             Some(index) => {
                 Rc::make_mut(&mut self.names).insert(table.clone(), Rc::new(index));
@@ -333,6 +339,16 @@ impl Virtuals {
 
     pub(super) fn key(&self, table: &str) -> Option<&[String]> {
         self.keys.get(table).map(Vec::as_slice)
+    }
+
+    pub(super) fn carried(&self, table: &str) -> Option<&Carried> {
+        self.tenancy.get(table).map(|carried| &**carried)
+    }
+
+    pub(super) fn set_carried(&mut self, table: &str, carried: Option<Carried>) {
+        if let Some(carried) = carried {
+            Rc::make_mut(&mut self.tenancy).insert(table.to_string(), Rc::new(carried));
+        }
     }
 
     pub(super) fn set_key(&mut self, table: &str, key: Option<Vec<String>>) {
@@ -606,16 +622,20 @@ impl<'a> Analyzer<'a> {
                     // A LATERAL subquery reads the relations before it.
                     let mut inner = analyzer.clone();
                     inner.outer = Rc::new([scope.as_slice(), analyzer.outer.as_slice()].concat());
+                    // Without an alias its columns are no nodes a pin can name.
+                    inner.tenant_sink = alias.as_ref().and_then(|_| inner.tenant_sink(subquery));
                     let mut columns = inner
                         .query_columns(subquery)?
                         .unwrap_or_else(|| vec![Column::unknown("*")]);
                     if let Some(alias) = alias {
                         rename_columns(&mut columns, alias, analyzer.dialect);
                     }
+                    let carried = inner.carried(&columns);
                     let table = derived_table(factor);
                     let key = analyzer.output_key(subquery, &columns);
                     analyzer.virtuals.insert(table.clone(), columns);
                     analyzer.virtuals.set_key(&table, key);
+                    analyzer.virtuals.set_carried(&table, carried);
                     // Without an alias (SQLite, PostgreSQL 16) its columns are read unqualified.
                     let reference = alias
                         .as_ref()

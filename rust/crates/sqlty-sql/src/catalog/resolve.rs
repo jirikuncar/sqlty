@@ -4,7 +4,7 @@
 //! one relation when the loader updates the cached catalog in place.
 
 use std::ops::ControlFlow;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use rustc_hash::FxHashMap;
 
@@ -117,6 +117,7 @@ impl Loader {
             overrides: Arc::clone(&self.overrides),
             index: NameIndex::default(),
             databases: None,
+            tenants: OnceLock::new(),
         }
     }
 
@@ -471,6 +472,7 @@ impl<'a> Resolver<'a> {
                         })
                         .cloned()
                         .collect(),
+                    checks: table.checks.clone(),
                     row_triggers: table.row_triggers.iter().fold(
                         RowEvents::default(),
                         |all, (_, events)| RowEvents {
@@ -501,6 +503,8 @@ impl<'a> Resolver<'a> {
                         .map(|key| key.columns.clone())
                         .collect(),
                     row_security: table.row_security,
+                    force_row_security: table.force_row_security,
+                    policies: table.policies.clone(),
                     by_name: Vec::new(),
                 }
                 .indexed(),

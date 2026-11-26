@@ -81,6 +81,9 @@ Style, naming and refactoring suggestions are Nit at most.
 ## Tests
 
 - A bug fix comes with a test that fails without it. Name the failing input.
+- Tests call the package's public API ([AGENTS.md](AGENTS.md#writing-tests)): a new
+  `#[test]` in `src/` or a test importing a private `sqlty._*` module needs a reason no
+  public call can give.
 - mdtest for behavior, unit tests only for what mdtest cannot express. No duplicate
   sections (`tests/test_duplicates.py`); reuse fixtures and parametrize instead of
   copying setup.
