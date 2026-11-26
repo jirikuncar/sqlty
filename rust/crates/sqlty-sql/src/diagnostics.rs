@@ -8,7 +8,7 @@ use std::cell::RefCell;
 use std::ops::Range;
 use std::rc::Rc;
 
-use rustc_hash::FxHashSet;
+use rustc_hash::FxHashMap;
 use sqlparser::tokenizer::Span;
 
 pub use sqlty_rules::Rule;
@@ -40,8 +40,8 @@ struct Inner {
     enabled: bool,
     /// Each diagnostic with where sqlparser read its node, empty when unknown.
     items: Vec<(NameDiagnostic, Span)>,
-    /// The rule and message of each of `items`, which are recorded once.
-    recorded: FxHashSet<(Rule, String)>,
+    /// The rules of `items` by message, each pair recorded once.
+    recorded: FxHashMap<String, Vec<Rule>>,
     /// The spans of the nodes being analyzed, innermost last; see [`Diagnostics::at`].
     at: Vec<Span>,
     /// Untyped results accounted for so far, recorded or deliberately silent.
@@ -53,14 +53,21 @@ struct Inner {
 impl Inner {
     /// Drop the items from `start` on that `keep` rejects.
     fn drop_since(&mut self, start: usize, keep: impl Fn(Rule) -> bool) {
-        if start >= self.items.len() {
+        if self
+            .items
+            .get(start..)
+            .is_none_or(|tail| tail.iter().all(|(item, _)| keep(item.rule)))
+        {
             return;
         }
         for (item, span) in self.items.split_off(start) {
             if keep(item.rule) {
                 self.items.push((item, span));
-            } else {
-                self.recorded.remove(&(item.rule, item.message));
+            } else if let Some(rules) = self.recorded.get_mut(item.message.as_str()) {
+                rules.retain(|rule| *rule != item.rule);
+                if rules.is_empty() {
+                    self.recorded.remove(item.message.as_str());
+                }
             }
         }
     }
@@ -143,7 +150,18 @@ impl Diagnostics {
             return;
         }
         inner.explained += explains;
-        if inner.recorded.insert((item.rule, item.message.clone())) {
+        let new = match inner.recorded.get_mut(item.message.as_str()) {
+            Some(rules) if rules.contains(&item.rule) => false,
+            Some(rules) => {
+                rules.push(item.rule);
+                true
+            }
+            None => {
+                inner.recorded.insert(item.message.clone(), vec![item.rule]);
+                true
+            }
+        };
+        if new {
             let at = inner.at.last().copied().unwrap_or(Span::empty());
             inner.items.push((item, at));
         }
@@ -299,6 +317,23 @@ mod tests {
         diag.rewind(mark);
         assert_eq!(diag.items(), [found(Rule::UnknownType, "kept")]);
         assert_eq!(diag.explained(), 1);
+        diag.record(Rule::UnknownType, "dropped");
+        let mark = diag.mark();
+        diag.record(Rule::UnknownColumn, "dropped");
+        diag.record(Rule::UnknownTable, "kept too");
+        diag.retain_since(mark, |rule| rule == Rule::UnknownTable);
+        diag.record(Rule::UnknownColumn, "dropped");
+        let rules: Vec<_> = diag.items().into_iter().map(|d| d.rule).collect();
+        assert_eq!(
+            rules,
+            [
+                Rule::UnknownType,
+                Rule::UnknownType,
+                Rule::UnknownTable,
+                Rule::UnknownColumn
+            ],
+            "what was dropped is recorded again"
+        );
     }
 
     #[test]
