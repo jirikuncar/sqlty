@@ -273,7 +273,9 @@ impl Analyzer<'_> {
         let mut passed = Vec::new();
         for item in &select.projection {
             let (reference, options) = match item {
-                SelectItem::UnnamedExpr(expr) | SelectItem::ExprWithAlias { expr, .. } => {
+                SelectItem::UnnamedExpr(expr)
+                | SelectItem::ExprWithAlias { expr, .. }
+                | SelectItem::ExprWithAliases { expr, .. } => {
                     if has_window(expr) {
                         return None;
                     }
@@ -282,11 +284,12 @@ impl Analyzer<'_> {
                     continue;
                 }
                 SelectItem::Wildcard(options) => (None, options),
-                SelectItem::QualifiedWildcard(
-                    SelectItemQualifiedWildcardKind::ObjectName(name),
-                    options,
-                ) => (Some(object_name(name)), options),
-                _ => return None,
+                SelectItem::QualifiedWildcard(kind, options) => {
+                    let SelectItemQualifiedWildcardKind::ObjectName(name) = kind else {
+                        return None;
+                    };
+                    (Some(object_name(name)), options)
+                }
             };
             if *options != WildcardAdditionalOptions::default()
                 || reference.is_none() && any_merging_join(&select.from)
