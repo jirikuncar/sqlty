@@ -925,7 +925,8 @@ fn check(
         return Ok(0);
     }
     let mut unreadable = !workspace.unreadable().is_empty();
-    if files.is_empty() && query_files.is_empty() && !unreadable {
+    let schema_files = workspace.schema_diagnostics()?;
+    if files.is_empty() && query_files.is_empty() && schema_files.is_empty() && !unreadable {
         if !common.quiet {
             host.warn("No Python files found");
         }
@@ -982,6 +983,13 @@ fn check(
             types.extend(found.into_iter().map(|line| format!("{shown}: {line}")));
         }
         let text: Arc<str> = Arc::from(text);
+        reports.extend(
+            found
+                .into_iter()
+                .map(|diag| (path.clone(), diag, Arc::clone(&text))),
+        );
+    }
+    for (path, found, text) in schema_files {
         reports.extend(
             found
                 .into_iter()

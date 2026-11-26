@@ -29,7 +29,9 @@ call passes:
   as MySQL compares without case.
 
 A type alias (`X = T`, `X: TypeAlias = T` or `type X = T`, in the module or
-imported) is checked as the type `T` it names.
+imported) is checked as the type `T` it names. Each member of a union
+(`tuple[int] | tuple[str]`) is checked on its own, since a type checker accepts
+values of any one of them.
 
 A `str` and a cast parameter take anything, and `typing.Any`, an unknown type or
 an annotation `P` can't be read from are never reported. With

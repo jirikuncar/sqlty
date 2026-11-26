@@ -12,7 +12,6 @@ import builtins
 import collections
 import dataclasses
 import io
-import random
 import re
 import time
 import tokenize
@@ -21,6 +20,8 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from hypothesis import example, given
+from hypothesis import strategies as st
 
 import sqlty.core as core
 from sqlty._core import query_sites as _query_sites
@@ -28,6 +29,7 @@ from sqlty._lint import NAME_RULES, Diagnostic
 from sqlty._source import ParsedSource
 from tests._mdtest.parser import parse
 from tests._mdtest.runner import comments, string_constants, without_generated
+from tests.test_rust_types import FUZZ, parses
 
 ROOT = Path(__file__).resolve().parent.parent
 MARKDOWN = [
@@ -124,7 +126,7 @@ def test_fix_leaves_nothing_stale(source: str, options: core.Settings) -> None:
     stale = [
         d
         for d in core.check_source(fixed, options)
-        if d["rule"] in ("stale-rewrite", "stale-type", "narrow-type")
+        if d["rule"] in ("stale-rewrite", "stale-type", "narrow-type", "optional-row")
     ]
     assert not stale
 
@@ -325,20 +327,14 @@ _FRAGMENTS = [
 ]
 
 
-def test_fuzz_fragments() -> None:
-    """Random sequences of tricky fragments: outputs stay valid and keep their strings."""
-    rng = random.Random(127)
-    checked = 0
-    for _ in range(1500):
-        source = "".join(rng.choices(_FRAGMENTS, k=rng.randint(1, 5)))
-        try:
-            ast.parse(source)
-        except SyntaxError:
-            continue
-        options = core.Settings(untyped=rng.random() < 0.5)
-        _check_outputs(source, options)
-        checked += 1
-    assert checked > 1000
+@FUZZ
+@example(fragments=[_FRAGMENTS[6], _FRAGMENTS[17], _FRAGMENTS[0]], untyped=True)
+@given(st.lists(st.sampled_from(_FRAGMENTS), min_size=1, max_size=5), st.booleans())
+def test_fuzz_fragments(fragments: list[str], untyped: bool) -> None:
+    """Sequences of tricky fragments: outputs stay valid and keep their strings."""
+    source = "".join(fragments)
+    if parses(source):
+        _check_outputs(source, core.Settings(untyped=untyped))
 
 
 def test_sum_of_an_unknown_schema_column_is_untyped() -> None:

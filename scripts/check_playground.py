@@ -257,6 +257,7 @@ def exercise(browser: Browser, url: str, watch: Callable[[Page], None]) -> None:
     page.wait_for_selector("[data-source] .monaco-editor.vs-dark")
 
     files_and_panels(page)
+    schema_problems(page)
     breaking(page)
     editing(page)
     engine_errors(page)
@@ -268,6 +269,7 @@ def exercise(browser: Browser, url: str, watch: Callable[[Page], None]) -> None:
     resizing(page)
     zoomed(page, url)
     unsupported(context, url, watch)
+    webmcp(context, url, watch)
     asking(page, url)
     assert not errors, errors
 
@@ -389,6 +391,26 @@ def files_and_panels(page: Page) -> None:
     page.click('[data-file="schema"]')
     page.click("[data-problems] li button >> nth=0")
     assert page.evaluate(f"{SOURCE}.getModel().getLanguageId()") == "python"
+
+
+def schema_problems(page: Page) -> None:
+    """A schema whose row-level security is not forced: Problems and JSON name schema.sql, and
+    its problem opens it."""
+    page.click('[data-file="schema"]')
+    schema = page.evaluate(f"{SOURCE}.getValue()")
+    rls = "ALTER TABLE users ENABLE ROW LEVEL SECURITY;\nCREATE POLICY t ON users USING (id = current_setting('app.id')::int);\n"
+    page.evaluate(f"(text) => {SOURCE}.setValue(text)", schema + rls)
+    page.click('[data-file="python"]')
+    page.wait_for_selector("[data-problems] li:has-text('tenant-policy')")
+    assert "schema.sql:" in page.inner_text("[data-problems] li:has-text('tenant-policy')")
+    page.click('[data-tab="json"]')
+    json = "monaco.editor.getEditors().find((e) => e.getContainerDomNode().matches('[data-json]'))"
+    assert '"schema.sql"' in page.evaluate(f"{json}.getValue()")
+    page.click('[data-tab="problems"]')
+    page.click("[data-problems] li:has-text('tenant-policy') button")
+    assert page.evaluate(f"{SOURCE}.getModel().getLanguageId()") == "sql"
+    page.evaluate(f"(text) => {SOURCE}.setValue(text)", schema)
+    page.click('[data-file="python"]')
 
 
 def breaking(page: Page) -> None:
@@ -675,6 +697,33 @@ def unsupported(context: BrowserContext, url: str, watch: Callable[[Page], None]
     assert not other.is_visible("[data-ask-open]")
 
 
+def webmcp(context: BrowserContext, url: str, watch: Callable[[Page], None]) -> None:
+    """A browser with WebMCP, here a stub of it, gets a tool that leaves the editor alone."""
+    other = context.new_page()
+    watch(other)
+    other.add_init_script(
+        "Object.defineProperty(document, 'modelContext', { value: {"
+        " registerTool: async (tool) => { globalThis.tool = tool; } } })"
+    )
+    other.goto(url)
+    other.wait_for_function("globalThis.tool", timeout=60_000)
+    edited = other.evaluate(f"{SOURCE}.getValue()")
+
+    def call(arguments: dict[str, str]) -> Any:
+        return json.loads(other.evaluate("(given) => globalThis.tool.execute(given)", arguments))
+
+    assert "unknown-column" in {found["rule"] for found in call({})["diagnostics"]}
+    given = {
+        "source": 'q = """--sql\nSELECT nope FROM t"""\n',
+        "schema": "CREATE TABLE t (id int);",
+        "dialect": "sqlite",
+    }
+    assert "unknown-column" in {found["rule"] for found in call(given)["diagnostics"]}
+    assert other.evaluate(f"{SOURCE}.getValue()") == edited
+    other.evaluate(f"{MODEL.format('ini')}.setValue('[')")
+    assert "TOML" in call({})["error"]
+
+
 def asking(page: Page, url: str) -> None:
     page.goto(url)
     page.wait_for_selector("[data-ask-open]:not([hidden])", timeout=60_000)
@@ -760,7 +809,10 @@ class Coverage:
 
 def count(ranges: list[dict[str, int]], at: int) -> int:
     """How often the innermost range around offset `at` ran."""
+    # Pages that share a renderer share its counts: a take may hold only some functions.
     holding = [r for r in ranges if r["startOffset"] <= at < r["endOffset"]]
+    if not holding:
+        return 0
     return min(holding, key=lambda r: r["endOffset"] - r["startOffset"])["count"]
 
 

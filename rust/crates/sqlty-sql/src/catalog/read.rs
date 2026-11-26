@@ -17,6 +17,7 @@ use super::columns::{add_values, unique_key};
 use super::index::NameIndex;
 use super::loader::{Loader, Op, OpKind, Taint, TypeDef};
 use super::names::{fold, parts};
+use super::policies::Change;
 use super::Catalog;
 use super::TypeOverrides;
 
@@ -60,6 +61,7 @@ static DROP_EXPRESSION: LazyLock<regex::Regex> =
 /// Apply each statement as it is read, so a parsed statement lives only until it is
 /// applied; the ones waiting on a later definition are returned for [`Loader::run`].
 pub(super) fn read_statements<'a>(
+    source: &'a str,
     statements: impl IntoIterator<Item = ddl::Statement<'a>>,
     dialect: SqlDialect,
     loader: &mut Loader,
@@ -88,6 +90,7 @@ pub(super) fn read_statements<'a>(
                 path: path.clone(),
                 kind,
                 size: stmt.size(),
+                at: stmt.range_in(source).unwrap_or_default(),
             };
             if !loader.apply(&op, false) {
                 pending.push(op);
@@ -232,6 +235,18 @@ pub(super) fn read_statements<'a>(
                     stmt.name_parts_after("function"),
                 )),
             }
+        } else if postgres && stmt.creates("policy") {
+            match parse_ddl(&stmt.sql(), dialect).and_then(|stmts| stmts.into_iter().next()) {
+                Some(Statement::CreatePolicy(create)) => {
+                    let table = parts(&create.table_name, dialect);
+                    push(OpKind::Policy(table, Box::new(Change::Create(create))));
+                }
+                _ => {
+                    skipped.push(("statement", statement_text(stmt)));
+                    let table = stmt.name_parts_after("on");
+                    push(OpKind::Policy(table, Box::new(Change::Unknown)));
+                }
+            }
         } else if stmt.creates("index") {
             if let Some(Statement::CreateIndex(index)) =
                 parse_ddl(&stmt.sql(), dialect).and_then(|stmts| stmts.into_iter().next())
@@ -318,6 +333,15 @@ pub(super) fn read_alter_or_drop(
             }
             ("table", _) => {}
             ("type", Some(Statement::AlterType(alter))) => push(OpKind::AlterType(alter)),
+            ("policy", Some(Statement::AlterPolicy(alter))) if dialect == SqlDialect::Postgres => {
+                let table = parts(&alter.table_name, dialect);
+                push(OpKind::Policy(table, Box::new(Change::Alter(alter))));
+            }
+            ("policy", _) if dialect == SqlDialect::Postgres => {
+                skipped.push(("statement", statement_text(stmt)));
+                let table = stmt.name_parts_after("on");
+                push(OpKind::Policy(table, Box::new(Change::Unknown)));
+            }
             // A constraint added to or dropped from a domain changes the values it allows.
             ("domain", _) if action.iter().any(|w| w == "constraint") => {
                 push(OpKind::Taint(Taint::Type, name));
@@ -340,6 +364,10 @@ pub(super) fn read_alter_or_drop(
                 | Statement::DropDomain(_)),
             ) => {
                 push(OpKind::Drop(Box::new(drop)));
+            }
+            Some(Statement::DropPolicy(drop)) if dialect == SqlDialect::Postgres => {
+                let table = parts(&drop.table_name, dialect);
+                push(OpKind::Policy(table, Box::new(Change::Drop(drop.name))));
             }
             Some(Statement::DropTrigger(drop)) => push(OpKind::DropTrigger(
                 parts(&drop.trigger_name, dialect),
@@ -379,7 +407,13 @@ pub(crate) fn load_with(
     static BUILTIN: LazyLock<Loader> = LazyLock::new(|| {
         let mut loader = Loader::new(SqlDialect::Postgres);
         let builtin = ddl::statements(BUILTIN_SQL, false);
-        let ops = read_statements(builtin, SqlDialect::Postgres, &mut loader, &mut Vec::new());
+        let ops = read_statements(
+            BUILTIN_SQL,
+            builtin,
+            SqlDialect::Postgres,
+            &mut loader,
+            &mut Vec::new(),
+        );
         loader.run(ops);
         loader.search_path = vec!["public".to_string()];
         loader
@@ -394,7 +428,7 @@ pub(crate) fn load_with(
     loader.allow(schema_sql);
     let mut skipped = Vec::new();
     let statements = ddl::statements(schema_sql, dialect == SqlDialect::MySql);
-    let ops = read_statements(statements, dialect, &mut loader, &mut skipped);
+    let ops = read_statements(schema_sql, statements, dialect, &mut loader, &mut skipped);
     loader.run(ops);
     loader.resolve_foreign_keys();
     skipped.append(&mut loader.skipped);

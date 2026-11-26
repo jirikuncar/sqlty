@@ -174,3 +174,10 @@ test("a panic before the spare is ready, where only asynchronous instantiation i
     WebAssembly.Instance = Instance;
   }
 });
+
+test("analyze reports the schema's tenant policies, offsets into the schema", () => {
+  const rls = "CREATE TABLE notes (id INT, org_id INT);\nALTER TABLE notes ENABLE ROW LEVEL SECURITY;\nCREATE POLICY t ON notes USING (org_id = current_setting('app.org')::int);";
+  const [found] = ask({ op: "analyze", source: "", schema: rls, dialect: "postgres" }).schema_diagnostics;
+  assert.deepEqual([found.line, found.rule], [2, "tenant-policy"]);
+  assert.equal(rls.slice(found.start, found.end), "ALTER TABLE notes ENABLE ROW LEVEL SECURITY");
+});

@@ -212,7 +212,7 @@ mod tests {
         assert!(Rule::SelectStar.fixable());
         assert!(!Rule::SelectStar.is_sql());
         assert!(Rule::SQL.iter().all(|rule| rule.is_sql()));
-        assert_eq!(Rule::SQL.len(), 19);
+        assert_eq!(Rule::SQL.len(), 20);
         assert!(Rule::ALL.iter().all(|rule| !rule.summary().is_empty()));
     }
 

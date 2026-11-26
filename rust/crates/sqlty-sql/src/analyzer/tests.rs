@@ -934,3 +934,477 @@ fn reads_of_a_deprecated_column_are_reported_writes_are_not() {
     assert_eq!(found("INSERT INTO b (id, t) VALUES (1, 'x')"), []);
     assert!(!TypeOverrides::new(&types, "postgres").unwrap().is_empty());
 }
+
+#[test]
+fn tenant_scope_reports_statements_that_do_not_pin_the_tenant_key() {
+    let schema = "CREATE TABLE orgs (id SERIAL PRIMARY KEY, parent_id INT REFERENCES orgs, name TEXT);
+        CREATE TABLE projects (id SERIAL PRIMARY KEY, org_id INT NOT NULL REFERENCES orgs, name TEXT);
+        CREATE TABLE invoices (id SERIAL PRIMARY KEY, org_id INT NOT NULL REFERENCES orgs, project_id INT, name TEXT);
+        CREATE TABLE audit_log (id SERIAL PRIMARY KEY, org_id INT REFERENCES orgs);
+        CREATE TABLE events (id SERIAL PRIMARY KEY, org INT NOT NULL);
+        CREATE TABLE transfers (id SERIAL PRIMARY KEY, a INT REFERENCES orgs, b INT REFERENCES orgs);
+        CREATE TABLE secrets (id SERIAL PRIMARY KEY, org_id INT REFERENCES orgs);
+        CREATE TABLE tags (id SERIAL PRIMARY KEY, name TEXT);
+        ALTER TABLE secrets ENABLE ROW LEVEL SECURITY;
+        ALTER TABLE secrets FORCE ROW LEVEL SECURITY;
+        CREATE POLICY tenant ON secrets USING (org_id = current_setting('app.org_id')::int);
+        CREATE TABLE regions (id INT, region TEXT, PRIMARY KEY (id, region));
+        CREATE TABLE sites (id INT, org_id INT, region TEXT, FOREIGN KEY (org_id, region) REFERENCES regions);
+        CREATE VIEW names AS SELECT name FROM projects;";
+    let load = |table: &str| {
+        let types = [tenancy_type(
+            table,
+            &["audit_log.org_id"],
+            &["public.events.org"],
+            &[],
+        )];
+        let overrides = TypeOverrides::new(&types, "postgres").unwrap();
+        assert!(!overrides.is_empty());
+        load_schema_with_overrides(schema, "postgres", overrides).0
+    };
+    let (orgs, regions) = (load("public.orgs"), load("regions"));
+    let found = |sql: &str, schema: &Schema| -> Vec<String> {
+        analyze_with_diagnostics(sql, "postgres", Some(schema))
+            .1
+            .into_iter()
+            .filter(|found| found.rule == crate::diagnostics::Rule::TenantScope)
+            .map(|found| found.message)
+            .collect()
+    };
+    let read = |table: &str, column: &str| {
+        vec![format!(
+            "`{table}` is read without `{table}.{column} = <parameter>`"
+        )]
+    };
+    for sql in [
+        "SELECT name FROM projects WHERE org_id = %s",
+        "SELECT name FROM projects WHERE org_id IN ($1, $2)",
+        "SELECT name FROM projects WHERE org_id = ANY($1)",
+        "SELECT name FROM projects WHERE $1::INT = org_id",
+        "SELECT name FROM projects WHERE org_id IS NOT DISTINCT FROM $1",
+        "SELECT p.name FROM orgs o JOIN projects p ON p.org_id = o.id WHERE o.id = $1",
+        "SELECT p.name FROM orgs o, projects p WHERE p.org_id = o.id AND o.id = $1",
+        "SELECT i.id FROM invoices i JOIN projects p USING (org_id) WHERE p.org_id = $1",
+        "SELECT i.id FROM projects p LEFT JOIN invoices i ON i.org_id = p.org_id WHERE p.org_id = $1",
+        "SELECT i.id FROM (projects p JOIN invoices i ON i.org_id = p.org_id) WHERE p.org_id = $1",
+        "SELECT p.id FROM invoices i RIGHT JOIN projects p ON i.org_id = p.org_id WHERE p.org_id = $1",
+        "SELECT p.id FROM projects p WHERE p.org_id = $1 AND EXISTS (SELECT 1 FROM invoices i WHERE i.org_id = p.org_id)",
+        "SELECT id FROM audit_log",
+        "SELECT id FROM secrets",
+        "SELECT id FROM events WHERE org = $1",
+        "SELECT id FROM transfers WHERE b = $1",
+        "SELECT name FROM names",
+        "SELECT x FROM generate_series(1, 2) x",
+        "WITH projects AS (SELECT 1 AS id) SELECT id FROM projects",
+        "UPDATE projects SET name = $1, org_id = $2 WHERE org_id = $3",
+        "DELETE FROM invoices USING projects p WHERE invoices.org_id = p.org_id AND p.org_id = $1",
+        "INSERT INTO projects (org_id, name) VALUES ($1, $2)",
+        "INSERT INTO projects VALUES (DEFAULT, $1, $2)",
+        "INSERT INTO orgs (name) VALUES ($1)",
+        "INSERT INTO invoices (org_id, project_id) SELECT org_id, id FROM projects WHERE org_id = $1",
+        "INSERT INTO projects (id, org_id) VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET org_id = EXCLUDED.org_id",
+        "INSERT INTO projects (id, org_id) VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET name = 'x', (org_id) = (1)",
+        "INSERT INTO projects (id, org_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+        "UPDATE (SELECT 1) d SET x = 1",
+        "UPDATE tags SET name = $1",
+        "SELECT i.id FROM projects p LEFT JOIN invoices i ON i.org_id = $1 WHERE p.org_id = $1",
+        "SELECT i.id FROM projects p LEFT JOIN invoices i ON p.org_id = $1 AND i.org_id = $1 WHERE p.org_id = $1",
+        "SELECT p.id FROM projects p JOIN invoices i USING (org_id) JOIN audit_log a USING (id) WHERE p.org_id = $1",
+        "SELECT p.id FROM projects p JOIN invoices i USING (name) WHERE p.org_id = $1 AND i.org_id = $1",
+        "SELECT name FROM projects p WHERE org_id = $1 AND p.org_id = (SELECT 1)",
+        "SELECT p.id FROM projects p JOIN invoices i USING (nothing) WHERE p.org_id = $1 AND i.org_id = $1",
+        "SELECT a.id FROM projects a JOIN projects b ON b.org_id = a.org_id JOIN projects c ON c.org_id = b.org_id AND c.org_id = a.org_id WHERE a.org_id = $1",
+        "INSERT INTO audit_log (org_id) VALUES (1)",
+        "INSERT INTO names (name) VALUES ($1)",
+        "MERGE INTO projects p USING invoices i ON p.id = i.id WHEN MATCHED THEN DELETE",
+        "SELECT i.id FROM projects p JOIN (invoices i JOIN audit_log a ON a.id = i.id) ON i.org_id = p.org_id WHERE p.org_id = $1",
+        "SELECT p.id FROM projects p JOIN invoices i ON true WHERE p.org_id = $1 AND i.org_id = p.org_id",
+        "SELECT p.id FROM projects p NATURAL JOIN invoices i WHERE p.org_id = $1 AND i.org_id = $1",
+        "SELECT p.id FROM projects p JOIN LATERAL (SELECT 1 AS one) l ON true WHERE p.org_id = $1",
+        "SELECT p.id FROM projects p JOIN invoices i USING (id) WHERE p.org_id = $1 AND i.org_id = $1",
+        "SELECT p.id FROM projects p, (SELECT 1 AS id) d WHERE p.org_id = $1",
+        "UPDATE ONLY projects SET name = $1 WHERE org_id = $2",
+        "DELETE FROM projects WHERE org_id = $1",
+        "SELECT name FROM projects WHERE org_id = $1 AND name = $2 OR id = $3 AND org_id = $1 AND false",
+        "WITH p AS (SELECT name, org_id FROM projects) SELECT name FROM p WHERE org_id = $1",
+        "WITH p AS (SELECT name FROM projects WHERE org_id = $1) SELECT name FROM p",
+        "SELECT d.name FROM (SELECT * FROM projects) d WHERE d.org_id = $1",
+        "SELECT d.name FROM (SELECT p.* FROM projects p) d WHERE d.org_id = $1",
+        "WITH p (n, t) AS (SELECT name, org_id FROM projects) SELECT n FROM p WHERE t = $1",
+        "WITH a AS (SELECT name, org_id FROM projects), b AS (SELECT name, org_id FROM a) SELECT name FROM b WHERE org_id = $1",
+        "WITH u AS (SELECT id, org_id FROM projects UNION ALL (SELECT id, org_id FROM invoices)) SELECT id FROM u WHERE org_id = $1",
+        "WITH p AS (SELECT id, org_id FROM projects WHERE org_id = $1) SELECT i.id FROM invoices i JOIN p ON p.org_id = i.org_id",
+        "SELECT n FROM (SELECT org_id, count(*)::INT AS n FROM projects GROUP BY org_id) c WHERE c.org_id = $1",
+        "WITH p AS (SELECT i.id, p.org_id FROM projects p JOIN invoices i ON i.org_id = p.org_id) SELECT id FROM p WHERE org_id = $1",
+        "WITH p AS (SELECT id, org_id FROM projects) SELECT i.id FROM invoices i WHERE i.org_id = $1 AND EXISTS (SELECT 1 FROM p WHERE p.org_id = i.org_id)",
+        "WITH p AS (SELECT id, org_id FROM projects) UPDATE invoices SET project_id = p.id FROM p WHERE p.org_id = invoices.org_id AND invoices.org_id = $1",
+        "WITH p AS (SELECT id, org_id FROM projects) DELETE FROM invoices WHERE org_id = $1 AND project_id IN (SELECT id FROM p WHERE org_id = $1)",
+        "WITH t AS (SELECT 1 AS x, 2 AS x) SELECT 1 FROM t",
+        "SELECT g FROM (SELECT x AS g FROM generate_series(1, 2) x) d",
+        "SELECT x FROM (VALUES (1)) v (x)",
+        "WITH p AS (SELECT name, org_id FROM projects) SELECT name FROM p WHERE org_id = $1 AND EXISTS (WITH p AS (SELECT 1 AS one) SELECT one FROM p)",
+        "CREATE TABLE copy (id INT)",
+    ] {
+        let expected: Vec<String> = match sql {
+            s if s.ends_with("false") => read("projects", "org_id"),
+            _ => Vec::new(),
+        };
+        assert_eq!(found(sql, &orgs), expected, "{sql}");
+    }
+    for (sql, expected) in [
+        ("SELECT name FROM orgs", read("orgs", "id")),
+        ("SELECT name FROM orgs WHERE parent_id = $1", read("orgs", "id")),
+        ("SELECT name FROM projects WHERE org_id = 1", read("projects", "org_id")),
+        ("SELECT name FROM projects WHERE org_id > $1", read("projects", "org_id")),
+        ("SELECT name FROM projects WHERE org_id IN ($1, 2)", read("projects", "org_id")),
+        ("SELECT name FROM projects WHERE org_id NOT IN ($1)", read("projects", "org_id")),
+        ("SELECT name FROM projects WHERE org_id <> ALL($1)", read("projects", "org_id")),
+        ("SELECT name FROM projects WHERE org_id = name", read("projects", "org_id")),
+        ("INSERT INTO projects (org_id) TABLE projects", read("projects", "org_id")),
+        ("SELECT name FROM projects WHERE lower(name) = $1", read("projects", "org_id")),
+        ("SELECT name FROM projects WHERE org_id = $1 OR id = $2", read("projects", "org_id")),
+        (
+            "SELECT i.id FROM projects p LEFT JOIN invoices i ON i.org_id = p.org_id AND i.org_id = $1",
+            read("projects", "org_id"),
+        ),
+        (
+            "SELECT i.id FROM projects p FULL JOIN invoices i ON i.org_id = p.org_id WHERE p.org_id = $1",
+            read("invoices", "org_id"),
+        ),
+        (
+            "SELECT i.id FROM projects p RIGHT JOIN invoices i ON i.org_id = p.org_id AND p.org_id = $1",
+            read("invoices", "org_id"),
+        ),
+        (
+            "SELECT p.id FROM projects p WHERE p.org_id = $1 AND p.id IN (SELECT project_id FROM invoices i WHERE i.project_id = p.id)",
+            read("invoices", "org_id"),
+        ),
+        (
+            "SELECT id FROM transfers",
+            vec!["`transfers` is read without `transfers.a = <parameter>` or `transfers.b = <parameter>`".into()],
+        ),
+        (
+            "UPDATE projects SET name = $1 WHERE id = $2",
+            vec!["`projects` is updated without `projects.org_id = <parameter>`".into()],
+        ),
+        (
+            "UPDATE projects SET org_id = 2 WHERE org_id = $1",
+            vec!["UPDATE of `projects` does not set `org_id` from a parameter".into()],
+        ),
+        (
+            "UPDATE invoices SET project_id = p.id FROM projects p WHERE invoices.org_id = $1",
+            read("projects", "org_id"),
+        ),
+        (
+            "DELETE FROM events WHERE id < $1",
+            vec!["`events` is deleted from without `events.org = <parameter>`".into()],
+        ),
+        (
+            "INSERT INTO projects (org_id, name) VALUES ($1, $2), (2, $3)",
+            vec!["INSERT into `projects` does not set `org_id` from a parameter".into()],
+        ),
+        (
+            "INSERT INTO projects (name) VALUES ($1)",
+            vec!["INSERT into `projects` does not set `org_id` from a parameter".into()],
+        ),
+        (
+            "INSERT INTO invoices (org_id, project_id) SELECT 1, id FROM projects WHERE org_id = $1",
+            vec!["INSERT into `invoices` does not set `org_id` from a parameter".into()],
+        ),
+        (
+            "INSERT INTO projects (id, org_id) VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET org_id = 1",
+            vec!["UPDATE of `projects` does not set `org_id` from a parameter".into()],
+        ),
+        ("WITH p AS (SELECT name, org_id FROM projects) SELECT name FROM p", read("projects", "org_id")),
+        (
+            "WITH p AS (SELECT name, id FROM projects) SELECT p.name FROM p JOIN invoices i ON i.project_id = p.id WHERE i.org_id = $1",
+            read("projects", "org_id"),
+        ),
+        (
+            "WITH u AS (SELECT id, org_id FROM projects UNION ALL SELECT id, 1 FROM invoices) SELECT id FROM u WHERE org_id = $1",
+            read("invoices", "org_id"),
+        ),
+        (
+            "WITH u AS (SELECT id, org_id FROM projects UNION ALL SELECT id FROM invoices) SELECT id FROM u WHERE org_id = $1",
+            [read("invoices", "org_id"), read("projects", "org_id")].concat(),
+        ),
+        (
+            "WITH x AS (SELECT p.name, p.org_id, i.org_id FROM projects p, invoices i WHERE p.org_id = $1) SELECT name FROM x",
+            read("invoices", "org_id"),
+        ),
+        (
+            "WITH RECURSIVE r AS (SELECT id, org_id FROM projects UNION ALL SELECT id, org_id FROM r) SELECT id FROM r WHERE org_id = $1",
+            read("projects", "org_id"),
+        ),
+        (
+            "SELECT name FROM (SELECT name, org_id, row_number() OVER () AS n FROM projects) r WHERE r.org_id = $1",
+            read("projects", "org_id"),
+        ),
+        (
+            "WITH p AS (SELECT name, org_id FROM projects LIMIT 10) SELECT name FROM p WHERE org_id = $1",
+            read("projects", "org_id"),
+        ),
+        (
+            "SELECT n FROM (SELECT max(org_id) AS org_id, count(*)::INT AS n FROM projects GROUP BY name) c WHERE c.org_id = $1",
+            read("projects", "org_id"),
+        ),
+        (
+            "SELECT n FROM (SELECT org_id, count(*)::INT AS n FROM projects GROUP BY ALL) c WHERE c.org_id = $1",
+            read("projects", "org_id"),
+        ),
+        (
+            "SELECT name FROM (SELECT DISTINCT ON (name) name, org_id FROM projects) d WHERE d.org_id = $1",
+            read("projects", "org_id"),
+        ),
+        (
+            "SELECT name FROM (SELECT * FROM projects JOIN invoices USING (id)) d WHERE d.org_id = $1",
+            [read("projects", "org_id"), read("invoices", "org_id")].concat(),
+        ),
+        (
+            "SELECT name FROM (SELECT d.* FROM (SELECT name, org_id, row_number() OVER () AS n FROM projects) d) e WHERE e.org_id = $1",
+            read("projects", "org_id"),
+        ),
+        (
+            "SELECT name FROM (SELECT (p).* FROM projects p) d WHERE d.org_id = $1",
+            read("projects", "org_id"),
+        ),
+        (
+            "SELECT name FROM (SELECT name, org_id FROM projects) WHERE org_id = $1",
+            read("projects", "org_id"),
+        ),
+        (
+            "WITH p AS (SELECT id, org_id FROM projects) MERGE INTO invoices i USING p ON i.project_id = p.id WHEN MATCHED THEN DELETE",
+            read("projects", "org_id"),
+        ),
+        (
+            "MERGE INTO invoices i USING (SELECT id, org_id FROM projects) p ON i.project_id = p.id WHEN MATCHED THEN DELETE",
+            read("projects", "org_id"),
+        ),
+    ] {
+        assert_eq!(found(sql, &orgs), expected, "{sql}");
+    }
+    let both =
+        "`sites` is read without `sites.org_id = <parameter>` and `sites.region = <parameter>`";
+    assert_eq!(
+        found("SELECT id FROM sites WHERE region = $1", &regions),
+        [both]
+    );
+    assert_eq!(
+        found(
+            "SELECT id FROM sites WHERE org_id = $1 AND region = $2",
+            &regions
+        ),
+        Vec::<String>::new()
+    );
+    assert_eq!(
+        found(
+            "WITH s AS (SELECT id, org_id FROM sites WHERE region = $1) SELECT id FROM s WHERE org_id = $2",
+            &regions
+        ),
+        Vec::<String>::new()
+    );
+    assert_eq!(
+        found(
+            "SELECT name FROM projects",
+            &load_schema(schema, "postgres")
+        ),
+        Vec::<String>::new()
+    );
+}
+
+#[test]
+fn tenant_scope_reads_mysql_joins_and_assignments() {
+    let types = [tenancy_type("orgs", &[], &[], &[])];
+    let overrides = TypeOverrides::new(&types, "mysql").unwrap();
+    let schema = "CREATE TABLE orgs (id INT PRIMARY KEY);
+        CREATE TABLE projects (id INT PRIMARY KEY, org_id INT NOT NULL, FOREIGN KEY (org_id) REFERENCES orgs (id));
+        CREATE TABLE invoices (id INT PRIMARY KEY, org_id INT NOT NULL, FOREIGN KEY (org_id) REFERENCES orgs (id));";
+    let (schema, _) = load_schema_with_overrides(schema, "mysql", overrides);
+    let found = |sql: &str| -> Vec<String> {
+        analyze_with_diagnostics(sql, "mysql", Some(&schema))
+            .1
+            .into_iter()
+            .filter(|found| found.rule == crate::diagnostics::Rule::TenantScope)
+            .map(|found| found.message)
+            .collect()
+    };
+    assert_eq!(
+        found("SELECT i.id FROM projects p STRAIGHT_JOIN invoices i ON i.org_id = p.org_id WHERE p.org_id = ?"),
+        Vec::<String>::new()
+    );
+    assert_eq!(
+        found("INSERT INTO projects SET id = ?, org_id = ?"),
+        Vec::<String>::new()
+    );
+    assert_eq!(
+        found("INSERT INTO FUNCTION remote('x') VALUES (1)"),
+        Vec::<String>::new()
+    );
+    assert_eq!(
+        found("INSERT INTO projects SET id = ?, org_id = 1"),
+        ["INSERT into `projects` does not set `org_id` from a parameter"]
+    );
+    assert_eq!(
+        found("UPDATE projects p JOIN invoices i ON i.org_id = p.org_id SET p.id = ? WHERE p.org_id = ?"),
+        Vec::<String>::new()
+    );
+}
+
+#[test]
+fn tenant_scope_reads_row_level_security_policies() {
+    let rls = |name: &str, policies: &str| {
+        format!(
+            "CREATE TABLE {name} (id INT PRIMARY KEY, org_id INT, owner TEXT);
+            ALTER TABLE {name} ENABLE ROW LEVEL SECURITY;
+            ALTER TABLE {name} FORCE ROW LEVEL SECURITY;
+            {policies}"
+        )
+    };
+    let tenant = "current_setting('app.org_id')::int";
+    let schema = [
+        rls("per_command", &format!(
+            "CREATE POLICY s ON per_command FOR SELECT USING (org_id = {tenant});
+            CREATE POLICY i ON per_command FOR INSERT WITH CHECK ({tenant} = org_id);
+            CREATE POLICY u ON per_command FOR UPDATE USING (org_id = {tenant}) WITH CHECK (org_id = {tenant});
+            CREATE POLICY d ON per_command FOR DELETE USING ((org_id) = ({tenant}));"
+        )),
+        rls("no_delete", &format!("CREATE POLICY s ON no_delete FOR SELECT USING (org_id = {tenant});")),
+        rls("loose_update", &format!(
+            "CREATE POLICY a ON loose_update USING (org_id = {tenant});
+            CREATE POLICY u ON loose_update FOR UPDATE USING (org_id = {tenant}) WITH CHECK (true);"
+        )),
+        rls("for_admins", &format!(
+            "CREATE POLICY a ON for_admins USING (true);
+            CREATE POLICY r ON for_admins AS RESTRICTIVE TO admin USING (org_id = {tenant});"
+        )),
+        rls("users", "CREATE POLICY a ON users AS PERMISSIVE TO PUBLIC USING (owner = session_user AND id > 0 AND owner::text = current_user);"),
+        rls("renamed", &format!(
+            "CREATE POLICY a ON renamed USING (org_id = {tenant});
+            ALTER POLICY a ON renamed RENAME TO b;
+            ALTER POLICY b ON renamed TO admin;
+            ALTER POLICY missing ON renamed USING (true);
+            DROP POLICY a ON renamed;"
+        )),
+        rls("restored", &format!(
+            "CREATE POLICY a ON restored TO admin USING (org_id = {tenant});
+            ALTER POLICY a ON restored TO public;"
+        )),
+        rls("dropped", &format!(
+            "CREATE POLICY a ON dropped USING (org_id = {tenant});
+            CREATE POLICY b ON dropped USING (true);
+            DROP POLICY a ON dropped;"
+        )),
+        rls("unforced", &format!(
+            "CREATE POLICY a ON unforced USING (org_id = {tenant});
+            ALTER TABLE unforced NO FORCE ROW LEVEL SECURITY;"
+        )),
+        rls("lost_column", &format!(
+            "CREATE POLICY a ON lost_column USING (org_id = {tenant});
+            CREATE POLICY b ON lost_column USING (owner = (SELECT 1, 2));
+            CREATE POLICY c ON lost_column USING (owner = (SELECT current_user UNION SELECT 'x'));
+            CREATE POLICY d ON lost_column USING (owner = lower('x') OR id = id);
+            ALTER TABLE lost_column DROP COLUMN org_id;"
+        )),
+        rls("supabase", "CREATE POLICY a ON supabase USING (owner = (SELECT auth.uid()) AND org_id = (SELECT 1) AND id = 'x' AND org_id = (VALUES (1)));
+            ALTER TABLE supabase RENAME COLUMN owner TO user_id;
+            ALTER TABLE supabase RENAME COLUMN id TO key;"),
+        rls("unread", &format!(
+            "CREATE POLICY a ON unread USING (org_id = {tenant});
+            CREATE POLICY b ON unread USING (id = ANY (SELECT 1 WINDOW w AS ()));"
+        )),
+        rls("unread_alter", &format!(
+            "CREATE POLICY a ON unread_alter USING (unread_alter.org_id = {tenant});
+            ALTER POLICY a ON unread_alter USING (id = ANY (SELECT 1 WINDOW w AS ()));"
+        )),
+        rls("quoted", &format!(
+            "CREATE POLICY a ON quoted USING (quoted.org_id = {tenant} AND owner = (SELECT auth.uid() AS uid));
+            ALTER TABLE quoted RENAME COLUMN org_id TO \"OrgId\";
+            ALTER TABLE quoted NO FORCE ROW LEVEL SECURITY;"
+        )),
+        rls("narrowed", &format!(
+            "CREATE POLICY a ON narrowed USING (true) WITH CHECK (true);
+            CREATE POLICY r ON narrowed AS RESTRICTIVE USING (org_id = {tenant});
+            CREATE POLICY d ON narrowed FOR DELETE USING (true);"
+        )),
+        rls("checked_open", &format!(
+            "CREATE POLICY a ON checked_open USING (true) WITH CHECK (true);
+            CREATE POLICY d ON checked_open FOR DELETE USING (true);
+            CREATE POLICY i ON checked_open FOR INSERT WITH CHECK (org_id = {tenant});"
+        )),
+        "CREATE TABLE soft (id INT, owner TEXT);
+            CREATE POLICY a ON soft USING (owner = auth.uid()::text);".to_string(),
+    ]
+    .join("\n");
+    let types = [tenancy_type("", &[], &["dropped.org_id"], &["Auth.UID"])];
+    let overrides = TypeOverrides::new(&types, "postgres").unwrap();
+    let sql = schema;
+    let (schema, _) = load_schema_with_overrides(&sql, "postgres", overrides);
+    let policies: Vec<(String, String)> = schema
+        .tenant_policies()
+        .into_iter()
+        .map(|found| {
+            let words: Vec<&str> = sql[found.span].split_whitespace().take(5).collect();
+            (found.message, words.join(" "))
+        })
+        .collect();
+    let gap =
+        |policy: &str, table: &str, what: &str| format!("policy `{policy}` on `{table}` {what}");
+    let check = "; compare it to the session in WITH CHECK";
+    let filter = "; compare it to the session in USING";
+    assert_eq!(
+        policies,
+        [
+            (gap("u", "loose_update", &format!("does not check `org_id` on UPDATE{check}")), "CREATE POLICY u ON loose_update"),
+            (gap("a", "for_admins", &format!("does not filter SELECT, UPDATE, DELETE or check INSERT by `org_id`{filter}")), "CREATE POLICY a ON for_admins"),
+            (gap("b", "dropped", &format!("does not filter SELECT, UPDATE, DELETE or check INSERT by `org_id`{filter}")), "CREATE POLICY b ON dropped"),
+            ("`unforced` has row-level security without `FORCE ROW LEVEL SECURITY`, so its owner sees every tenant".to_string(), "ALTER TABLE unforced NO FORCE"),
+            ("sqlty can't read this policy on `unread`, so it counts as letting every tenant's rows through".to_string(), "CREATE POLICY b ON unread"),
+            ("sqlty can't read this policy on `unread_alter`, so it counts as letting every tenant's rows through".to_string(), "ALTER POLICY a ON unread_alter"),
+            ("`quoted` has row-level security without `FORCE ROW LEVEL SECURITY`, so its owner sees every tenant".to_string(), "ALTER TABLE quoted NO FORCE"),
+            (gap("a", "checked_open", "does not filter SELECT, UPDATE, DELETE or check INSERT by `org_id`; compare it to the session in USING and WITH CHECK"), "CREATE POLICY a ON checked_open"),
+            (gap("d", "checked_open", &format!("does not filter DELETE by `org_id`{filter}")), "CREATE POLICY d ON checked_open"),
+        ]
+        .map(|(message, at)| (message, at.to_string()))
+    );
+    let found = |sql: &str| -> Vec<String> {
+        analyze_with_diagnostics(sql, "postgres", Some(&schema))
+            .1
+            .into_iter()
+            .filter(|found| found.rule == crate::diagnostics::Rule::TenantScope)
+            .map(|found| found.message)
+            .collect()
+    };
+    let read = |table: &str, column: &str| {
+        vec![format!(
+            "`{table}` is read without `{table}.{column} = <parameter>`"
+        )]
+    };
+    assert_eq!(found("SELECT id FROM per_command"), Vec::<String>::new());
+    assert_eq!(found("SELECT id FROM no_delete"), Vec::<String>::new());
+    assert_eq!(found("SELECT id FROM restored"), Vec::<String>::new());
+    assert_eq!(found("SELECT id FROM lost_column"), Vec::<String>::new());
+    assert_eq!(
+        found("SELECT id FROM loose_update"),
+        read("loose_update", "org_id")
+    );
+    assert_eq!(
+        found("SELECT id FROM for_admins"),
+        read("for_admins", "org_id")
+    );
+    assert_eq!(found("SELECT id FROM renamed"), Vec::<String>::new());
+    assert_eq!(found("SELECT id FROM dropped"), read("dropped", "org_id"));
+    assert_eq!(found("SELECT id FROM unforced"), read("unforced", "org_id"));
+    assert_eq!(found("SELECT id FROM users"), Vec::<String>::new());
+    assert_eq!(found("DELETE FROM users"), Vec::<String>::new());
+    assert_eq!(found("SELECT key FROM supabase"), Vec::<String>::new());
+    assert_eq!(found("SELECT id FROM soft"), read("soft", "owner"));
+    assert_eq!(found("SELECT id FROM unread"), read("unread", "org_id"));
+    assert_eq!(
+        found("SELECT id FROM unread_alter"),
+        read("unread_alter", "org_id")
+    );
+    assert_eq!(
+        found("SELECT id FROM quoted"),
+        ["`quoted` is read without `quoted.OrgId = <parameter>` or `quoted.owner = <parameter>`"]
+    );
+}

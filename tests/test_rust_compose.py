@@ -3,7 +3,8 @@
 Each ``run(...)`` argument is also evaluated with the real ``psycopg.sql`` classes against
 the module constants; where both render, the SQL must match. Rust renders every
 ``sql.Literal(...)`` as ``NULL``, so those are left out. Raise the number of generated
-examples with ``SQLTY_FUZZ_EXAMPLES``.
+examples with ``SQLTY_FUZZ_EXAMPLES``
+under ``--hypothesis-profile=fuzz``.
 """
 
 from __future__ import annotations

@@ -2,7 +2,8 @@
 
 Every module of the test suite and its docs, and generated ones, must give the same row
 types, field for field, and the same answers on how their field types relate. Raise the
-number of generated examples with ``SQLTY_FUZZ_EXAMPLES``.
+number of generated examples with ``SQLTY_FUZZ_EXAMPLES``
+under ``--hypothesis-profile=fuzz``.
 """
 
 from __future__ import annotations

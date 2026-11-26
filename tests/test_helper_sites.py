@@ -3,7 +3,8 @@
 The corner cases pin down how a call is resolved where a name is bound more than once or
 an import is unusual; the expected calls document the behaviour. Generated modules then mix
 those imports and calls in every block kind. Raise the number of generated examples with
-``SQLTY_FUZZ_EXAMPLES``.
+``SQLTY_FUZZ_EXAMPLES``
+under ``--hypothesis-profile=fuzz``.
 """
 
 from __future__ import annotations

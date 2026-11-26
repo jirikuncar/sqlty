@@ -377,6 +377,35 @@ r = "--sql\nSELECT name FROM users WHERE id = :id"
 # rewritten-file: r = SQL[tuple[str], RParams]("--sql\nSELECT name FROM users WHERE id = :id")
 ```
 
+## Enum and `CHECK` columns take their values
+
+A parameter stored in, or compared by `=` or `IN` with, a column of known values (an enum,
+a `CHECK` list) is a `Literal` of them. A cast parameter takes anything.
+
+`schema.sql`:
+
+```sql
+CREATE TYPE pay_kind AS ENUM ('card', 'iban');
+CREATE TABLE payments (
+    id INTEGER PRIMARY KEY,
+    kind pay_kind NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('new', 'done'))
+);
+```
+
+```python
+a = "--sql\nSELECT id FROM payments WHERE kind = %s"
+b = "--sql\nSELECT id FROM payments WHERE status IN (%s, %s)"
+c = "--sql\nINSERT INTO payments (id, kind, status) VALUES (%s, %s, %s) RETURNING id"
+d = "--sql\nSELECT id FROM payments WHERE kind = %s::pay_kind"
+# rewritten-file: import typing
+# rewritten-file: from sqlty import SQL
+# rewritten-file: a = SQL[tuple[int], tuple[typing.Literal['card', 'iban'] | None]]("--sql\nSELECT id FROM payments WHERE kind = %s")
+# rewritten-file: b = SQL[tuple[int], tuple[typing.Literal['new', 'done'] | None, typing.Literal['new', 'done'] | None]]("--sql\nSELECT id FROM payments WHERE status IN (%s, %s)")
+# rewritten-file: c = SQL[tuple[int], tuple[int, typing.Literal['card', 'iban'], typing.Literal['new', 'done']]]("--sql\nINSERT INTO payments (id, kind, status) VALUES (%s, %s, %s) RETURNING id")
+# rewritten-file: d = SQL[tuple[int], tuple[typing.Any]]("--sql\nSELECT id FROM payments WHERE kind = %s::pay_kind")
+```
+
 ## Turned off
 
 `param-types = false` leaves `SQL[R]`.
