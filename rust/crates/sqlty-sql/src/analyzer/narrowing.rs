@@ -326,7 +326,9 @@ impl<'a> Analyzer<'a> {
         for cond in conditions(select) {
             cases = both(cases, self.learn_cases(cond, true, scope));
         }
-        facts.with_cases(self.checked(cases, scope, facts))
+        // What all cases prove makes an outer join's row present, so its `CHECK`s hold.
+        let proven = facts.with(merge(cases.clone()));
+        facts.with_cases(self.checked(cases, scope, &proven))
     }
 
     /// `cases` combined with the `CHECK`s of the tables of `scope`, which hold for every row:
