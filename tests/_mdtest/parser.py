@@ -107,6 +107,8 @@ class Unit:
     assertions: list[Assertion]
     # A ```` ```sql migration ```` block: a migration run on top of `against.sql`.
     migration: bool = False
+    # A ```` ```sql schema ```` block: the schema itself, whose `-- error:` `sqlty check` reports.
+    schema: bool = False
 
     @property
     def code(self) -> Code:
@@ -257,7 +259,7 @@ def _add_block(
     elif lang == "python":
         _add_python(section, body, start, fail)
     elif lang == "sql":
-        _add_sql(section, body, start, migration="migration" in tags)
+        _add_sql(section, body, start, migration="migration" in tags, schema="schema" in tags)
 
 
 def _add_python(section: Section, body: list[str], start: int, fail: Fail) -> None:
@@ -305,7 +307,9 @@ def _add_python(section: Section, body: list[str], start: int, fail: Fail) -> No
     section.setup = []
 
 
-def _add_sql(section: Section, body: list[str], start: int, *, migration: bool = False) -> None:
+def _add_sql(
+    section: Section, body: list[str], start: int, *, migration: bool = False, schema: bool = False
+) -> None:
     lines: list[tuple[int, str]] = []
     assertions: list[Assertion] = []
     pending: list[Assertion] = []
@@ -329,7 +333,7 @@ def _add_sql(section: Section, body: list[str], start: int, *, migration: bool =
                 pending.clear()
             lines.append((start + offset, text))
     if assertions:
-        section.units.append(Unit("sql", lines, assertions, migration=migration))
+        section.units.append(Unit("sql", lines, assertions, migration=migration, schema=schema))
 
 
 def _append(assertions: list[Assertion], new: Assertion) -> None:

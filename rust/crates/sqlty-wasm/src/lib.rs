@@ -32,6 +32,7 @@ use sqlty_python::checker::{query_sites, Diagnostic, SiteKind};
 use sqlty_python::config;
 use sqlty_python::fixer::fix_module;
 use sqlty_python::locate::{self, Queries};
+use sqlty_python::migrations::check_schema;
 use sqlty_python::options::Options;
 use sqlty_python::params::add_param_types;
 use sqlty_python::project::{self, FindError, Read};
@@ -118,7 +119,8 @@ fn postgres() -> String {
 /// (`postgres` by default).
 ///
 /// - `analyze`: `diagnostics` (what `sqlty check` reports for a module by itself, each
-///   with the `fix` edits of its quick fix), `queries` (row type, columns
+///   with the `fix` edits of its quick fix), `schema_diagnostics` (what it reports on
+///   `schema`, such as `tenant-policy`, offsets into `schema`), `queries` (row type, columns
 ///   and parameters of each query), `highlights` (the SQL tokens to color), and what
 ///   `sqlty rewrite`, `sqlty strip` and `sqlty check --fix` make of the source: `rewritten`,
 ///   `stripped` and `fixed`.
@@ -251,8 +253,17 @@ pub fn run(request: &str) -> String {
     let answer = match op {
         SourceOp::Analyze => {
             let diagnostics = check(&options, &schema);
+            let schema_units = sqlty_python::utf16::Utf16::new(&request.schema);
+            let schema_diagnostics: Vec<Diagnostic> = schema
+                .as_deref()
+                .map(|loaded| check_schema(loaded, &[(request.schema.as_str(), &rules)]))
+                .into_iter()
+                .flatten()
+                .flatten()
+                .collect();
             json!({
             "diagnostics": reported(&diagnostics, utf16),
+            "schema_diagnostics": reported(&schema_diagnostics, |byte| schema_units.at(byte)),
             "queries": query_sites(source, &options.style, &[])
                 .into_iter()
                 .filter(|(_, kind, _)| *kind == SiteKind::Query)

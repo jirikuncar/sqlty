@@ -1321,13 +1321,51 @@ fn tenant_scope_reads_row_level_security_policies() {
             ALTER TABLE quoted RENAME COLUMN org_id TO \"OrgId\";
             ALTER TABLE quoted NO FORCE ROW LEVEL SECURITY;"
         )),
+        rls("narrowed", &format!(
+            "CREATE POLICY a ON narrowed USING (true) WITH CHECK (true);
+            CREATE POLICY r ON narrowed AS RESTRICTIVE USING (org_id = {tenant});
+            CREATE POLICY d ON narrowed FOR DELETE USING (true);"
+        )),
+        rls("checked_open", &format!(
+            "CREATE POLICY a ON checked_open USING (true) WITH CHECK (true);
+            CREATE POLICY d ON checked_open FOR DELETE USING (true);
+            CREATE POLICY i ON checked_open FOR INSERT WITH CHECK (org_id = {tenant});"
+        )),
         "CREATE TABLE soft (id INT, owner TEXT);
             CREATE POLICY a ON soft USING (owner = auth.uid()::text);".to_string(),
     ]
     .join("\n");
     let types = [tenancy_type("", &[], &["dropped.org_id"], &["Auth.UID"])];
     let overrides = TypeOverrides::new(&types, "postgres").unwrap();
-    let (schema, _) = load_schema_with_overrides(&schema, "postgres", overrides);
+    let sql = schema;
+    let (schema, _) = load_schema_with_overrides(&sql, "postgres", overrides);
+    let policies: Vec<(String, String)> = schema
+        .tenant_policies()
+        .into_iter()
+        .map(|found| {
+            let words: Vec<&str> = sql[found.span].split_whitespace().take(5).collect();
+            (found.message, words.join(" "))
+        })
+        .collect();
+    let gap =
+        |policy: &str, table: &str, what: &str| format!("policy `{policy}` on `{table}` {what}");
+    let check = "; compare it to the session in WITH CHECK";
+    let filter = "; compare it to the session in USING";
+    assert_eq!(
+        policies,
+        [
+            (gap("u", "loose_update", &format!("does not check `org_id` on UPDATE{check}")), "CREATE POLICY u ON loose_update"),
+            (gap("a", "for_admins", &format!("does not filter SELECT, UPDATE, DELETE or check INSERT by `org_id`{filter}")), "CREATE POLICY a ON for_admins"),
+            (gap("b", "dropped", &format!("does not filter SELECT, UPDATE, DELETE or check INSERT by `org_id`{filter}")), "CREATE POLICY b ON dropped"),
+            ("`unforced` has row-level security without `FORCE ROW LEVEL SECURITY`, so its owner sees every tenant".to_string(), "ALTER TABLE unforced NO FORCE"),
+            ("sqlty can't read this policy on `unread`, so it counts as letting every tenant's rows through".to_string(), "CREATE POLICY b ON unread"),
+            ("sqlty can't read this policy on `unread_alter`, so it counts as letting every tenant's rows through".to_string(), "ALTER POLICY a ON unread_alter"),
+            ("`quoted` has row-level security without `FORCE ROW LEVEL SECURITY`, so its owner sees every tenant".to_string(), "ALTER TABLE quoted NO FORCE"),
+            (gap("a", "checked_open", "does not filter SELECT, UPDATE, DELETE or check INSERT by `org_id`; compare it to the session in USING and WITH CHECK"), "CREATE POLICY a ON checked_open"),
+            (gap("d", "checked_open", &format!("does not filter DELETE by `org_id`{filter}")), "CREATE POLICY d ON checked_open"),
+        ]
+        .map(|(message, at)| (message, at.to_string()))
+    );
     let found = |sql: &str| -> Vec<String> {
         analyze_with_diagnostics(sql, "postgres", Some(&schema))
             .1
