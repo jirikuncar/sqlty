@@ -1,6 +1,6 @@
 {
   "name": "@sqlty/wasm",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "description": "The sqlty engine as WebAssembly: type-check, complete and fix the SQL in Python source from a browser, an editor or Node.js",
   "keywords": [
     "sql",

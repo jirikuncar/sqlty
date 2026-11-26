@@ -45,6 +45,11 @@ PLACES: list[tuple[str, re.Pattern[str], int]] = [
         re.compile(rf'"name": "@sqlty/wasm",\n\s+"version": "{VERSION}"'),
         1,
     ),
+    (
+        "npm/wasm/example/package-lock.json",
+        re.compile(rf'"name": "@sqlty/wasm",\n\s+"version": "{VERSION}"'),
+        1,
+    ),
 ]
 
 
