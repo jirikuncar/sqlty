@@ -142,3 +142,27 @@ SELECT id FROM users;
 -- error: [unknown-table] "table `events` is not defined in the schema"
 SELECT n FROM events;
 ```
+
+## Databases that share a schema
+
+Databases may read the same schema file; each still reads its queries in its own dialect.
+
+```toml
+[tool.sqlty.databases.replica]
+schema = "app.sql"
+
+[tool.sqlty.databases.lite]
+dialect = "sqlite"
+schema = "app.sql"
+```
+
+```python
+from sqlty import SQL
+
+# error:
+q = SQL[tuple[str]]("--sql sqlty:db=replica\nSELECT id FROM users")
+# error: [narrow-type] "SQL[tuple[int]] should be SQL[tuple[str]]"
+r = SQL[tuple[int]]("--sql sqlty:db=lite\nSELECT id FROM users")
+# error: [unknown-table] "table `events` is not defined in the schema"
+s = SQL[tuple[int]]("--sql sqlty:db=replica\nSELECT n FROM events")
+```

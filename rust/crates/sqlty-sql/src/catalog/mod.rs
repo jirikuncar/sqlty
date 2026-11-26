@@ -213,9 +213,47 @@ enum Relation {
 }
 
 /// The resolved schema: what the analyzer reads. Built by `load`; shared, so caching it
-/// is cheap.
-#[derive(Default)]
+/// is cheap. Each named database shares the data of a schema it loads with another.
+#[derive(Clone, Default)]
 pub struct Catalog {
+    data: Arc<CatalogData>,
+    /// The named databases queries are routed to, when the schema was loaded with them.
+    pub(crate) databases: Option<Arc<crate::analyzer::Databases>>,
+}
+
+impl Catalog {
+    /// This catalog, routing queries to `databases`.
+    pub(crate) fn routed(&self, databases: crate::analyzer::Databases) -> Self {
+        Self {
+            data: Arc::clone(&self.data),
+            databases: Some(Arc::new(databases)),
+        }
+    }
+
+    /// Whether `other` shares this catalog's data.
+    pub fn shares_data(&self, other: &Catalog) -> bool {
+        Arc::ptr_eq(&self.data, &other.data)
+    }
+}
+
+impl std::ops::Deref for Catalog {
+    type Target = CatalogData;
+
+    fn deref(&self) -> &CatalogData {
+        &self.data
+    }
+}
+
+impl std::ops::DerefMut for Catalog {
+    /// Unique while the loader builds it, so this never copies.
+    fn deref_mut(&mut self) -> &mut CatalogData {
+        Arc::make_mut(&mut self.data)
+    }
+}
+
+/// What a [`Catalog`] reads, shared between the databases that load one schema.
+#[derive(Clone, Default)]
+pub struct CatalogData {
     /// `schema.name` -> relation.
     relations: FxHashMap<Arc<str>, Relation>,
     /// `schema.name` -> domain and enum types.
@@ -238,8 +276,6 @@ pub struct Catalog {
     overrides: Arc<TypeOverrides>,
     /// Sorted names for prefix lookups, sharing the keys above; built once by `load`.
     index: NameIndex,
-    /// The named databases queries are routed to, when the schema was loaded with them.
-    pub(crate) databases: Option<Arc<crate::analyzer::Databases>>,
     /// The tenant keys of each table, built on first use; see [`Catalog::tenant_keys`].
     tenants: OnceLock<FxHashMap<Arc<str>, Vec<Vec<String>>>>,
 }

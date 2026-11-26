@@ -1693,14 +1693,14 @@ mod tests {
     fn parsed_params_follow_the_database_a_query_names() {
         use crate::analyzer::{route, Databases};
         let other = load_schema("CREATE TABLE events (n INTEGER NOT NULL)", "sqlite");
-        let schema = SchemaData::with_databases(
-            load_schema(&schema_for("postgres"), "postgres"),
+        let schema = Some(SchemaData::with_databases(
+            &load_schema(&schema_for("postgres"), "postgres"),
             Databases {
                 name: "default".to_string(),
                 absent: false,
                 others: vec![("other".to_string(), "sqlite", Some(other))],
             },
-        );
+        ));
         let schema = schema.as_deref();
         for sql in [
             "-- sqlty: db=other\nSELECT n FROM events WHERE n = ?",
