@@ -189,6 +189,126 @@ SELECT a FROM other WHERE kind = 'a'
 -- inferred: tuple[str | None]
 ```
 
+### CASE and num_nonnulls forms
+
+The same union can be written as a `CASE` on the discriminator, whose arms are the
+conditions each value requires, or with `num_nonnulls` and `num_nulls` in each arm. A row
+takes the first `WHEN` it matches, and one that matches none passes the `CHECK` when there
+is no `ELSE` (the `CASE` is NULL) or takes the `ELSE`.
+
+`forms.sql`:
+
+```sql
+CREATE TYPE pay_kind AS ENUM ('card', 'iban', 'cash');
+CREATE TABLE simple (
+    id SERIAL PRIMARY KEY,
+    kind pay_kind NOT NULL,
+    card_last4 TEXT,
+    iban TEXT,
+    CHECK (CASE kind WHEN 'card' THEN card_last4 IS NOT NULL AND iban IS NULL
+                     WHEN 'iban' THEN iban IS NOT NULL AND card_last4 IS NULL
+                     ELSE num_nulls(card_last4, iban) = 2 END)
+);
+CREATE TABLE searched (
+    id SERIAL PRIMARY KEY,
+    kind pay_kind NOT NULL,
+    card_last4 TEXT,
+    iban TEXT,
+    CHECK (CASE WHEN kind = 'card' THEN card_last4 IS NOT NULL
+                WHEN kind IN ('iban', 'card') THEN iban IS NOT NULL END)
+);
+CREATE TABLE counted (
+    id SERIAL PRIMARY KEY,
+    kind pay_kind NOT NULL,
+    card_last4 TEXT,
+    iban TEXT,
+    CHECK ((kind = 'cash' AND num_nonnulls(card_last4, iban) = 0)
+        OR (kind IN ('card', 'iban') AND num_nonnulls(card_last4, iban) = 1))
+);
+CREATE TABLE mixed (
+    id SERIAL PRIMARY KEY,
+    kind TEXT NOT NULL,
+    a TEXT,
+    b TEXT,
+    CHECK (CASE WHEN kind = 'a' THEN a IS NOT NULL WHEN b = 'x' THEN b IS NOT NULL END),
+    c TEXT,
+    d TEXT,
+    CHECK (CASE kind WHEN 'b' THEN length(b) > 0 END),
+    CHECK (CASE lower(kind) WHEN 'c' THEN c IS NOT NULL END),
+    CHECK (kind = 'd' AND num_nonnulls(a, b, c, d, id, kind) = 6 OR kind = 'e')
+);
+```
+
+```toml
+[tool.sqlty]
+schema = "forms.sql"
+```
+
+```sql
+SELECT card_last4, iban FROM simple WHERE kind = 'card'
+-- inferred: tuple[str, str | None]
+```
+
+```sql
+SELECT CASE kind WHEN 'iban' THEN iban ELSE 'none' END AS iban FROM simple
+-- inferred: tuple[str]
+```
+
+The second `WHEN` of `searched` only matches `'iban'`: `'card'` took the first.
+
+```sql
+SELECT card_last4, iban FROM searched WHERE kind = 'card'
+-- inferred: tuple[str, str | None]
+```
+
+```sql
+SELECT iban FROM searched WHERE kind = 'iban'
+-- inferred: tuple[str]
+```
+
+No `WHEN` matches `'cash'`, so the `CHECK` says nothing about it.
+
+```sql
+SELECT card_last4, iban FROM searched WHERE kind = 'cash'
+-- inferred: tuple[str | None, str | None]
+```
+
+`num_nonnulls(card_last4, iban) = 1` holds when one of them is set: with the other NULL,
+it is the one.
+
+```sql
+SELECT iban FROM counted WHERE kind = 'iban' AND card_last4 IS NULL
+-- inferred: tuple[str]
+```
+
+```sql
+SELECT iban FROM counted WHERE kind = 'iban'
+-- inferred: tuple[str | None]
+```
+
+A `CASE` whose `WHEN`s test different columns or an expression, an arm of another shape,
+or a count over more than five columns is not read.
+
+```sql
+SELECT a FROM mixed WHERE kind = 'a'
+-- inferred: tuple[str | None]
+```
+
+```sql
+SELECT b, c, d FROM mixed WHERE kind = 'b' OR kind = 'c' OR kind = 'd'
+-- inferred: tuple[str | None, str | None, str | None]
+```
+
+```sql
+SELECT c FROM mixed WHERE kind = 'c'
+-- inferred: tuple[str | None]
+```
+
+```sql
+SELECT d FROM mixed WHERE kind = 'd'
+-- inferred: tuple[str | None]
+```
+
 ### A CASE over every value of a nullable column
 
 A row whose `mood` is NULL matches no `WHEN`: the `CASE` is NULL for it.

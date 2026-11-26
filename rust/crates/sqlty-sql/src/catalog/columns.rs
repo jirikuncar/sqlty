@@ -6,8 +6,9 @@
 use std::ops::ControlFlow;
 
 use sqlparser::ast::{
-    visit_expressions, BinaryOperator, ColumnDef, ColumnOption, DataType, Expr, FunctionArg,
-    FunctionArgExpr, FunctionArguments, GeneratedAs, Ident, InTarget, IndexColumn, ObjectName,
+    visit_expressions, BinaryOperator, CaseWhen, ColumnDef, ColumnOption, DataType, Expr,
+    FunctionArg, FunctionArgExpr, FunctionArguments, GeneratedAs, Ident, InTarget, IndexColumn,
+    ObjectName, Value as SqlValue, ValueWithSpan,
 };
 
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -247,13 +248,10 @@ fn checked(columns: &[RawColumn], expr: &Expr, dialect: SqlDialect) -> Vec<(usiz
     columns.iter().enumerate().filter_map(limits).collect()
 }
 
-/// The groups of columns a `CHECK` keeps at least one of non-null, conjunct by conjunct:
-/// `num_nonnulls(a, b) = 1` (or `>= 1`, `> 0`), `num_nulls(a, b) = 0` (each of them on its
-/// own), `a IS NOT NULL OR b IS NOT NULL`. MySQL before 8.0.16 ignores `CHECK`.
 /// Whether `check` ties columns to a discriminator, the only `CHECK` narrowing reads: an
 /// `OR` of `AND`s of `col = constant`, `col IN (constants)` and `col IS [NOT] NULL`, with
-/// both a value and a NULL test.
-pub(super) fn discriminates(check: &Expr) -> bool {
+/// both a value and a NULL test. `NOT IN` is read too: it is the `ELSE` of a `CASE`.
+fn discriminates(check: &Expr) -> bool {
     fn leaves<'e>(expr: &'e Expr, into: &mut Vec<&'e Expr>) {
         match expr {
             Expr::Nested(inner) => leaves(inner, into),
@@ -286,7 +284,6 @@ pub(super) fn discriminates(check: &Expr) -> bool {
             Expr::In {
                 expr,
                 target: InTarget::List(list),
-                negated: false,
                 ..
             } if column(expr) && list.iter().all(constant) => values = true,
             _ => return false,
@@ -295,6 +292,196 @@ pub(super) fn discriminates(check: &Expr) -> bool {
     values && nulls
 }
 
+/// `check` in the form [`discriminates`] reads, when it ties columns to a discriminator:
+/// a `CASE` over the values of one column is an `OR` of its arms, and `num_nonnulls(a, b)
+/// = 1` (or `num_nulls`) an `OR` of the ways that many columns are set.
+pub(super) fn discriminating(check: &Expr) -> Option<Expr> {
+    let check = expanded(check)?;
+    discriminates(&check).then_some(check)
+}
+
+/// [`discriminating`] before it is judged; `None` for a `CASE` or count it cannot expand.
+#[recursive::recursive]
+fn expanded(expr: &Expr) -> Option<Expr> {
+    Some(match expr {
+        Expr::Nested(inner) => expanded(inner)?,
+        Expr::BinaryOp {
+            left,
+            op: op @ (BinaryOperator::And | BinaryOperator::Or),
+            right,
+        } => Expr::BinaryOp {
+            left: Box::new(expanded(left)?),
+            op: op.clone(),
+            right: Box::new(expanded(right)?),
+        },
+        Expr::Case {
+            operand,
+            conditions,
+            else_result,
+            ..
+        } => cased(operand.as_deref(), conditions, else_result.as_deref())?,
+        Expr::BinaryOp {
+            left,
+            op: BinaryOperator::Eq,
+            right,
+        } => counted(left, right)
+            .or_else(|| counted(right, left))
+            .unwrap_or_else(|| expr.clone()),
+        other => other.clone(),
+    })
+}
+
+/// A `CASE` that picks its arm by the value of one column, as the `OR` of each arm's values
+/// `AND` its result. A row takes the first arm it matches, so an arm leaves out the values
+/// of the ones before it, and a row no `WHEN` matches passes (`ELSE NULL`) or takes `ELSE`.
+fn cased(
+    operand: Option<&Expr>,
+    conditions: &[CaseWhen],
+    otherwise: Option<&Expr>,
+) -> Option<Expr> {
+    let mut column = operand.cloned();
+    let mut seen = FxHashSet::default();
+    let mut listed = Vec::new();
+    let mut arms = Vec::new();
+    for when in conditions {
+        let (tested, constants) = match (operand, &when.condition) {
+            (Some(operand), value) => (operand.clone(), vec![value.clone()]),
+            (
+                None,
+                Expr::BinaryOp {
+                    left,
+                    op: BinaryOperator::Eq,
+                    right,
+                },
+            ) => ((**left).clone(), vec![(**right).clone()]),
+            (
+                None,
+                Expr::In {
+                    expr,
+                    target: InTarget::List(list),
+                    negated: false,
+                    ..
+                },
+            ) => ((**expr).clone(), list.clone()),
+            _ => return None,
+        };
+        if !matches!(tested, Expr::Identifier(_))
+            || *column.get_or_insert_with(|| tested.clone()) != tested
+        {
+            return None;
+        }
+        let mut fresh = Vec::new();
+        for constant in constants {
+            let value = values::constant(&constant)?;
+            if seen.insert(value) {
+                fresh.push(constant.clone());
+            }
+            listed.push(constant);
+        }
+        if !fresh.is_empty() {
+            arms.push(guarded(
+                in_list(&tested, fresh, false),
+                expanded(&when.result)?,
+            ));
+        }
+    }
+    let column = column?;
+    let rest = in_list(&column, listed, true);
+    arms.push(match otherwise {
+        Some(result) => guarded(rest, expanded(result)?),
+        None => rest,
+    });
+    arms.into_iter().reduce(|left, right| Expr::BinaryOp {
+        left: Box::new(left),
+        op: BinaryOperator::Or,
+        right: Box::new(right),
+    })
+}
+
+/// `num_nonnulls(a, b) = n` or `num_nulls(a, b) = n` as the `OR` of the ways `n` of the
+/// columns are set (or NULL), each an `AND` of `IS [NOT] NULL`. At most five columns, so
+/// at most ten arms.
+fn counted(call: &Expr, count: &Expr) -> Option<Expr> {
+    let Expr::Function(func) = call else {
+        return None;
+    };
+    let name = func.name.0.last()?.as_ident()?.value.to_ascii_lowercase();
+    let FunctionArguments::List(list) = &func.args else {
+        return None;
+    };
+    let columns = list
+        .args
+        .iter()
+        .map(|arg| match arg {
+            FunctionArg::Unnamed(FunctionArgExpr::Expr(column @ Expr::Identifier(_))) => {
+                Some(column.clone())
+            }
+            _ => None,
+        })
+        .collect::<Option<Vec<_>>>()?;
+    let Some(Value::Int(n)) = values::constant(count) else {
+        return None;
+    };
+    let k = columns.len();
+    let set = match name.as_str() {
+        "num_nonnulls" => usize::try_from(n).ok()?,
+        "num_nulls" => k.checked_sub(usize::try_from(n).ok()?)?,
+        _ => return None,
+    };
+    if k == 0 || k > 5 || set > k {
+        return None;
+    }
+    (0u32..1 << k)
+        .filter(|mask| mask.count_ones() as usize == set)
+        .filter_map(|mask| {
+            columns
+                .iter()
+                .enumerate()
+                .map(|(i, column)| {
+                    let column = Box::new(column.clone());
+                    if mask & 1 << i != 0 {
+                        Expr::IsNotNull(column)
+                    } else {
+                        Expr::IsNull(column)
+                    }
+                })
+                .reduce(guarded)
+        })
+        .reduce(|left, right| Expr::BinaryOp {
+            left: Box::new(left),
+            op: BinaryOperator::Or,
+            right: Box::new(right),
+        })
+}
+
+/// `guard AND result`, or `guard` alone when `result` is `TRUE`.
+fn guarded(guard: Expr, result: Expr) -> Expr {
+    if let Expr::Value(ValueWithSpan {
+        value: SqlValue::Boolean(true),
+        ..
+    }) = result
+    {
+        return guard;
+    }
+    Expr::BinaryOp {
+        left: Box::new(guard),
+        op: BinaryOperator::And,
+        right: Box::new(result),
+    }
+}
+
+fn in_list(column: &Expr, list: Vec<Expr>, negated: bool) -> Expr {
+    Expr::In {
+        expr: Box::new(column.clone()),
+        target: InTarget::List(list),
+        negated,
+        global: false,
+    }
+}
+
+/// The groups of columns a `CHECK` keeps at least one of non-null, conjunct by conjunct:
+/// `num_nonnulls(a, b) = 1` (or `>= 1`, `> 0`), `num_nulls(a, b) = 0` (each of them on its
+/// own), `a IS NOT NULL OR b IS NOT NULL`. MySQL before 8.0.16 ignores `CHECK`.
 pub(super) fn nonnull_groups(expr: &Expr, dialect: SqlDialect) -> Vec<Vec<String>> {
     use sqlparser::ast::BinaryOperator::{And, Eq, Gt, GtEq, Lt, LtEq, Or};
 
