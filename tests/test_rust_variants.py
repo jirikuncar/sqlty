@@ -2,7 +2,8 @@
 
 Generated functions bind the parts of a query along ``if``, ``match``, loops and ``try``,
 call functions of the module and compose with ``psycopg.sql``. Raise the number of
-generated examples with ``SQLTY_FUZZ_EXAMPLES``.
+generated examples with ``SQLTY_FUZZ_EXAMPLES``
+under ``--hypothesis-profile=fuzz``.
 """
 
 from __future__ import annotations

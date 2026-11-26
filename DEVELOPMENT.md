@@ -201,9 +201,9 @@ SQLTY_FUZZ_EXAMPLES=2000 SQLTY_PG_DSN=postgresql:///scratch SQLTY_FUZZ_PYTHON=.v
 
 The server's tables are dropped and recreated, so point it at a scratch
 database. `SQLTY_FUZZ_PYTHON` must import this checkout's `sqlty` dependencies;
-each property prints how many distinct cases it ran (`--nocapture`). In CI, run the `Fuzz`
-workflow by hand (Actions, Fuzz, Run workflow); a failure prints the case it
-shrank to and the `PROPTEST_RNG_SEED` that replays it. The case belongs in an
+each property prints how many distinct cases it ran (`--nocapture`). In CI, the `Fuzz`
+workflow runs every night, or by hand (Actions, Fuzz, Run workflow); a failure prints the
+case it shrank to and the `PROPTEST_RNG_SEED` that replays it. The case belongs in an
 mdtest next to the fix.
 
 `rust/fuzz` feeds every playground request (`analyze`, `complete`, `hover`,
@@ -220,6 +220,14 @@ cargo +nightly fuzz run -O -a run -- -dict=sql.dict -max_total_time=600
 A crash leaves its input in `artifacts/run/`; `cargo +nightly fuzz fmt -O -a run
 <file>` prints it. The `Fuzz the engine` workflow runs it every night and
 uploads the input when it fails.
+
+The Hypothesis tests of `tests/` (the Rust engine against the Python oracle in
+`tests/type_oracle`, round trips over tricky fragments) run only their `@example`s in the
+suite. The `Fuzz` workflow generates `SQLTY_FUZZ_EXAMPLES` cases for each of them as well:
+
+```bash
+SQLTY_FUZZ_EXAMPLES=2000 uv run pytest --hypothesis-profile=fuzz --no-cov
+```
 
 ## Type checking
 

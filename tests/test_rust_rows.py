@@ -1,7 +1,8 @@
 """Row checks in Rust (``sqlty_python::rows``).
 
 Generated modules name their row types in ``SQL[Row](...)`` calls over a small schema.
-Raise the number of generated examples with ``SQLTY_FUZZ_EXAMPLES``.
+Raise the number of generated examples with ``SQLTY_FUZZ_EXAMPLES``
+under ``--hypothesis-profile=fuzz``.
 """
 
 from __future__ import annotations

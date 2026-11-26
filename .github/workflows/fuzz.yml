@@ -1,14 +1,18 @@
 name: Fuzz
 
-# On demand: the property tests of rust/fuzz, the analyzer compared with PostgreSQL among them.
+# Nightly, with Fuzz the engine, and on demand: the property tests of rust/fuzz, the analyzer
+# compared with PostgreSQL among them, and the Hypothesis tests of tests/ generating cases (the
+# suite runs their examples only).
 on:
+  schedule:
+    - cron: "41 3 * * *"
   workflow_dispatch:
     inputs:
       examples:
         description: Examples per property
         default: "2000"
       seed:
-        description: Seed (PROPTEST_RNG_SEED, empty for a random one)
+        description: Seed (PROPTEST_RNG_SEED and --hypothesis-seed, empty for a random one)
         default: ""
 
 permissions:
@@ -34,7 +38,7 @@ jobs:
 
     env:
       SQLTY_PG_DSN: postgresql://postgres:postgres@localhost:5432/postgres
-      SQLTY_FUZZ_EXAMPLES: ${{ inputs.examples }}
+      SQLTY_FUZZ_EXAMPLES: ${{ inputs.examples || '2000' }}
       SQLTY_FUZZ_PYTHON: ${{ github.workspace }}/.venv/bin/python
 
     steps:
@@ -59,3 +63,31 @@ jobs:
         run: >-
           cargo test --release --manifest-path rust/fuzz/Cargo.toml --test properties
           -- --nocapture
+
+  hypothesis:
+    name: Fuzz the Python checks
+    runs-on: ubuntu-latest
+    env:
+      SQLTY_FUZZ_EXAMPLES: ${{ inputs.examples || '2000' }}
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: $/.github/actions/setup
+        with:
+          python-version: "3.14"
+
+      - name: Install the dependencies
+        run: uv sync --all-groups --no-install-project
+
+      - name: Build Rust extension
+        run: uv run maturin develop --release --manifest-path rust/crates/sqlty-ext/Cargo.toml
+
+      - name: Fuzz
+        env:
+          SEED: ${{ inputs.seed }}
+        run: >-
+          uv run pytest --hypothesis-profile=fuzz --no-cov -m "hypothesis and not pg"
+          ${SEED:+--hypothesis-seed="$SEED"}
