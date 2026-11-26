@@ -2,7 +2,8 @@
 
 Each case and generated module must give the same row types in Rust as in the oracle, and
 the outline must keep every class ``ast.parse`` finds, in ``ast.walk`` order. Raise the
-number of generated examples with ``SQLTY_FUZZ_EXAMPLES``.
+number of generated examples with ``SQLTY_FUZZ_EXAMPLES``
+under ``--hypothesis-profile=fuzz``.
 """
 
 from __future__ import annotations

@@ -1,6 +1,7 @@
 """``--sql`` t-strings read in Rust (``sqlty_python::templates``).
 
-Raise the number of generated examples with ``SQLTY_FUZZ_EXAMPLES``.
+Raise the number of generated examples with ``SQLTY_FUZZ_EXAMPLES``
+under ``--hypothesis-profile=fuzz``.
 """
 
 from __future__ import annotations

@@ -562,3 +562,49 @@ async def run(conn: Any, BY_ID: LiteralString) -> None:
     await fetch_one(conn, BY_ID, tuple[str])
 # error:
 ```
+
+## A union `P` is checked member by member
+
+Each member of a union `P` must fit the query: a type checker accepts any one of them.
+
+```toml
+[tool.sqlty]
+schema = "schema.sql"
+```
+
+`schema.sql`:
+
+```sql
+CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
+```
+
+```python
+from typing import Optional, TypedDict, Union
+
+from sqlty import SQL, NoParams
+
+
+class ById(TypedDict):
+    id: int
+
+
+type Params = tuple[bytes] | tuple[int]
+
+# error: [params-type-mismatch] "tuple[bytes] item 1 is bytes but query parameter 1 expects int"
+a = SQL[tuple[str], tuple[bytes] | tuple[int]]("--sql\nSELECT name FROM users WHERE id = %s")
+# error: [params-type-mismatch] "tuple[int, int] has 2 items but the query has 1 parameter"
+b = SQL[tuple[str], Union[tuple[int], tuple[int, int]]]("--sql\nSELECT name FROM users WHERE id = %s")
+# error: [params-type-mismatch] "ById is a TypedDict but the query takes positional parameters"
+c = SQL[tuple[str], tuple[int] | ById]("--sql\nSELECT name FROM users WHERE id = %s")
+d = SQL[tuple[str], tuple[int] | tuple[str]]("--sql\nSELECT name FROM users WHERE id = %s")
+e = SQL[tuple[int], NoParams]("--sql\nSELECT id FROM users")
+# error: [params-type-mismatch] "None takes none but the query has 1 parameter"
+f = SQL[tuple[str], Optional[tuple[int]]]("--sql\nSELECT name FROM users WHERE id = %s")
+g = SQL[tuple[int], tuple[()] | None]("--sql\nSELECT id FROM users")
+# error: [params-type-mismatch] "tuple[bytes] item 1 is bytes but query parameter 1 expects int"
+h = SQL[tuple[str], Params]("--sql\nSELECT name FROM users WHERE id = %s")
+# error: [params-type-mismatch] "tuple[bytes] item 1 is bytes but query parameter 1 expects int"
+i = SQL[tuple[str], Union[tuple[bytes], tuple[bytes]]]("--sql\nSELECT name FROM users WHERE id = %s")
+# error: [params-type-mismatch] "NoParams takes none but the query has 1 parameter"
+j = SQL[tuple[str], NoParams | tuple[int]]("--sql\nSELECT name FROM users WHERE id = %s")
+```

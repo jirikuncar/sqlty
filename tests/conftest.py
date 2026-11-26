@@ -10,11 +10,14 @@ import pytest
 
 WORKER = os.environ.get("PYTEST_XDIST_WORKER")
 
-# Coverage must not depend on what Hypothesis happens to generate.
+# Tests run their explicit examples only, so neither coverage nor the suite's time depends on
+# what Hypothesis generates; the Fuzz workflow generates with `--hypothesis-profile=fuzz`.
 with contextlib.suppress(ImportError):
     from hypothesis import Phase, settings
 
-    settings.register_profile("coverage", phases=[Phase.explicit])
+    settings.register_profile("explicit", phases=[Phase.explicit])
+    settings.register_profile("fuzz")
+    settings.load_profile("explicit")
 
 
 def _worker_database(dsn: str, *, create: bool) -> str:

@@ -89,8 +89,8 @@ Style, naming and refactoring suggestions are Nit at most.
   copying setup.
 - 100% coverage: Python `fail_under = 100`, Rust gated on an empty
   `cargo llvm-cov report --show-missing-lines` list (nightly). Cover lines with
-  real tests, not `#[coverage(off)]` (test modules and Debug impls only) or Hypothesis luck (the
-  coverage profile runs explicit examples only). Restructure dead branches: a `?`
+  real tests, not `#[coverage(off)]` (test modules and Debug impls only) or Hypothesis luck (tests
+  run explicit examples only). Restructure dead branches: a `?`
   alone on a line or an unreachable `Err` arm counts as missed.
 - No `pytest.importorskip`, no skips or xfails beyond what AGENTS.md
   "Writing tests" allows, no wall-time assertions outside

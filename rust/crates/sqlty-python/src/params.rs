@@ -117,10 +117,14 @@ pub fn add_param_types(source: &str, options: &Options, closed: bool) -> String 
 }
 
 fn param_type(param: &Param) -> String {
-    match &param.python_type {
-        Some(text) if !param.cast && param.nullability == Nullability::NonNull => text.clone(),
-        Some(text) if !param.cast => format!("{text} | None"),
-        _ => "typing.Any".to_string(),
+    let text = match (&param.literal, &param.python_type) {
+        (Some(literal), _) => literal,
+        (None, Some(text)) if !param.cast => text,
+        _ => return "typing.Any".to_string(),
+    };
+    match param.nullability {
+        Nullability::NonNull => text.clone(),
+        _ => format!("{text} | None"),
     }
 }
 

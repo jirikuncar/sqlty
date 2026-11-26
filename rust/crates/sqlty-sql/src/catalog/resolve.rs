@@ -504,6 +504,7 @@ impl<'a> Resolver<'a> {
                         .collect(),
                     row_security: table.row_security,
                     force_row_security: table.force_row_security,
+                    row_security_at: table.row_security_at.clone(),
                     policies: table.policies.clone(),
                     by_name: Vec::new(),
                 }

@@ -16,7 +16,9 @@ use sqlty_sql::analyzer::{self, Nullability};
 use sqlty_sql::json::JsonShape;
 
 use crate::analyses::Analyses;
-use crate::checker::{wrapped_queries, Diagnostic};
+use crate::checker::{
+    unchecked_form, unchecked_message, without_none, wrapped_queries, Diagnostic,
+};
 use crate::frozen::Table;
 use crate::options::Options;
 use crate::rules::{Rule, RuleConfig};
@@ -508,6 +510,12 @@ fn check_structural(
 fn check_aliases(ctx: &mut Check<'_>, aliased: &[(RowQuery, &Expr)]) {
     let mut shapes: HashMap<&str, Option<RowShape>> = HashMap::new();
     for ((line, name, query, span), target) in aliased {
+        let written = unparse(target, &ctx.source.text);
+        if let Some(form) = unchecked_form(without_none(&written).unwrap_or(&written)) {
+            let message = unchecked_message(name, form);
+            ctx.report(Rule::UncheckedRowType, message, *line, Some(*span));
+            continue;
+        }
         let Some(columns) = ctx.columns(query.as_deref()) else {
             continue;
         };

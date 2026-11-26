@@ -50,6 +50,7 @@ pub(crate) use names::{fold, folded, lowercase};
 pub(crate) use read::{load, load_with};
 
 use rustc_hash::FxHashMap;
+use std::ops::Range;
 use std::sync::{Arc, LazyLock, OnceLock};
 
 use sqlparser::ast::{DataType, Expr};
@@ -167,6 +168,8 @@ struct TableRelation {
     unique: Vec<Vec<String>>,
     row_security: bool,
     force_row_security: bool,
+    /// The bytes of the latest statement that changed `row_security` or `force_row_security`.
+    row_security_at: Range<usize>,
     policies: Vec<policies::Policy>,
     /// Positions in `columns`, by name and then position, so that a column is found in
     /// O(log width).
@@ -605,6 +608,75 @@ impl Catalog {
                 found.insert(Arc::clone(key), keys);
             }
         }
+        found
+    }
+
+    /// Why each tenant table with row-level security is not scoped by the database, at the
+    /// statement that leaves it so: `tenant-policy` findings, sorted by position. The table's
+    /// queries are judged by `tenant-scope` meanwhile.
+    pub fn tenant_policies(&self) -> Vec<crate::migrations::Finding> {
+        use crate::migrations::Finding;
+        let functions = self.overrides.tenancy.as_ref();
+        let functions = functions.map_or(&[][..], |tenancy| &tenancy.session_functions);
+        let mut found = Vec::new();
+        for (key, relation) in &self.relations {
+            let (Relation::Table(table), Some(keys)) = (relation, self.tenants().get(key)) else {
+                continue;
+            };
+            if !table.row_security {
+                continue;
+            }
+            let name = short_name(key);
+            let finding = |span, message| Finding {
+                rule: sqlty_rules::Rule::TenantPolicy,
+                message,
+                span,
+            };
+            if !table.force_row_security {
+                found.push(finding(
+                    table.row_security_at.clone(),
+                    format!("`{name}` has row-level security without `FORCE ROW LEVEL SECURITY`, so its owner sees every tenant"),
+                ));
+            }
+            let named: Vec<String> = keys
+                .iter()
+                .map(|key| format!("`{}`", key.join("`, `")))
+                .collect();
+            let named = named.join(" or ");
+            let gaps = policies::gaps(&table.policies, keys, functions);
+            let mut policies: Vec<&policies::Policy> = gaps.iter().map(|gap| gap.policy).collect();
+            policies.sort_by_key(|policy| policy.at().start);
+            policies.dedup_by(|a, b| std::ptr::eq(*a, *b));
+            for policy in policies {
+                let commands = |written: bool| {
+                    let listed: Vec<String> = gaps
+                        .iter()
+                        .filter(|gap| std::ptr::eq(gap.policy, policy) && gap.written == written)
+                        .map(|gap| gap.command.to_string())
+                        .collect();
+                    listed.join(", ")
+                };
+                let (read, written) = (commands(false), commands(true));
+                let message = match (policy.name(), read.is_empty(), written.is_empty()) {
+                    ("", ..) => format!("sqlty can't read this policy on `{name}`, so it counts as letting every tenant's rows through"),
+                    (own, false, true) => format!(
+                        "policy `{own}` on `{name}` does not filter {read} by {named}; compare it to the session in USING"
+                    ),
+                    (own, true, _) => format!(
+                        "policy `{own}` on `{name}` does not check {named} on {written}; compare it to the session in WITH CHECK"
+                    ),
+                    (own, false, false) => {
+                        let clauses = match policy.checks() {
+                            true => "USING and WITH CHECK",
+                            false => "USING",
+                        };
+                        format!("policy `{own}` on `{name}` does not filter {read} or check {written} by {named}; compare it to the session in {clauses}")
+                    }
+                };
+                found.push(finding(policy.at(), message));
+            }
+        }
+        found.sort_by_key(|finding| (finding.span.start, finding.message.clone()));
         found
     }
 
