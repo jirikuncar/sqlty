@@ -1364,6 +1364,7 @@ mod tests {
             sources[1].files[0].schema_files,
             sources[1].settings.schema_files
         );
+        assert!(Arc::ptr_eq(&sources[1].files[0], &sources[1].settings));
         assert!(workspace
             .database(Path::new("/repo/app/_"), "events")
             .expect("reads")
