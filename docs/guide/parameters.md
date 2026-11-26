@@ -223,6 +223,8 @@ count = "--sql\nSELECT count(*) FROM users"
   accept only `()`, `{}` or nothing.
 - A parameter is `T | None` unless a `NOT NULL` column stores it, and
   `typing.Any` when its type is unknown or cast (`%s::int` takes anything).
+- A parameter stored in, or compared by `=` or `IN` with, a column of known
+  values (an enum or a `CHECK` list) is a `typing.Literal` of those values.
 
 `rewrite` writes `P` for every `SQL[R]` call that has none, and keeps a `P`
 you wrote. `sqlty check` compares a `P` you wrote with the query
