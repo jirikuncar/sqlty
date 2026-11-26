@@ -164,8 +164,11 @@ impl Module {
 const STACK_RED_ZONE: usize = 2 << 20;
 const STACK_SEGMENT: usize = 16 << 20;
 
-/// `as`, which any import binding a name to another has.
-static AS: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| sqlty_sql::regex(r"\bas\b"));
+/// An `import` statement with `as`, which any import binding a name to another has:
+/// `as` on its line or in its parentheses, not that of `with ... as` or `except ... as`.
+static IMPORT_AS: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
+    sqlty_sql::regex(r"\bimport\b(?:[^\n;#(\\]|\\\r?\n|\((?:[^)#]|#[^\n]*)*)*?\bas\b")
+});
 
 /// The sources of the modules of a checked tree and what is read of them, shared by an
 /// index and its forks.
@@ -458,20 +461,21 @@ impl Builder {
         // A module can re-export a helper under another name, which a call then spells; its
         // text then holds the name, so only such modules have their imports read.
         let mut names = names;
+        let mut added = names.clone();
         for _ in 0..8 {
-            if names.is_empty() {
+            if added.is_empty() {
                 break;
             }
-            let named = alternation(&names);
-            let mut renamed = Vec::new();
+            let named = alternation(&added);
+            let mut renamed = HashSet::new();
             // Only `import ... as ...` binds a helper to another name.
             let aliasing = self.sources().values().filter(|known| {
                 named
                     .as_ref()
                     .is_none_or(|named| named.is_match(&known.text))
-                    && AS.is_match(&known.text)
+                    && IMPORT_AS.is_match(&known.text)
             });
-            for source in aliasing.filter_map(|known| known.load()) {
+            for source in aliasing.filter_map(|known| known.source()) {
                 renamed.extend(
                     source
                         .targets()
@@ -483,10 +487,8 @@ impl Builder {
                         .map(|(local, _)| local.clone()),
                 );
             }
-            if renamed.is_empty() {
-                break;
-            }
-            names.extend(renamed);
+            names.extend(renamed.iter().cloned());
+            added = renamed;
         }
         let pattern = alternation(&names);
         let tree = self.tree.unwrap_or_else(|| {
