@@ -382,8 +382,9 @@ def flatten(result: dict) -> dict[str, tuple[str, float]]:
             flat[f"{name}.rss"] = ("rss", m["rss_mb"])
     # Per-kind microsecond timings are too noisy to budget one by one: budget the sums.
     for fn in ("analyze_select", "analyze_params", "analyze_query"):
-        total_us = sum(us for name, us in result["micro_us"].items() if name.startswith(fn + "."))
-        flat[f"micro.{fn}.total"] = ("time", total_us * 1e-6 / cal)
+        timings = [us for name, us in result["micro_us"].items() if name.startswith(fn + ".")]
+        if timings:
+            flat[f"micro.{fn}.total"] = ("time", sum(timings) * 1e-6 / cal)
     return flat
 
 

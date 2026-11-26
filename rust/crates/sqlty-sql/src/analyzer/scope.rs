@@ -104,8 +104,8 @@ impl Scope {
     }
 
     /// Moves the first source to the end.
-    pub(super) fn rotate_left(&mut self, mid: usize) {
-        self.sources.rotate_left(mid);
+    pub(super) fn rotate_first_last(&mut self) {
+        self.sources.rotate_left(1);
         self.index = OnceCell::new();
     }
 
