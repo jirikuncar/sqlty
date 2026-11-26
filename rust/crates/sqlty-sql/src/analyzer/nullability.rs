@@ -181,7 +181,7 @@ impl Facts {
 
     /// Forget what is known about relations a nested SELECT defines itself.
     pub(super) fn without(&mut self, scope: &Scope) {
-        let shadowed = |r: &String| scope.iter().any(|source| source.reference == *r);
+        let shadowed = |r: &String| scope.reads(r);
         // Rebuilding a list only when it has something to forget keeps shared ones shared.
         fn forget<T: Clone>(list: &mut Rc<Vec<T>>, gone: impl Fn(&T) -> bool) {
             if list.iter().any(&gone) {

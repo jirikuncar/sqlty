@@ -1,7 +1,10 @@
 //! Name resolution: table scopes, CTE and view sources, `*` expansion and column lookup.
 
+use std::cell::OnceCell;
 use std::collections::HashMap;
 use std::rc::Rc;
+
+use rustc_hash::FxHashMap;
 
 use sqlparser::ast::{
     DataType, Expr, Join, JoinConstraint, JoinOperator, JsonTableColumn, ObjectName, TableFactor,
@@ -74,11 +77,124 @@ impl Source {
     }
 }
 
-/// The sources a statement reads, in query order.
-pub(super) type Scope = Vec<Source>;
+/// The sources a statement reads, in query order, found by reference without a scan once
+/// there are more than [`SCANNED`].
+#[derive(Clone, Debug, Default)]
+pub(super) struct Scope {
+    sources: Vec<Source>,
+    /// The position of the first source of each reference, built on the first lookup.
+    index: OnceCell<FxHashMap<Box<str>, usize>>,
+}
+
+/// The most sources [`Scope::position`] scans.
+const SCANNED: usize = 8;
+
+impl Scope {
+    pub(super) fn new() -> Self {
+        Self::default()
+    }
+
+    pub(super) fn push(&mut self, source: Source) {
+        if let Some(index) = self.index.get_mut() {
+            index
+                .entry(source.reference.as_str().into())
+                .or_insert(self.sources.len());
+        }
+        self.sources.push(source);
+    }
+
+    /// Moves the first source to the end.
+    pub(super) fn rotate_left(&mut self, mid: usize) {
+        self.sources.rotate_left(mid);
+        self.index = OnceCell::new();
+    }
+
+    /// The position of the first source read by `reference`.
+    pub(super) fn position(&self, reference: &str) -> Option<usize> {
+        if self.sources.len() <= SCANNED {
+            return self
+                .sources
+                .iter()
+                .position(|source| source.reference == reference);
+        }
+        let index = self.index.get_or_init(|| {
+            let mut index = FxHashMap::default();
+            for (at, source) in self.sources.iter().enumerate() {
+                index.entry(source.reference.as_str().into()).or_insert(at);
+            }
+            index
+        });
+        index.get(reference).copied()
+    }
+
+    /// The first source read by `reference`.
+    pub(super) fn find(&self, reference: &str) -> Option<&Source> {
+        self.position(reference).map(|at| &self.sources[at])
+    }
+
+    /// Whether a source is read by `reference`.
+    pub(super) fn reads(&self, reference: &str) -> bool {
+        self.position(reference).is_some()
+    }
+}
+
+impl std::ops::Deref for Scope {
+    type Target = [Source];
+
+    fn deref(&self) -> &[Source] {
+        &self.sources
+    }
+}
+
+impl From<Vec<Source>> for Scope {
+    fn from(sources: Vec<Source>) -> Self {
+        Self {
+            sources,
+            index: OnceCell::new(),
+        }
+    }
+}
+
+impl FromIterator<Source> for Scope {
+    fn from_iter<I: IntoIterator<Item = Source>>(sources: I) -> Self {
+        Vec::from_iter(sources).into()
+    }
+}
+
+impl Extend<Source> for Scope {
+    fn extend<I: IntoIterator<Item = Source>>(&mut self, sources: I) {
+        for source in sources {
+            self.push(source);
+        }
+    }
+}
+
+impl IntoIterator for Scope {
+    type Item = Source;
+    type IntoIter = std::vec::IntoIter<Source>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.sources.into_iter()
+    }
+}
+
+impl<'s> IntoIterator for &'s Scope {
+    type Item = &'s Source;
+    type IntoIter = std::slice::Iter<'s, Source>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.sources.iter()
+    }
+}
+
+impl PartialEq for Scope {
+    fn eq(&self, other: &Self) -> bool {
+        self.sources == other.sources
+    }
+}
 
 pub(super) fn table_scope(factor: &TableFactor, dialect: SqlDialect) -> Scope {
-    vec![table_source(factor, dialect)]
+    vec![table_source(factor, dialect)].into()
 }
 
 /// The one source a table factor of FROM gives.
@@ -287,8 +403,7 @@ pub(super) fn join_constraint(join: &Join) -> Option<&JoinConstraint> {
 pub(super) fn resolve(reference: &str, scope: &Scope) -> Table {
     let reference = reference.to_lowercase();
     scope
-        .iter()
-        .find(|source| source.reference == reference)
+        .find(&reference)
         .map_or(Table::Named(reference), |source| source.table.clone())
 }
 
@@ -510,7 +625,7 @@ impl<'a> Analyzer<'a> {
     /// An analyzer for a subquery of an expression: its names may refer to `scope`.
     pub(super) fn correlated(&self, scope: &Scope) -> Analyzer<'a> {
         let mut inner = self.clone();
-        inner.outer = Rc::new([scope.as_slice(), self.outer.as_slice()].concat());
+        inner.outer = Rc::new(Scope::from([&scope[..], &self.outer[..]].concat()));
         inner
     }
 
@@ -621,7 +736,7 @@ impl<'a> Analyzer<'a> {
                 } => {
                     // A LATERAL subquery reads the relations before it.
                     let mut inner = analyzer.clone();
-                    inner.outer = Rc::new([scope.as_slice(), analyzer.outer.as_slice()].concat());
+                    inner.outer = Rc::new(Scope::from([&scope[..], &analyzer.outer[..]].concat()));
                     // Without an alias its columns are no nodes a pin can name.
                     inner.tenant_sink = alias.as_ref().and_then(|_| inner.tenant_sink(subquery));
                     let mut columns = inner
@@ -647,7 +762,7 @@ impl<'a> Analyzer<'a> {
                     let entries = match other {
                         TableFactor::Table {
                             name, args: None, ..
-                        } if analyzer.is_system_catalog(name) => vec![opaque_source(other)],
+                        } if analyzer.is_system_catalog(name) => vec![opaque_source(other)].into(),
                         _ => table_scope(other, analyzer.dialect),
                     };
                     let name = match other {
@@ -1010,13 +1125,14 @@ mod tests {
 
     #[test]
     fn resolve_finds_an_alias_or_falls_back_to_the_name() {
-        let scope = vec![
+        let scope: Scope = vec![
             Source::named("u".into(), "users".into()),
             Source {
                 reference: "g".into(),
                 table: Table::Opaque("table function".into()),
             },
-        ];
+        ]
+        .into();
         assert_eq!(resolve("U", &scope), Table::Named("users".into()));
         assert_eq!(resolve("g", &scope), Table::Opaque("table function".into()));
         assert_eq!(resolve("Other", &scope), Table::Named("other".into()));

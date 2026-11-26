@@ -356,7 +356,7 @@ impl<'a> Analyzer<'a> {
                     Expr::QualifiedWildcard(name, _) => object_name(name).to_lowercase(),
                     _ => return Vec::new(),
                 };
-                if scope.iter().any(|source| source.reference == reference) {
+                if scope.reads(&reference) {
                     vec![reference]
                 } else {
                     Vec::new()
@@ -509,9 +509,7 @@ impl<'a> Analyzer<'a> {
             return None;
         };
         let reference = ident.value.to_lowercase();
-        if !scope.iter().any(|source| source.reference == reference)
-            || self.locate_column(expr, scope).is_some()
-        {
+        if !scope.reads(&reference) || self.locate_column(expr, scope).is_some() {
             return None;
         }
         let columns = self.star_columns(Some(&reference), scope)?;

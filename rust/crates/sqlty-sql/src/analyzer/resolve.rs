@@ -236,9 +236,7 @@ impl<'a> Analyzer<'a> {
                 let qualifier = lowercase(&parts[parts.len() - 2].value);
                 let column = folded(&parts[parts.len() - 1], self.dialect);
                 for sources in [scope, &*self.outer] {
-                    if let Some(source) =
-                        sources.iter().find(|source| source.reference == qualifier)
-                    {
+                    if let Some(source) = sources.find(&qualifier) {
                         let table = source.table.named()?;
                         let found = self.find_column(table, &column)?;
                         return Some(Resolved {
@@ -316,7 +314,7 @@ impl<'a> Analyzer<'a> {
                 generated: Some(expr),
                 ..
             }) => {
-                let scope = vec![Source::named(table.to_string(), table.to_string())];
+                let scope = Scope::from(vec![Source::named(table.to_string(), table.to_string())]);
                 self.nullability(expr, &scope, &Facts::default())
             }
             found => found.nullability(),
@@ -423,11 +421,7 @@ impl<'a> Analyzer<'a> {
             return None;
         }
         let name = fold(ident, self.dialect);
-        let key = scope
-            .iter()
-            .find(|source| source.reference == name)?
-            .table
-            .named()?;
+        let key = scope.find(&name)?.table.named()?;
         self.schema.table(key).map(|_| key)
     }
 
@@ -782,7 +776,7 @@ impl<'a> Analyzer<'a> {
             return self.diag.explain_silently();
         }
         if let Some(reference) = &reference {
-            if !scope.iter().any(|source| source.reference == *reference) {
+            if !scope.reads(reference) {
                 return self.diag.record_about(
                     Rule::UnknownTable,
                     format!("`{reference}` in `{reference}.*` is not a table or alias in the FROM clause"),

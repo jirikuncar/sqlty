@@ -337,6 +337,9 @@ impl<'a> Analyzer<'a> {
         for cond in conditions(select) {
             cases = both(cases, self.learn_cases(cond, true, scope));
         }
+        if !cases.iter().any(Learned::limits_values) && !facts.limits_values() {
+            return facts.with_cases(cases);
+        }
         // What all cases prove makes an outer join's row present, so its `CHECK`s hold.
         let proven = facts.with(merge(cases.clone()));
         facts.with_cases(self.checked(cases, scope, &proven))
@@ -718,10 +721,7 @@ impl<'a> Analyzer<'a> {
             return Learned::default();
         };
         let Ok((inner, sources)) = self.correlated(scope).scope_of(&select.from);
-        let outer = |reference: &String| {
-            !sources.iter().any(|source| source.reference == *reference)
-                && scope.iter().any(|source| source.reference == *reference)
-        };
+        let outer = |reference: &String| !sources.reads(reference) && scope.reads(reference);
         let learned = inner.learn(selection, true, &sources);
         Learned {
             columns: learned

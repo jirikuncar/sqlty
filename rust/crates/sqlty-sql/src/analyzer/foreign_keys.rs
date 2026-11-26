@@ -314,9 +314,7 @@ impl<'s> Analyzer<'s> {
         scope: &'r Scope,
         into: &mut Group<'s, 'r>,
     ) {
-        let Some(at) = relation_name(right)
-            .and_then(|name| scope.iter().position(|source| source.reference == name))
-        else {
+        let Some(at) = relation_name(right).and_then(|name| scope.position(&name)) else {
             return;
         };
         let qualified = |reference: &str, ident: &Ident| {
@@ -354,9 +352,7 @@ impl<'s> Analyzer<'s> {
         }
         let (found, column) = self.locate_table_column(expr, scope)?;
         let table = self.schema.catalog().table_id(&found.table)?;
-        let inner = scope
-            .iter()
-            .any(|source| source.reference == *found.reference);
+        let inner = scope.reads(&found.reference);
         Some(Located {
             outer: !inner,
             row: if inner && !subquery.is_empty() {
