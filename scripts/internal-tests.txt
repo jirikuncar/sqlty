@@ -8,8 +8,8 @@ sqlty-ext 10
 sqlty-format 11
 sqlty-lsp 44
 sqlty-project 34
-sqlty-python 206
+sqlty-python 207
 sqlty-rules 7
-sqlty-sql 419
+sqlty-sql 422
 sqlty-wasm 34
 python 60
