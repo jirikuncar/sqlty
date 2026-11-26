@@ -271,8 +271,9 @@ def test_npm_runs_the_binary_of_the_platform(tmp_path: Path) -> None:
     main = json.loads((modules / "@sqlty" / "cli" / "package.json").read_text())
     linux = json.loads((modules / "@sqlty" / "cli-linux-x64" / "package.json").read_text())
 
-    assert len(packages) == len(package_binaries.TARGETS) + 1
+    assert len(packages) == len(package_binaries.TARGETS) + 2
     assert main["version"] == "1.2.3"
+    assert json.loads((modules / "sqlty" / "package.json").read_text()) == {**main, "name": "sqlty"}
     assert set(main["optionalDependencies"].values()) == {"1.2.3"}
     assert (linux["os"], linux["cpu"], linux["files"]) == (["linux"], ["x64"], ["bin/sqlty"])
     readme = (modules / "@sqlty" / "cli-linux-x64" / "README.md").read_text()
