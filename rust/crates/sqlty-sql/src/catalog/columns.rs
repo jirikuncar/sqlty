@@ -331,14 +331,20 @@ fn expanded(expr: &Expr) -> Option<Expr> {
     })
 }
 
+const MAX_WHENS: usize = 32;
+
 /// A `CASE` that picks its arm by the value of one column, as the `OR` of each arm's values
-/// `AND` its result. A row takes the first arm it matches, so an arm leaves out the values
-/// of the ones before it, and a row no `WHEN` matches passes (`ELSE NULL`) or takes `ELSE`.
+/// `AND` its result, when no value is listed twice: a row takes the first arm it matches,
+/// and a row no `WHEN` matches passes (`ELSE NULL`) or takes `ELSE`. At most
+/// [`MAX_WHENS`] arms, which keeps the `OR` it becomes shallow.
 fn cased(
     operand: Option<&Expr>,
     conditions: &[CaseWhen],
     otherwise: Option<&Expr>,
 ) -> Option<Expr> {
+    if conditions.len() > MAX_WHENS {
+        return None;
+    }
     let mut column = operand.cloned();
     let mut seen = FxHashSet::default();
     let mut listed = Vec::new();
@@ -370,20 +376,16 @@ fn cased(
         {
             return None;
         }
-        let mut fresh = Vec::new();
-        for constant in constants {
-            let value = values::constant(&constant)?;
-            if seen.insert(value) {
-                fresh.push(constant.clone());
+        for constant in &constants {
+            if !seen.insert(values::constant(constant)?) {
+                return None;
             }
-            listed.push(constant);
         }
-        if !fresh.is_empty() {
-            arms.push(guarded(
-                in_list(&tested, fresh, false),
-                expanded(&when.result)?,
-            ));
-        }
+        listed.extend(constants.iter().cloned());
+        arms.push(guarded(
+            in_list(&tested, constants, false),
+            expanded(&when.result)?,
+        ));
     }
     let column = column?;
     let rest = in_list(&column, listed, true);

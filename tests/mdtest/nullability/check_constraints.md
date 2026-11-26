@@ -193,8 +193,8 @@ SELECT a FROM other WHERE kind = 'a'
 
 The same union can be written as a `CASE` on the discriminator, whose arms are the
 conditions each value requires, or with `num_nonnulls` and `num_nulls` in each arm. A row
-takes the first `WHEN` it matches, and one that matches none passes the `CHECK` when there
-is no `ELSE` (the `CASE` is NULL) or takes the `ELSE`.
+that matches no `WHEN` passes the `CHECK` when there is no `ELSE` (the `CASE` is NULL), or
+takes the `ELSE`.
 
 `forms.sql`:
 
@@ -215,7 +215,7 @@ CREATE TABLE searched (
     card_last4 TEXT,
     iban TEXT,
     CHECK (CASE WHEN kind = 'card' THEN card_last4 IS NOT NULL
-                WHEN kind IN ('iban', 'card') THEN iban IS NOT NULL END)
+                WHEN kind IN ('iban') THEN iban IS NOT NULL END)
 );
 CREATE TABLE counted (
     id SERIAL PRIMARY KEY,
@@ -237,6 +237,13 @@ CREATE TABLE mixed (
     CHECK (CASE lower(kind) WHEN 'c' THEN c IS NOT NULL END),
     CHECK (kind = 'd' AND num_nonnulls(a, b, c, d, id, kind) = 6 OR kind = 'e')
 );
+CREATE TABLE repeated (
+    id SERIAL PRIMARY KEY,
+    kind pay_kind NOT NULL,
+    x TEXT,
+    y TEXT,
+    CHECK (CASE kind WHEN 'card' THEN x IS NOT NULL WHEN 'card' THEN y IS NOT NULL END)
+);
 ```
 
 ```toml
@@ -253,8 +260,6 @@ SELECT card_last4, iban FROM simple WHERE kind = 'card'
 SELECT CASE kind WHEN 'iban' THEN iban ELSE 'none' END AS iban FROM simple
 -- inferred: tuple[str]
 ```
-
-The second `WHEN` of `searched` only matches `'iban'`: `'card'` took the first.
 
 ```sql
 SELECT card_last4, iban FROM searched WHERE kind = 'card'
@@ -286,8 +291,8 @@ SELECT iban FROM counted WHERE kind = 'iban'
 -- inferred: tuple[str | None]
 ```
 
-A `CASE` whose `WHEN`s test different columns or an expression, an arm of another shape,
-or a count over more than five columns is not read.
+A `CASE` whose `WHEN`s test different columns or an expression, or list a value twice, an
+arm of another shape, or a count over more than five columns is not read.
 
 ```sql
 SELECT a FROM mixed WHERE kind = 'a'
@@ -306,6 +311,11 @@ SELECT c FROM mixed WHERE kind = 'c'
 
 ```sql
 SELECT d FROM mixed WHERE kind = 'd'
+-- inferred: tuple[str | None]
+```
+
+```sql
+SELECT x FROM repeated WHERE kind = 'card'
 -- inferred: tuple[str | None]
 ```
 
