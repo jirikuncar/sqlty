@@ -958,30 +958,29 @@ impl<'a> Analyzer<'a> {
     /// also non-null where the others of a group a `CHECK` keeps one of are proven NULL
     /// (`CASE WHEN a IS NOT NULL THEN a ELSE b END`).
     fn column_nullability(&self, expr: &Expr, scope: &Scope, facts: &Facts) -> Nullability {
-        let Some((reference, table, column)) = self.locate_column(expr, scope) else {
+        let Some(resolved) = self.resolve_reference(expr, scope) else {
             return Nullability::Unknown;
         };
-        let nullability = facts.column(
-            &reference,
-            &column,
-            self.declared_nullability(&table, &column),
-        );
+        let declared = self.declared_nullability(&resolved);
+        let (reference, table, column) =
+            (&*resolved.reference, &*resolved.table, &*resolved.column);
+        let nullability = facts.column(reference, column, declared);
         if nullability == Nullability::NonNull
-            || facts.column(&reference, &column, Nullability::NonNull) != Nullability::NonNull
+            || facts.column(reference, column, Nullability::NonNull) != Nullability::NonNull
         {
             return nullability;
         }
         let mut columns: Vec<&str> = facts
             .null
             .iter()
-            .filter(|(r, _)| *r == reference)
+            .filter(|(r, _)| r == reference)
             .map(|(_, c)| c.as_str())
             .collect();
         if columns.is_empty() {
             return nullability;
         }
-        columns.push(&column);
-        if self.checked_non_null(&table, &columns) {
+        columns.push(column);
+        if self.checked_non_null(table, &columns) {
             Nullability::NonNull
         } else {
             nullability

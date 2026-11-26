@@ -5,11 +5,12 @@
 //! ambiguous column, a source the analyzer does not read. Names are only judged when a
 //! schema is configured; without one every table and column is unknown.
 
+use std::borrow::Cow;
 use std::rc::Rc;
 
 use sqlparser::ast::{Expr, Ident, TableFactor, TableWithJoins};
 
-use crate::catalog::fold;
+use crate::catalog::{fold, folded, lowercase};
 use crate::diagnostics::{NameDiagnostic, Rule};
 
 use super::dialect::SqlDialect;
@@ -17,7 +18,7 @@ use super::literals::value_set;
 use super::names::table_key;
 use super::nullability::{Facts, Nullability};
 use super::query::{Analyzer, Column};
-use super::scope::{relations, resolve, Scope, Source, Table};
+use super::scope::{relations, Scope, Source, Table};
 use super::suggest;
 use super::typed::Typed;
 use super::Candidate;
@@ -69,14 +70,14 @@ impl ColumnRef<'_> {
 }
 
 /// A column reference resolved to the source it reads.
-struct Resolved<'s> {
+pub(super) struct Resolved<'r> {
     /// The alias or table name the source is read by.
-    reference: String,
+    pub(super) reference: Cow<'r, str>,
     /// The key of the source's table.
-    table: String,
+    pub(super) table: Cow<'r, str>,
     /// The column, as the resolver names it (case folded).
-    column: String,
-    found: ColumnRef<'s>,
+    pub(super) column: Cow<'r, str>,
+    found: ColumnRef<'r>,
 }
 
 impl<'a> Analyzer<'a> {
@@ -212,31 +213,37 @@ impl<'a> Analyzer<'a> {
 
     /// The source a column reference reads and the column in it: its qualifier's source, else
     /// the first source having it, the FROM clause before enclosing queries.
-    fn resolve_reference(&self, expr: &Expr, scope: &Scope) -> Option<Resolved<'_>> {
+    pub(super) fn resolve_reference<'r>(
+        &'r self,
+        expr: &'r Expr,
+        scope: &'r Scope,
+    ) -> Option<Resolved<'r>> {
         match expr {
             Expr::Identifier(ident) => {
-                let column = fold(ident, self.dialect);
-                sources(scope, &self.outer).find_map(|source| {
-                    let found = self.find_column(source.table.named()?, &column)?;
-                    Some(Resolved {
-                        reference: source.reference.clone(),
-                        table: source.table.named()?.to_string(),
-                        column: column.clone(),
-                        found,
-                    })
+                let column = folded(ident, self.dialect);
+                let (source, table, found) = sources(scope, &self.outer).find_map(|source| {
+                    let table = source.table.named()?;
+                    Some((source, table, self.find_column(table, &column)?))
+                })?;
+                Some(Resolved {
+                    reference: Cow::Borrowed(&source.reference),
+                    table: Cow::Borrowed(table),
+                    column,
+                    found,
                 })
             }
             Expr::CompoundIdentifier(parts) if parts.len() >= 2 => {
-                let qualifier = parts[parts.len() - 2].value.to_lowercase();
-                let column = fold(&parts[parts.len() - 1], self.dialect);
-                for sources in [scope, &self.outer] {
-                    if sources.iter().any(|source| source.reference == qualifier) {
-                        let table = resolve(&qualifier, sources);
-                        let table = table.named()?;
+                let qualifier = lowercase(&parts[parts.len() - 2].value);
+                let column = folded(&parts[parts.len() - 1], self.dialect);
+                for sources in [scope, &*self.outer] {
+                    if let Some(source) =
+                        sources.iter().find(|source| source.reference == qualifier)
+                    {
+                        let table = source.table.named()?;
                         let found = self.find_column(table, &column)?;
                         return Some(Resolved {
-                            reference: qualifier,
-                            table: table.to_string(),
+                            reference: Cow::Borrowed(&source.reference),
+                            table: Cow::Borrowed(table),
                             column,
                             found,
                         });
@@ -272,7 +279,11 @@ impl<'a> Analyzer<'a> {
         scope: &Scope,
     ) -> Option<(String, String, String)> {
         let found = self.resolve_reference(expr, scope)?;
-        Some((found.reference, found.table, found.column))
+        Some((
+            found.reference.into_owned(),
+            found.table.into_owned(),
+            found.column.into_owned(),
+        ))
     }
 
     /// Whether `expr` reads a column of a source in `scope`, a schema table's or not.
@@ -292,29 +303,28 @@ impl<'a> Analyzer<'a> {
             return None;
         };
         Some((
-            found.reference,
-            found.table,
-            found.column,
+            found.reference.into_owned(),
+            found.table.into_owned(),
+            found.column.into_owned(),
             column.foreign_key,
         ))
     }
 
-    /// Whether the source says `column` of `table` can be NULL (see [`ColumnRef`]).
-    pub(super) fn declared_nullability(&self, table: &str, column: &str) -> Nullability {
-        match self.find_column(table, column) {
+    /// Whether the source of `resolved` says its column can be NULL (see [`ColumnRef`]).
+    pub(super) fn declared_nullability(&self, resolved: &Resolved<'_>) -> Nullability {
+        let (table, column) = (&*resolved.table, &*resolved.column);
+        match &resolved.found {
             // `CHECK (column IS NOT NULL)` or `CHECK (num_nulls(column, ...) = 0)`.
-            Some(ColumnRef::Schema(_)) if self.checked_non_null(table, &[column]) => {
-                Nullability::NonNull
-            }
-            Some(ColumnRef::Schema(SchemaColumn {
+            ColumnRef::Schema(_) if self.checked_non_null(table, &[column]) => Nullability::NonNull,
+            ColumnRef::Schema(SchemaColumn {
                 not_null: false,
                 generated: Some(expr),
                 ..
-            })) => {
+            }) => {
                 let scope = vec![Source::named(table.to_string(), table.to_string())];
                 self.nullability(expr, &scope, &Facts::default())
             }
-            found => found.map_or(Nullability::Unknown, |found| found.nullability()),
+            found => found.nullability(),
         }
     }
 
@@ -451,10 +461,10 @@ impl<'a> Analyzer<'a> {
     /// `ambiguous-column`: an unqualified column in more than one FROM source. Columns
     /// merged by `USING` (and every column of a `NATURAL` join) are single.
     fn check_ambiguous(&self, ident: &Ident, scope: &Scope) {
-        if !self.diag.enabled() || !self.judges_names() {
+        if scope.len() < 2 || !self.diag.enabled() || !self.judges_names() {
             return;
         }
-        let column = fold(ident, self.dialect);
+        let column = folded(ident, self.dialect);
         if self
             .merged
             .iter()

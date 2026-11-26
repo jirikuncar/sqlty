@@ -676,7 +676,10 @@ impl<'a> Analyzer<'a> {
                     format!("expression `{}` is not typed", shorten(&expr.to_string())),
                 );
             }
-            self.check_references(expr, scope);
+            // A bare column was checked by typing it.
+            if !matches!(expr, Expr::Identifier(_) | Expr::CompoundIdentifier(_)) {
+                self.check_references(expr, scope);
+            }
             let mut nullability = self.nullability(expr, scope, facts);
             // Not NULL whichever way the conditions hold: `COALESCE(a, c)` under
             // `a IS NOT NULL OR c IS NOT NULL`.
