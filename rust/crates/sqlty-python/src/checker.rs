@@ -626,6 +626,14 @@ impl Checker<'_> {
             }
             return;
         }
+        if let Some(form) = unchecked_form(annotated).filter(|_| !call.is_any(&self.any_calls)) {
+            self.report(
+                Rule::UncheckedRowType,
+                unchecked_message(annotated, form),
+                at,
+            );
+            return;
+        }
         let literals = self.rules.is_enabled(Rule::LiteralMismatch)
             || self.rules.is_enabled(Rule::RedundantLiteral);
         if !(annotated.starts_with("tuple[")
@@ -1023,8 +1031,25 @@ fn rename(text: &str, renamed: impl Fn(&str) -> Option<String>) -> String {
     out
 }
 
+/// What makes `row_type` a form sqlty cannot check against a query: `"a union"` or `"Annotated"`.
+pub(crate) fn unchecked_form(row_type: &str) -> Option<&'static str> {
+    let bare = row_type.strip_prefix("typing.").unwrap_or(row_type);
+    if split_top(row_type, '|').len() > 1 || bare.starts_with("Union[") {
+        Some("a union")
+    } else if bare.starts_with("Annotated[") {
+        Some("Annotated")
+    } else {
+        None
+    }
+}
+
+/// The `unchecked-row-type` message for the row type `written`, of the [`unchecked_form`] `form`.
+pub(crate) fn unchecked_message(written: &str, form: &str) -> String {
+    format!("row type {written} is {form}, which sqlty cannot check against the query")
+}
+
 /// `X` of a row type `X | None`, `None | X`, `Optional[X]` or `Union[X, None]`.
-fn without_none(row_type: &str) -> Option<&str> {
+pub(crate) fn without_none(row_type: &str) -> Option<&str> {
     let top = split_top(row_type, '|');
     let bare = row_type.strip_prefix("typing.").unwrap_or(row_type);
     let bare = if top.len() == 1 { bare } else { "" };
