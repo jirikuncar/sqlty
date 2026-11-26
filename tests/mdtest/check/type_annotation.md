@@ -289,3 +289,91 @@ from sqlty import SQL
 count = SQL[int]("--sql\nSELECT count(*)::INTEGER FROM users")
 unknown = SQL[int]("--sql\nSELECT $1")
 ```
+
+## Optional row types
+
+The `None` is reported and the rest is checked as the row type.
+
+```toml
+[tool.sqlty]
+dialect = "postgres"
+```
+
+```python
+import typing
+from typing import NamedTuple, Optional, TypedDict, Union
+from sqlty import SQL, SQLTemplate
+
+class User(TypedDict):
+    id: str
+
+class Pair(NamedTuple):
+    id: int
+    name: str
+
+# error: [column-type-mismatch] "User.id is str but query column 'id' infers int"
+# error: [optional-row] "SQL[User | None] should be SQL[User]: a row is never None"
+a = SQL[User | None]("--sql\nSELECT id::INTEGER FROM users")
+# error: [narrow-type] "SQL[tuple[str]] should be SQL[tuple[int]]"
+# error: [optional-row] "SQL[None | tuple[str]] should be SQL[tuple[str]]: a row is never None"
+b = SQL[None | tuple[str]]("--sql\nSELECT id::INTEGER FROM users")
+# error: [optional-row] "SQL[typing.Optional[tuple[int]]] should be SQL[tuple[int]]: a row is never None"
+c = SQL[typing.Optional[tuple[int]]]("--sql\nSELECT id::INTEGER FROM users")
+# error: [optional-row] "SQL[Union[Pair, None]] should be SQL[Pair]: a row is never None"
+d = SQL[Union[Pair, None]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
+# error: [optional-row] "SQL[Pair | None] should be SQL[Pair]: a row is never None"
+e = SQL["Pair | None"]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
+# error: [optional-row] "SQLTemplate[tuple[int] | None] should be SQLTemplate[tuple[int]]: a row is never None"
+f = SQLTemplate[tuple[int] | None](t"--sql\nSELECT id::INTEGER FROM users")
+# error: [narrow-type] "SQL[int] should be SQL[tuple[int]]: a row is never a single value"
+# error: [optional-row] "SQL[int | None] should be SQL[int]: a row is never None"
+g = SQL[int | None]("--sql\nSELECT id::INTEGER FROM users")
+```
+
+## Optional row types - not a single `None` member
+
+A `None` between other members, or one of a `Union` of several, is left as written.
+
+```toml
+[tool.sqlty]
+dialect = "postgres"
+```
+
+```python
+from typing import NamedTuple, Optional, Union
+from sqlty import SQL
+
+class Pair(NamedTuple):
+    id: int
+    name: str
+
+# error:
+a = SQL[Pair | None | tuple[int]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
+b = SQL[Union[Pair, tuple[int], None]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
+c = SQL[None]("--sql\nSELECT id::INTEGER FROM users")
+d = SQL[None | None]("--sql\nSELECT id::INTEGER FROM users")
+e = SQL[Optional[Pair] | tuple[int]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
+f = SQL[Union[None, Pair] | tuple[int]]("--sql\nSELECT id::INTEGER, name::TEXT FROM users")
+```
+
+## Optional row types - fix
+
+```toml
+[tool.sqlty]
+dialect = "postgres"
+```
+
+```python
+from typing import Optional
+from sqlty import SQL
+
+a = SQL["tuple[int] | None"]("--sql\nSELECT id::INTEGER FROM users")
+b = SQL[Optional[tuple[int]]]("--sql\nSELECT id::INTEGER FROM users")
+c = SQL[None | tuple[str]]("--sql\nSELECT id::INTEGER FROM users")
+# fixed: from typing import Optional
+# fixed: from sqlty import SQL
+# fixed:
+# fixed: a = SQL["tuple[int]"]("--sql\nSELECT id::INTEGER FROM users")
+# fixed: b = SQL[tuple[int]]("--sql\nSELECT id::INTEGER FROM users")
+# fixed: c = SQL[tuple[int]]("--sql\nSELECT id::INTEGER FROM users")
+```

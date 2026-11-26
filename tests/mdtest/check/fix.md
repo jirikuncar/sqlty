@@ -1,8 +1,8 @@
 # Fixes
 
 `sqlty check --fix` applies `core.fix_source()`: it wraps unwrapped queries,
-expands `SELECT *` from a schema, and refreshes stale `tuple[...]` and
-`UNTYPED` row types. Rules set to `"ignore"` are not fixed.
+expands `SELECT *` from a schema, refreshes stale `tuple[...]` and
+`UNTYPED` row types, and drops a `| None` from a row type. Rules set to `"ignore"` are not fixed.
 
 ## Stale tuple type is refreshed
 

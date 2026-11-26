@@ -61,6 +61,7 @@ stale-type = "error"
 | [`stale-rewrite`](rules/stale-rewrite.md) | Rewrite | warn | yes | --sql string not wrapped in SQL[T] |
 | [`stale-type`](rules/stale-type.md) | Rewrite | warn | yes | SQL[tuple[...]] wider than the inferred row type |
 | [`narrow-type`](rules/narrow-type.md) | Rewrite | error | yes | SQL[tuple[...]] doesn't admit every row the query returns |
+| [`optional-row`](rules/optional-row.md) | Rewrite | error | yes | SQL[X \| None]: a row is never None |
 | [`fstring-skipped`](rules/fstring-skipped.md) | Rewrite | warn | no | f-string with --sql cannot be rewritten |
 | [`tstring-skipped`](rules/tstring-skipped.md) | Rewrite | warn | no | t-string with --sql and a field that changes the SQL |
 | [`unchecked-query`](rules/unchecked-query.md) | Rewrite | warn | no | --sql query that is not plain string literals |

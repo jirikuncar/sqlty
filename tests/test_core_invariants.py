@@ -126,7 +126,7 @@ def test_fix_leaves_nothing_stale(source: str, options: core.Settings) -> None:
     stale = [
         d
         for d in core.check_source(fixed, options)
-        if d["rule"] in ("stale-rewrite", "stale-type", "narrow-type")
+        if d["rule"] in ("stale-rewrite", "stale-type", "narrow-type", "optional-row")
     ]
     assert not stale
 
