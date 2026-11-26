@@ -234,11 +234,16 @@ pub(super) fn read_statements<'a>(
                 )),
             }
         } else if postgres && stmt.creates("policy") {
-            if let Some(Statement::CreatePolicy(create)) =
-                parse_ddl(&stmt.sql(), dialect).and_then(|stmts| stmts.into_iter().next())
-            {
-                let table = parts(&create.table_name, dialect);
-                push(OpKind::Policy(table, Box::new(Change::Create(create))));
+            match parse_ddl(&stmt.sql(), dialect).and_then(|stmts| stmts.into_iter().next()) {
+                Some(Statement::CreatePolicy(create)) => {
+                    let table = parts(&create.table_name, dialect);
+                    push(OpKind::Policy(table, Box::new(Change::Create(create))));
+                }
+                _ => {
+                    skipped.push(("statement", statement_text(stmt)));
+                    let table = stmt.name_parts_after("on");
+                    push(OpKind::Policy(table, Box::new(Change::Unknown)));
+                }
             }
         } else if stmt.creates("index") {
             if let Some(Statement::CreateIndex(index)) =
@@ -329,6 +334,11 @@ pub(super) fn read_alter_or_drop(
             ("policy", Some(Statement::AlterPolicy(alter))) if dialect == SqlDialect::Postgres => {
                 let table = parts(&alter.table_name, dialect);
                 push(OpKind::Policy(table, Box::new(Change::Alter(alter))));
+            }
+            ("policy", _) if dialect == SqlDialect::Postgres => {
+                skipped.push(("statement", statement_text(stmt)));
+                let table = stmt.name_parts_after("on");
+                push(OpKind::Policy(table, Box::new(Change::Unknown)));
             }
             // A constraint added to or dropped from a domain changes the values it allows.
             ("domain", _) if action.iter().any(|w| w == "constraint") => {

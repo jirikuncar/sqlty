@@ -394,7 +394,7 @@ policies are forced and pin a tenant key for every command.
 schema = "rls.sql"
 
 [tool.sqlty.tenancy]
-columns = ["dropped.org_id"]
+columns = ["dropped.org_id", "dumped.owner"]
 session-functions = ["auth.uid"]
 ```
 
@@ -414,10 +414,19 @@ CREATE TABLE invoices (id SERIAL PRIMARY KEY, org_id INTEGER NOT NULL);
 ALTER TABLE invoices ENABLE ROW LEVEL SECURITY, FORCE ROW LEVEL SECURITY;
 CREATE POLICY tenant ON invoices FOR ALL USING (org_id = current_setting('app.org_id')::int) WITH CHECK (true);
 
+CREATE TABLE checked (id SERIAL PRIMARY KEY, org_id INTEGER NOT NULL);
+ALTER TABLE checked ENABLE ROW LEVEL SECURITY, FORCE ROW LEVEL SECURITY;
+CREATE POLICY tenant ON checked FOR ALL USING (org_id = current_setting('app.org_id')::int) WITH CHECK (org_id = current_setting('app.org_id')::int);
+
 CREATE TABLE notes (id SERIAL PRIMARY KEY, owner UUID NOT NULL, body TEXT);
 ALTER TABLE notes ENABLE ROW LEVEL SECURITY;
 ALTER TABLE notes FORCE ROW LEVEL SECURITY;
 CREATE POLICY own ON notes USING (owner = (SELECT auth.uid()));
+
+CREATE TABLE dumped (id SERIAL PRIMARY KEY, owner UUID NOT NULL);
+ALTER TABLE ONLY dumped FORCE ROW LEVEL SECURITY;
+ALTER TABLE dumped ENABLE ROW LEVEL SECURITY;
+CREATE POLICY own ON public.dumped USING ((owner = ( SELECT auth.uid() AS uid)));
 
 CREATE TABLE open_to_all (id SERIAL PRIMARY KEY, org_id INTEGER NOT NULL);
 ALTER TABLE open_to_all ENABLE ROW LEVEL SECURITY;
@@ -448,6 +457,9 @@ names = SQL[tuple[str]]("--sql\nSELECT name FROM projects")
 
 # error:
 narrowed = SQL[tuple[int]]("--sql\nSELECT id FROM narrowed")
+
+# error:
+checked = SQL[tuple[int]]("--sql\nSELECT id FROM checked")
 ```
 
 ### Policies the database does not enforce for every role or command
@@ -475,13 +487,17 @@ scoped = SQL[tuple[int]]("--sql\nSELECT id FROM unforced WHERE org_id = %s")
 ### Session functions
 
 `session-functions` names the functions a policy reads the session's tenant from, such
-as Supabase's `auth.uid()`.
+as Supabase's `auth.uid()`, also in the form `pg_dump` writes. `columns` makes
+`dumped.owner` a tenant key whether the policy pins it or not.
 
 ```python
 from sqlty import SQL
 
 # error:
 notes = SQL[tuple[str | None]]("--sql\nSELECT body FROM notes")
+
+# error:
+dumped = SQL[tuple[int]]("--sql\nSELECT id FROM dumped")
 ```
 
 ### ALTER POLICY

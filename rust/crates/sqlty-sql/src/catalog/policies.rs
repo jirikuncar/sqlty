@@ -30,11 +30,13 @@ pub(super) struct Policy {
     with_check: Option<Expr>,
 }
 
-/// A `CREATE`, `ALTER` or `DROP POLICY` (by name).
+/// A `CREATE`, `ALTER` or `DROP POLICY` (by name), or a policy statement sqlparser does
+/// not read, which may let any row through.
 pub(super) enum Change {
     Create(CreatePolicy),
     Alter(AlterPolicy),
     Drop(Ident),
+    Unknown,
 }
 
 /// Applies a `CREATE`, `ALTER` or `DROP POLICY` to the policies of its table.
@@ -76,6 +78,14 @@ pub(super) fn apply(policies: &mut Vec<Policy>, change: &Change, dialect: SqlDia
             let name = fold(name, dialect);
             policies.retain(|policy| policy.name != name);
         }
+        Change::Unknown => policies.push(Policy {
+            name: String::new(),
+            restrictive: false,
+            command: None,
+            public: true,
+            using: None,
+            with_check: None,
+        }),
     }
 }
 
@@ -90,8 +100,8 @@ fn is_public(to: Option<&[Owner]>) -> bool {
 pub(super) fn drop_column(policies: &mut Vec<Policy>, column: &str, dialect: SqlDialect) {
     policies.retain(|policy| {
         let reads = |expr: &Option<Expr>| {
-            visit_expressions(expr, |expr| match expr {
-                Expr::Identifier(ident) if fold(ident, dialect) == column => ControlFlow::Break(()),
+            visit_expressions(expr, |expr| match last_ident(expr) {
+                Some(ident) if fold(ident, dialect) == column => ControlFlow::Break(()),
                 _ => ControlFlow::Continue(()),
             })
             .is_break()
@@ -107,10 +117,13 @@ pub(super) fn rename_column(policies: &mut [Policy], old: &str, new: &str, diale
         .flat_map(|policy| [&mut policy.using, &mut policy.with_check])
     {
         let _ = visit_expressions_mut(expr, |expr| {
-            if let Expr::Identifier(ident) = expr {
-                if fold(ident, dialect) == old {
-                    *ident = Ident::new(new);
-                }
+            let ident = match expr {
+                Expr::Identifier(ident) => Some(ident),
+                Expr::CompoundIdentifier(parts) => parts.last_mut(),
+                _ => None,
+            };
+            if let Some(ident) = ident.filter(|ident| fold(ident, dialect) == old) {
+                *ident = Ident::with_quote('"', new);
             }
             ControlFlow::<()>::Continue(())
         });
@@ -185,8 +198,14 @@ fn pinned(expr: &Expr, functions: &[String]) -> Vec<String> {
 }
 
 fn column(expr: &Expr) -> Option<String> {
-    match uncast(expr) {
-        Expr::Identifier(ident) => Some(fold(ident, SqlDialect::Postgres)),
+    last_ident(uncast(expr)).map(|ident| fold(ident, SqlDialect::Postgres))
+}
+
+/// The column a plain or qualified name reads: `org_id`, `t.org_id`.
+fn last_ident(expr: &Expr) -> Option<&Ident> {
+    match expr {
+        Expr::Identifier(ident) => Some(ident),
+        Expr::CompoundIdentifier(parts) => parts.last(),
         _ => None,
     }
 }
@@ -210,7 +229,7 @@ fn is_session(expr: &Expr, functions: &[String]) -> bool {
         }
         Expr::Subquery(query) => match query.body.as_ref() {
             SetExpr::Select(select) if select.from.is_empty() && select.projection.len() == 1 => {
-                matches!(&select.projection[0], SelectItem::UnnamedExpr(expr) if is_session(expr, functions))
+                matches!(&select.projection[0], SelectItem::UnnamedExpr(expr) | SelectItem::ExprWithAlias { expr, .. } if is_session(expr, functions))
             }
             _ => false,
         },

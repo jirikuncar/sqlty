@@ -1218,6 +1218,19 @@ fn tenant_scope_reads_row_level_security_policies() {
         rls("supabase", "CREATE POLICY a ON supabase USING (owner = (SELECT auth.uid()) AND org_id = (SELECT 1) AND id = 'x' AND org_id = (VALUES (1)));
             ALTER TABLE supabase RENAME COLUMN owner TO user_id;
             ALTER TABLE supabase RENAME COLUMN id TO key;"),
+        rls("unread", &format!(
+            "CREATE POLICY a ON unread USING (org_id = {tenant});
+            CREATE POLICY b ON unread USING (id = ANY (SELECT 1 WINDOW w AS ()));"
+        )),
+        rls("unread_alter", &format!(
+            "CREATE POLICY a ON unread_alter USING (unread_alter.org_id = {tenant});
+            ALTER POLICY a ON unread_alter USING (id = ANY (SELECT 1 WINDOW w AS ()));"
+        )),
+        rls("quoted", &format!(
+            "CREATE POLICY a ON quoted USING (quoted.org_id = {tenant} AND owner = (SELECT auth.uid() AS uid));
+            ALTER TABLE quoted RENAME COLUMN org_id TO \"OrgId\";
+            ALTER TABLE quoted NO FORCE ROW LEVEL SECURITY;"
+        )),
         "CREATE TABLE soft (id INT, owner TEXT);
             CREATE POLICY a ON soft USING (owner = auth.uid()::text);".to_string(),
     ]
@@ -1257,4 +1270,13 @@ fn tenant_scope_reads_row_level_security_policies() {
     assert_eq!(found("DELETE FROM users"), Vec::<String>::new());
     assert_eq!(found("SELECT key FROM supabase"), Vec::<String>::new());
     assert_eq!(found("SELECT id FROM soft"), read("soft", "owner"));
+    assert_eq!(found("SELECT id FROM unread"), read("unread", "org_id"));
+    assert_eq!(
+        found("SELECT id FROM unread_alter"),
+        read("unread_alter", "org_id")
+    );
+    assert_eq!(
+        found("SELECT id FROM quoted"),
+        ["`quoted` is read without `quoted.OrgId = <parameter>` or `quoted.owner = <parameter>`"]
+    );
 }
