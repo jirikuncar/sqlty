@@ -2,7 +2,7 @@
 
 import sys
 from string.templatelib import Template
-from typing import TYPE_CHECKING, Any, NamedTuple, get_args, overload
+from typing import TYPE_CHECKING, Any, Generic, NamedTuple, TypeVar, get_args, overload
 
 if sys.version_info >= (3, 15):
     from typing import TypedDict, TypeForm
@@ -27,8 +27,12 @@ def __getattr__(name: str) -> str:
 
 __all__ = ["SQL", "UNTYPED", "Bound", "NoParams", "SQLTemplate", "row_form"]
 
+# PEP 695 infers variance, and mypy and pyright infer these invariant.
+R_co = TypeVar("R_co", covariant=True)
+P_contra = TypeVar("P_contra", contravariant=True, default=Any)
 
-class SQL[R, P = Any](str):
+
+class SQL(str, Generic[R_co, P_contra]):  # noqa: UP046
     """A query whose rows are ``R`` and whose parameters are ``P``.
 
     ``P`` defaults to ``Any``, so ``SQL[R]`` takes any parameters. A query is typed like a
@@ -43,9 +47,9 @@ class SQL[R, P = Any](str):
 
     if TYPE_CHECKING:
 
-        def __sqlty_row__(self) -> R: ...
+        def __sqlty_row__(self) -> R_co: ...
 
-    def bind(self, params: P, /) -> Bound[R]:
+    def bind(self, params: P_contra, /) -> Bound[R_co]:
         """The query with ``params``, checked against ``P``: ``cursor.execute(*bound)`` runs it."""
         return Bound(self, params)
 
@@ -58,10 +62,10 @@ type NoParams = tuple[()] | _NoKeys
 """Parameters of a query without placeholders, ``SQL[R, NoParams]``: ``()`` or ``{}``."""
 
 
-class Bound[R](NamedTuple):
+class Bound(NamedTuple, Generic[R_co]):  # noqa: UP046
     """A query and its parameters, from ``SQL.bind``."""
 
-    query: SQL[R]
+    query: SQL[R_co]
     params: Any
 
 
