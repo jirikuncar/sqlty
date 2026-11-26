@@ -382,6 +382,11 @@ def test_params(sql: str, params: list[tuple[int, str | None, bool | None]]) -> 
     found = _core.analyze_params(sql, dialect="postgres", schema_sql=PARAMS_SCHEMA)
     assert found is not None
     assert [(index, python, nullable) for index, _, python, _, nullable, *_ in found] == params
+    columns = _core.analyze_select(sql, dialect="postgres", schema_sql=PARAMS_SCHEMA)
+    assert _core.analyze_query(sql, dialect="postgres", schema_sql=PARAMS_SCHEMA) == (
+        columns,
+        found,
+    )
 
 
 # fmt: off
