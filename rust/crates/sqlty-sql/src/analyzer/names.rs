@@ -25,17 +25,19 @@ pub(super) fn table_key(name: &ObjectName, dialect: SqlDialect) -> Cow<'_, str> 
     let idents = || name.0.iter().filter_map(|part| part.as_ident());
     let skip = idents().count().saturating_sub(2);
     let mut parts = idents().skip(skip);
-    let Some(first) = parts.next() else {
-        return Cow::Borrowed("");
-    };
-    let Some(second) = parts.next() else {
-        return folded(first, dialect);
-    };
-    let mut key = String::with_capacity(first.value.len() + second.value.len() + 1);
-    key.push_str(&folded(first, dialect));
-    key.push('.');
-    key.push_str(&folded(second, dialect));
-    Cow::Owned(key)
+    match (parts.next(), parts.next()) {
+        (Some(name), None) => folded(name, dialect),
+        (schema, name) => {
+            let mut key = String::new();
+            for (at, ident) in schema.into_iter().chain(name).enumerate() {
+                if at > 0 {
+                    key.push('.');
+                }
+                key.push_str(&folded(ident, dialect));
+            }
+            Cow::Owned(key)
+        }
+    }
 }
 
 /// PostgreSQL's name for an unquoted identifier is lowercase.
