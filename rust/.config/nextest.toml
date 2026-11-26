@@ -1,0 +1,6 @@
+# Per-test times for scripts/slowest.py, at target/nextest/default/junit.xml.
+[profile.default]
+slow-timeout = "10s"
+
+[profile.default.junit]
+path = "junit.xml"

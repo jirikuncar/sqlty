@@ -57,6 +57,17 @@ pub(super) struct Learned {
     null: HashSet<(String, String)>,
 }
 
+/// `into` with `other` added, moving the smaller set into the larger.
+fn extend_set<T: Eq + std::hash::Hash, S: std::hash::BuildHasher>(
+    into: &mut HashSet<T, S>,
+    mut other: HashSet<T, S>,
+) {
+    if other.len() > into.len() {
+        std::mem::swap(into, &mut other);
+    }
+    into.extend(other);
+}
+
 /// The values a column of a relation is limited to.
 pub(super) type ColumnValues = (String, String, Vec<Value>);
 
@@ -114,10 +125,10 @@ impl Learned {
     }
 
     fn union(mut self, other: Learned) -> Learned {
-        self.columns.extend(other.columns);
-        self.present.extend(other.present);
-        self.exprs.extend(other.exprs);
-        self.null.extend(other.null);
+        extend_set(&mut self.columns, other.columns);
+        extend_set(&mut self.present, other.present);
+        extend_set(&mut self.exprs, other.exprs);
+        extend_set(&mut self.null, other.null);
         restrict(&mut self.values, other.values);
         self
     }
