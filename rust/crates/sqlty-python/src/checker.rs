@@ -569,7 +569,23 @@ impl Checker<'_> {
 
     /// `untyped-query`, `stale-type` and the literal rules, against the inferred row type.
     fn annotation(&mut self, call: &Call, sql_content: &str, query: &str, at: &At) {
-        let annotated = call.row_type(self.scan.source());
+        let written = call.row_type(self.scan.source());
+        let annotated = without_none(written).unwrap_or(written);
+        if annotated != written {
+            let wrapper = if call.template { "SQLTemplate" } else { "SQL" };
+            let source = &self.scan.source()[call.annotation.clone()];
+            self.report_fix(
+                Rule::OptionalRow,
+                format!(
+                    "{wrapper}[{written}] should be {wrapper}[{annotated}]: a row is never None"
+                ),
+                at,
+                vec![Edit::new(
+                    call.annotation.clone(),
+                    source.replacen(written, annotated, 1),
+                )],
+            );
+        }
         let wrapper = if call.template {
             self.options.style.template_name()
         } else {
@@ -878,7 +894,10 @@ pub(crate) fn wrapped_queries(scan: &Scan<'_>) -> Vec<WrappedQuery> {
             });
             (
                 scan.lines.line_at(call.span.start),
-                call.row_type(source).to_string(),
+                {
+                    let written = call.row_type(source);
+                    without_none(written).unwrap_or(written).to_string()
+                },
                 query,
                 (call.annotation.start, call.annotation.end),
             )
@@ -1002,6 +1021,42 @@ fn rename(text: &str, renamed: impl Fn(&str) -> Option<String>) -> String {
         }
     }
     out
+}
+
+/// `X` of a row type `X | None`, `None | X`, `Optional[X]` or `Union[X, None]`.
+fn without_none(row_type: &str) -> Option<&str> {
+    let top = split_top(row_type, '|');
+    let bare = row_type.strip_prefix("typing.").unwrap_or(row_type);
+    let bare = if top.len() == 1 { bare } else { "" };
+    if let Some(inner) = bare
+        .strip_prefix("Optional[")
+        .and_then(|rest| rest.strip_suffix(']'))
+    {
+        return Some(inner.trim());
+    }
+    let (members, sep) = match bare
+        .strip_prefix("Union[")
+        .and_then(|rest| rest.strip_suffix(']'))
+    {
+        Some(inner) => (split_top(inner, ','), ','),
+        None => (top, '|'),
+    };
+    let [first, .., last] = members.as_slice() else {
+        return None;
+    };
+    let kept = if *last == "None" {
+        &members[..members.len() - 1]
+    } else if *first == "None" {
+        &members[1..]
+    } else {
+        return None;
+    };
+    if kept.contains(&"None") || (sep == ',' && kept.len() > 1) {
+        return None;
+    }
+    let (head, tail) = (kept[0], kept[kept.len() - 1]);
+    let offset = |member: &str| member.as_ptr() as usize - row_type.as_ptr() as usize;
+    Some(&row_type[offset(head)..offset(tail) + tail.len()])
 }
 
 /// `text` split at `sep` outside brackets and quotes.
