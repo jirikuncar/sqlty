@@ -68,7 +68,7 @@ end
 
 
 def npm(version: str, binaries: Path, out: Path) -> list[Path]:
-    """Write the ``sqlty`` package and one package per platform to ``out``."""
+    """Write the ``@sqlty/cli`` package and one package per platform to ``out``."""
     main = json.loads((ROOT / "npm/sqlty/package.json").read_text())
     written = []
     for target, (platform, arch) in TARGETS.items():
@@ -95,7 +95,7 @@ def npm(version: str, binaries: Path, out: Path) -> list[Path]:
         shutil.copy2(ROOT / "LICENSE", package / "LICENSE")
         main["optionalDependencies"][name] = version
         written.append(package)
-    package = out / "sqlty"
+    package = out / "@sqlty/cli"
     shutil.copytree(ROOT / "npm/sqlty", package)
     shutil.copy2(ROOT / "LICENSE", package / "LICENSE")
     main["version"] = version

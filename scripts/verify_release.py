@@ -6,8 +6,8 @@
 
 The release workflow runs it on every supported platform once the packages are out.
 ``pypi`` installs the wheel for each interpreter given (``--only-binary``: a platform
-without a wheel fails instead of building the sdist), ``npm`` the ``@sqlty/cli-*`` package
-of this platform and ``@sqlty/wasm``, and ``homebrew`` the formula of the tap. Each
+without a wheel fails instead of building the sdist), ``npm`` ``@sqlty/cli`` (with the
+``@sqlty/cli-*`` package of this platform) and ``@sqlty/wasm``, and ``homebrew`` the formula of the tap. Each
 installed ``sqlty`` runs ``version``, ``rewrite`` and ``check`` on a small module.
 """
 
@@ -125,10 +125,13 @@ def npm(version: str, work: Path) -> None:
     (work / "package.json").write_text("{}\n")
     install(
         tool("npm"), "install", "--no-audit", "--no-fund",
-        f"{package}@{version}", f"@sqlty/wasm@{version}", cwd=work,
+        f"@sqlty/cli@{version}", f"@sqlty/wasm@{version}", cwd=work,
     )  # fmt: skip
     executable = "sqlty.exe" if platform.startswith("win32") else "sqlty"
     smoke(work / "node_modules" / package / "bin" / executable, version, work)
+    found = run(node, work / "node_modules/@sqlty/cli/bin/sqlty.js", "version").strip()
+    if found != f"sqlty {version}":
+        sys.exit(f"npx @sqlty/cli version: {found}")
     script = WASM
     for name, value in (("VERSION", version), ("QUERY", QUERY), ("REWRITTEN", REWRITTEN)):
         script = script.replace(name, json.dumps(value))

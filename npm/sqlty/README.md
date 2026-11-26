@@ -9,7 +9,7 @@ Type-safe raw SQL for Python: row and parameter types inferred from your SQL and
 schema, no ORM or database needed.
 
 ```console
-npx sqlty check
+npx @sqlty/cli check
 ```
 
 This package runs the native `sqlty` executable built for your platform. It reads
