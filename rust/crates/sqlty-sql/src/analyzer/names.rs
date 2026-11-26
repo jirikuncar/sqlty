@@ -24,7 +24,8 @@ pub(super) fn object_name(name: &ObjectName) -> String {
 pub(super) fn table_key(name: &ObjectName, dialect: SqlDialect) -> String {
     let idents = || name.0.iter().filter_map(|part| part.as_ident());
     let skip = idents().count().saturating_sub(2);
-    let mut key = String::new();
+    let mut key =
+        String::with_capacity(idents().skip(skip).map(|ident| ident.value.len() + 1).sum());
     for (at, ident) in idents().skip(skip).enumerate() {
         if at > 0 {
             key.push('.');
