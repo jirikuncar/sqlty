@@ -5,7 +5,7 @@ use std::borrow::Cow;
 use sqlparser::ast::TrimWhereField;
 use sqlparser::ast::{AccessExpr, DataType, Expr, Ident, ObjectName, Query, SelectItem};
 
-use crate::catalog::fold;
+use crate::catalog::folded;
 
 use super::dialect::SqlDialect;
 use super::query::leftmost_select;
@@ -22,13 +22,17 @@ pub(super) fn object_name(name: &ObjectName) -> String {
 /// The key a table reference is looked up by: `schema.name` when qualified, else `name`,
 /// each part folded as the dialect does (PostgreSQL keeps quoted case).
 pub(super) fn table_key(name: &ObjectName, dialect: SqlDialect) -> String {
-    let parts: Vec<String> = name
-        .0
-        .iter()
-        .filter_map(|part| part.as_ident())
-        .map(|ident| fold(ident, dialect))
-        .collect();
-    parts[parts.len().saturating_sub(2)..].join(".")
+    let idents = || name.0.iter().filter_map(|part| part.as_ident());
+    let skip = idents().count().saturating_sub(2);
+    let mut key =
+        String::with_capacity(idents().skip(skip).map(|ident| ident.value.len() + 1).sum());
+    for (at, ident) in idents().skip(skip).enumerate() {
+        if at > 0 {
+            key.push('.');
+        }
+        key.push_str(&folded(ident, dialect));
+    }
+    key
 }
 
 /// PostgreSQL's name for an unquoted identifier is lowercase.

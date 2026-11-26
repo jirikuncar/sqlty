@@ -46,7 +46,7 @@ pub(crate) use index::visited;
 pub use index::{Columns, NameRef, RelationKind, RelationRef};
 pub use joins::Join;
 pub(crate) use lookup::Lookup;
-pub(crate) use names::fold;
+pub(crate) use names::{fold, folded, lowercase};
 pub(crate) use read::{load, load_with};
 
 use rustc_hash::FxHashMap;
@@ -171,29 +171,36 @@ struct TableRelation {
     /// The bytes of the latest statement that changed `row_security` or `force_row_security`.
     row_security_at: Range<usize>,
     policies: Vec<policies::Policy>,
-    /// Positions in `columns`, by name and then position, so that a column is found in
-    /// O(log width).
-    by_name: Vec<u32>,
+    /// `(hash of the name, position in columns)`, sorted, so that a column is found in
+    /// O(log width) integer comparisons and one of names.
+    by_name: Vec<(u32, u32)>,
+}
+
+fn name_hash(name: &str) -> u32 {
+    let mut hasher = rustc_hash::FxHasher::default();
+    std::hash::Hash::hash(name, &mut hasher);
+    std::hash::Hasher::finish(&hasher) as u32
 }
 
 impl TableRelation {
     fn indexed(mut self) -> Self {
-        let mut by_name: Vec<u32> = (0..self.columns.len() as u32).collect();
-        by_name.sort_by(|&a, &b| {
-            self.columns[a as usize]
-                .name
-                .cmp(&self.columns[b as usize].name)
-        });
+        let mut by_name: Vec<(u32, u32)> = (0..self.columns.len() as u32)
+            .map(|at| (name_hash(&self.columns[at as usize].name), at))
+            .collect();
+        by_name.sort_unstable();
         self.by_name = by_name;
         self
     }
 
+    /// The first column named `name`.
     fn column(&self, name: &str) -> Option<&SchemaColumn> {
-        let at = self
-            .by_name
-            .partition_point(|&i| self.columns[i as usize].name.as_str() < name);
-        let column = &self.columns[*self.by_name.get(at)? as usize];
-        (column.name == name).then_some(column)
+        let hash = name_hash(name);
+        let at = self.by_name.partition_point(|&(h, _)| h < hash);
+        self.by_name[at..]
+            .iter()
+            .take_while(|&&(h, _)| h == hash)
+            .map(|&(_, at)| &self.columns[at as usize])
+            .find(|column| column.name == name)
     }
 }
 

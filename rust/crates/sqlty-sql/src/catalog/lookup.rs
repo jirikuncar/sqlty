@@ -50,6 +50,8 @@ impl<'a> Lookup<'a> {
     /// The column `column` of the table `name`: `None` when `table` would be, `Some(None)`
     /// when the table has no such column.
     pub(crate) fn column(&self, name: &str, column: &str) -> Option<Option<&'a SchemaColumn>> {
+        #[cfg(test)]
+        tests::COLUMNS.with(|count| count.set(count.get() + 1));
         match self.find(name)? {
             Relation::Table(table) => Some(table.column(column)),
             _ => None,
@@ -103,22 +105,36 @@ impl Deref for Lookup<'_> {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use crate::analyzer::{analyze_select, load_schema};
+    use std::cell::Cell;
+
+    use crate::analyzer::{analyze_with_diagnostics, load_schema};
     use crate::catalog::visited;
 
+    thread_local! {
+        /// How many columns [`super::Lookup::column`] looked up on this thread.
+        pub(super) static COLUMNS: Cell<usize> = const { Cell::new(0) };
+    }
+
     #[test]
-    fn an_analysis_finds_each_table_once_whatever_it_reads_of_it() {
-        let columns: Vec<String> = (0..32).map(|i| format!("c{i}")).collect();
+    fn an_analysis_finds_each_table_once_and_each_selected_column_twice() {
+        let columns: Vec<String> = (0..64).map(|i| format!("c{i}")).collect();
         let schema = load_schema(
             &format!("CREATE TABLE t ({} INTEGER);", columns.join(" INTEGER, ")),
             "postgres",
         );
         let lookups = |n: usize| {
             let sql = format!("SELECT {} FROM t WHERE c0 = 1", columns[..n].join(", "));
-            visited(|| {
-                analyze_select(&sql, "postgres", Some(&schema)).unwrap();
-            })
+            COLUMNS.with(|count| count.set(0));
+            let tables = visited(|| {
+                analyze_with_diagnostics(&sql, "postgres", Some(&schema));
+            });
+            (tables, COLUMNS.with(Cell::get))
         };
-        assert_eq!(lookups(1), lookups(32));
+        let (one, _) = lookups(1);
+        let (tables, half) = lookups(32);
+        let (_, all) = lookups(64);
+        assert_eq!(one, tables);
+        // Once for its type, once for its nullability.
+        assert_eq!(all - half, 2 * 32);
     }
 }

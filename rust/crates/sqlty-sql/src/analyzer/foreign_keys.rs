@@ -9,6 +9,7 @@
 //!
 //! The comparisons read here are judged by `entity-mismatch` too (see `entities.rs`).
 
+use std::cell::LazyCell;
 use std::collections::HashMap;
 use std::ops::ControlFlow;
 
@@ -196,17 +197,19 @@ impl<'s> Analyzer<'s> {
             subqueries: 0,
             groups: Vec::new(),
         };
-        let projected: Vec<(String, String)> = select
-            .projection
-            .iter()
-            .filter_map(|item| match item {
-                SelectItem::UnnamedExpr(expr) | SelectItem::ExprWithAlias { expr, .. } => {
-                    let column = self.locate(expr, scope, "")?;
-                    Some((column.row, column.name))
-                }
-                _ => None,
-            })
-            .collect();
+        let projected = LazyCell::new(|| {
+            select
+                .projection
+                .iter()
+                .filter_map(|item| match item {
+                    SelectItem::UnnamedExpr(expr) | SelectItem::ExprWithAlias { expr, .. } => {
+                        let column = self.locate(expr, scope, "")?;
+                        Some((column.row, column.name))
+                    }
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        });
         let mut all = Group::default();
         for (using, right) in &usings {
             self.using_comparisons(using, right, scope, &mut all);
@@ -371,7 +374,11 @@ impl<'s> Analyzer<'s> {
     /// Each composite key of a row compared with its referenced columns: all of them, of
     /// one row. A key column and its referenced column both equal to a constant or
     /// parameter count as compared.
-    fn judge_composites(&self, group: &Group<'s>, projected: &[(String, String)]) {
+    fn judge_composites(
+        &self,
+        group: &Group<'s>,
+        projected: &LazyCell<Vec<(String, String)>, impl FnOnce() -> Vec<(String, String)>>,
+    ) {
         let mut matches: Vec<Match> = Vec::new();
         let pairs = group.pairs.iter().enumerate();
         for (index, pair) in pairs.filter_map(|(i, c)| Some((i, c.keys.as_ref()?))) {

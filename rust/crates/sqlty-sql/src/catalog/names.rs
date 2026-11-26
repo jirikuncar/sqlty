@@ -3,7 +3,7 @@
 //! A key is `schema.name` in PostgreSQL and `name` elsewhere. Nothing here reads a
 //! [`super::Catalog`] or a loader; it only turns identifiers into keys.
 
-use std::borrow::Borrow;
+use std::borrow::{Borrow, Cow};
 use std::hash::Hash;
 
 use rustc_hash::FxHashMap;
@@ -57,10 +57,27 @@ pub(super) fn type_key(dt: &DataType, dialect: SqlDialect) -> Option<String> {
 /// An identifier as the dialect keys it. PostgreSQL folds an unquoted name to lower case and
 /// keeps a quoted one exactly; MySQL and SQLite compare names case-insensitively.
 pub(crate) fn fold(ident: &Ident, dialect: SqlDialect) -> String {
+    folded(ident, dialect).into_owned()
+}
+
+/// [`fold`], borrowing the identifier when folding leaves it as it is.
+pub(crate) fn folded(ident: &Ident, dialect: SqlDialect) -> Cow<'_, str> {
     if dialect == SqlDialect::Postgres && ident.quote_style.is_some() {
-        ident.value.clone()
+        Cow::Borrowed(&ident.value)
     } else {
-        ident.value.to_lowercase()
+        lowercase(&ident.value)
+    }
+}
+
+/// `text` in lower case, borrowed when it already is.
+pub(crate) fn lowercase(text: &str) -> Cow<'_, str> {
+    if text
+        .bytes()
+        .any(|byte| byte.is_ascii_uppercase() || !byte.is_ascii())
+    {
+        Cow::Owned(text.to_lowercase())
+    } else {
+        Cow::Borrowed(text)
     }
 }
 

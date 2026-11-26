@@ -8,6 +8,7 @@
 
 use std::ops::ControlFlow;
 
+use rustc_hash::{FxHashMap, FxHashSet};
 use sqlparser::ast::{
     Expr, GroupByExpr, Query, Select, SelectItem, SelectItemQualifiedWildcardKind, Value, Visit,
     Visitor,
@@ -63,11 +64,17 @@ impl Analyzer<'_> {
                     if let Some(item) =
                         position.and_then(|n| select.projection.get(n.wrapping_sub(1)))
                     {
-                        grouped.items.push(item as *const SelectItem);
+                        grouped.items.insert(item as *const SelectItem);
                     }
                 }
-                key => match self.locate_column(key, scope) {
-                    Some((reference, _, column)) => grouped.columns.push((reference, column)),
+                key => match self.resolve_reference(key, scope) {
+                    Some(found) => {
+                        grouped
+                            .columns
+                            .entry(found.reference.into_owned())
+                            .or_default()
+                            .insert(found.column.into_owned());
+                    }
                     None => {
                         if let Expr::Identifier(alias) = key {
                             grouped.items.extend(select.projection.iter().filter_map(|item| {
@@ -75,7 +82,7 @@ impl Analyzer<'_> {
                                     .then_some(item as *const SelectItem)
                             }));
                         }
-                        grouped.expressions.push(key.to_string());
+                        grouped.expressions.insert(key.to_string());
                     }
                 },
             }
@@ -169,20 +176,20 @@ impl Analyzer<'_> {
 impl Grouped {
     fn covers(&self, reference: &str, column: &str) -> bool {
         self.columns
-            .iter()
-            .any(|(r, c)| r == reference && c == column)
+            .get(reference)
+            .is_some_and(|columns| columns.contains(column))
     }
 }
 
 /// What the grouping keys of a query cover.
 #[derive(Default)]
 struct Grouped {
-    /// Columns, as `(reference, column)`.
-    columns: Vec<(String, String)>,
+    /// Columns, by reference.
+    columns: FxHashMap<String, FxHashSet<String>>,
     /// Other key expressions, as SQL text.
-    expressions: Vec<String>,
+    expressions: FxHashSet<String>,
     /// Select items a key names by position or alias.
-    items: Vec<*const SelectItem>,
+    items: FxHashSet<*const SelectItem>,
 }
 
 /// Visits a select item, reporting each column outside aggregates, window functions,
@@ -214,7 +221,8 @@ impl Visitor for Ungrouped<'_, '_> {
             return ControlFlow::Continue(());
         }
         let skip = matches!(expr, Expr::Function(func) if func.over.is_some() || is_aggregate_call(expr))
-            || self.grouped.expressions.contains(&expr.to_string());
+            || (!self.grouped.expressions.is_empty()
+                && self.grouped.expressions.contains(&expr.to_string()));
         if skip {
             self.skipping.push(expr as *const Expr);
             return ControlFlow::Continue(());
@@ -222,7 +230,7 @@ impl Visitor for Ungrouped<'_, '_> {
         if !matches!(expr, Expr::Identifier(_) | Expr::CompoundIdentifier(_)) {
             return ControlFlow::Continue(());
         }
-        let Some((reference, table, column)) = self.analyzer.locate_column(expr, self.scope) else {
+        let Some(found) = self.analyzer.resolve_reference(expr, self.scope) else {
             // A whole-row reference (`row_to_json(u)`) reads every column.
             if let (Expr::Identifier(ident), Some(table)) =
                 (expr, self.analyzer.whole_row_table(expr, self.scope))
@@ -235,22 +243,23 @@ impl Visitor for Ungrouped<'_, '_> {
             }
             return ControlFlow::Continue(());
         };
+        let (reference, table, column) = (&*found.reference, &*found.table, &*found.column);
         // Outer columns of a correlated query are grouped, or not, by their own query.
         let read = self
             .scope
             .iter()
             .any(|source| source.reference == reference);
-        let columns = match self.analyzer.virtual_columns(&table) {
+        let columns = match self.analyzer.virtual_columns(table) {
             Some(_) => Some(&[][..]),
-            None => self.analyzer.schema.table(&table),
+            None => self.analyzer.schema.table(table),
         };
         let Some(columns) = columns.filter(|_| read) else {
             return ControlFlow::Continue(());
         };
-        if !self.grouped.covers(&reference, &column)
-            && !Analyzer::groups_primary_key(self.grouped, &reference, columns)
+        if !self.grouped.covers(reference, column)
+            && !Analyzer::groups_primary_key(self.grouped, reference, columns)
         {
-            self.analyzer.record_ungrouped(&reference, &column);
+            self.analyzer.record_ungrouped(reference, column);
         }
         ControlFlow::Continue(())
     }
