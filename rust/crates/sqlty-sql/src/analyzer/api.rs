@@ -162,7 +162,7 @@ pub fn analyze_query(
     sql: &str,
     dialect: &str,
     schema: Option<&SchemaData>,
-) -> (Option<Vec<Column>>, Option<Vec<super::Param>>) {
+) -> (Option<Vec<Column>>, Option<Vec<Param>>) {
     let (dialect, schema) = super::route(sql, dialect, schema);
     let parsed = parse(sql, dialect);
     (parsed.columns(schema), parsed.params(sql, schema))

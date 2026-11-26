@@ -210,7 +210,7 @@ pub(super) fn table_source(factor: &TableFactor, dialect: SqlDialect) -> Source 
                 || object_name(name),
                 |alias| alias.name.value.to_lowercase(),
             );
-            Source::named(reference, table_key(name, dialect))
+            Source::named(reference, table_key(name, dialect).into_owned())
         }
         other => opaque_source(other),
     }
@@ -729,7 +729,7 @@ impl<'a> Analyzer<'a> {
                         || object_name(name),
                         |alias| alias.name.value.to_lowercase(),
                     );
-                    scope.push(Source::named(reference, table));
+                    scope.push(Source::named(reference, table.into_owned()));
                 }
                 TableFactor::Derived {
                     subquery, alias, ..

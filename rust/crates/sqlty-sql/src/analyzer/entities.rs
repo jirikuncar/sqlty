@@ -27,7 +27,7 @@ impl<'s> Analyzer<'s> {
         }
         // Two columns of one composite key are told apart by the column.
         let named = |side: &Side| {
-            let table = side.entity.0.rsplit('.').next().unwrap_or(&side.entity.0);
+            let table = side.entity.0.rsplit('.').next().unwrap_or(side.entity.0);
             if a.entity.0 == b.entity.0 {
                 format!("{table}.{}", side.entity.1)
             } else {

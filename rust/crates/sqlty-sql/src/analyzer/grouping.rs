@@ -245,7 +245,7 @@ impl Visitor for Ungrouped<'_, '_> {
         };
         let (reference, table, column) = (&*found.reference, &*found.table, &*found.column);
         // Outer columns of a correlated query are grouped, or not, by their own query.
-        let read = self.scope.reads(&reference);
+        let read = self.scope.reads(reference);
         let columns = match self.analyzer.virtual_columns(table) {
             Some(_) => Some(&[][..]),
             None => self.analyzer.schema.table(table),

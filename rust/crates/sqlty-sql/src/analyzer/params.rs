@@ -468,7 +468,10 @@ impl<'a> Analyzer<'a> {
             return;
         };
         let table = table_key(name, self.dialect);
-        let scope = Scope::from(vec![Source::named(object_name(name), table.clone())]);
+        let scope = Scope::from(vec![Source::named(
+            object_name(name),
+            table.clone().into_owned(),
+        )]);
         let targets: Vec<String> = if insert.columns.is_empty() {
             self.schema
                 .table(&table)
