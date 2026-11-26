@@ -118,7 +118,7 @@ wasm:  ## The engine as WebAssembly, in the @sqlty/wasm package (needs the wasm3
 
 .PHONY: playground
 playground: wasm  ## The engine as WebAssembly, and Monaco and the fonts, for the docs playground
-	cp npm/wasm/sqlty_wasm.wasm npm/wasm/engine.js docs/assets/playground/
+	cp npm/wasm/sqlty_wasm.wasm npm/wasm/engine.js npm/eslint-plugin/core.js npm/eslint-plugin/types.js docs/assets/playground/
 	python3 scripts/generate_playground_examples.py
 	python3 scripts/vendor_assets.py
 

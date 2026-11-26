@@ -1,0 +1,38 @@
+{
+  "name": "@sqlty/eslint-plugin",
+  "version": "0.8.0",
+  "description": "Type-check SQL in TypeScript tagged templates against your schema, with no database",
+  "keywords": ["eslint", "eslintplugin", "sql", "postgresql", "typescript", "type-checking"],
+  "homepage": "https://sqlty.kuncar.dev/",
+  "bugs": "https://github.com/jirikuncar/sqlty/issues",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jirikuncar/sqlty.git",
+    "directory": "npm/eslint-plugin"
+  },
+  "license": "MIT",
+  "author": "Jiri Kuncar",
+  "type": "module",
+  "exports": {
+    ".": "./index.js",
+    "./package.json": "./package.json"
+  },
+  "files": ["index.js", "core.js", "types.js"],
+  "scripts": {
+    "test": "node --test"
+  },
+  "dependencies": {
+    "@sqlty/wasm": "file:../wasm"
+  },
+  "peerDependencies": {
+    "eslint": ">=9"
+  },
+  "devDependencies": {
+    "@typescript-eslint/parser": "8.74.0",
+    "eslint": "10.15.0",
+    "typescript": "5.9.3"
+  },
+  "engines": {
+    "node": ">=20.16"
+  }
+}

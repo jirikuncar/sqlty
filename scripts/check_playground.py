@@ -266,6 +266,7 @@ def exercise(browser: Browser, url: str, watch: Callable[[Page], None]) -> None:
     stepping(page)
     opening(page)
     sharing(page)
+    typescript(page)
     resizing(page)
     zoomed(page, url)
     unsupported(context, url, watch)
@@ -644,6 +645,35 @@ def sharing(page: Page) -> None:
     page.click("[data-copy-link]")
     page.wait_for_timeout(300)
     assert "#" not in page.url
+
+
+def typescript(page: Page) -> None:
+    """The TypeScript example: what @sqlty/eslint-plugin reports, per driver, in a shared link."""
+    page.select_option("[data-example]", label="TypeScript (ESLint plugin)")
+    page.wait_for_selector("[data-problems] li:has-text('unknown-column')")
+    assert page.inner_text('[data-file="python"]') == "queries.ts"
+    assert not page.is_visible('[data-tab="breaking"]')
+    assert "Query is missing its row type" in page.inner_text("[data-problems]")
+    page.select_option("[data-driver]", "pg")
+    page.wait_for_timeout(500)
+    shared = page.url
+    page.goto("about:blank")
+    page.goto(shared)
+    page.wait_for_selector("[data-problems] li:has-text('unknown-column')", timeout=60_000)
+    assert page.input_value("[data-driver]") == "pg"
+    page.click('[data-tab="types"]')
+    assert "string | null" in page.inner_text("[data-types]")
+    page.click('[data-tab="problems"]')
+    page.click("[data-fix]")
+    fixed = source(page)
+    assert "sql<{ id: number; name: string; email: string | null }>`SELECT id" in fixed, fixed
+    assert "SELECT name FROM users" in fixed, fixed
+    # The shared session shows the first example: picking it again would not change it.
+    page.select_option("[data-example]", label="TypeScript (ESLint plugin)")
+    page.select_option("[data-example]", label="Tour")
+    page.wait_for_selector("[data-problems] li:has-text('unknown-column')")
+    assert page.inner_text('[data-file="python"]') == "queries.py"
+    assert page.is_visible('[data-tab="breaking"]')
 
 
 def resizing(page: Page) -> None:
