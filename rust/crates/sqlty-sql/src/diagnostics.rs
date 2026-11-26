@@ -8,6 +8,7 @@ use std::cell::RefCell;
 use std::ops::Range;
 use std::rc::Rc;
 
+use rustc_hash::FxHashSet;
 use sqlparser::tokenizer::Span;
 
 pub use sqlty_rules::Rule;
@@ -39,12 +40,30 @@ struct Inner {
     enabled: bool,
     /// Each diagnostic with where sqlparser read its node, empty when unknown.
     items: Vec<(NameDiagnostic, Span)>,
+    /// The rule and message of each of `items`, which are recorded once.
+    recorded: FxHashSet<(Rule, String)>,
     /// The spans of the nodes being analyzed, innermost last; see [`Diagnostics::at`].
     at: Vec<Span>,
     /// Untyped results accounted for so far, recorded or deliberately silent.
     explained: usize,
     /// The columns the completion placeholder could name, once the analyzer reaches it.
     probe: Option<Vec<crate::analyzer::Candidate>>,
+}
+
+impl Inner {
+    /// Drop the items from `start` on that `keep` rejects.
+    fn drop_since(&mut self, start: usize, keep: impl Fn(Rule) -> bool) {
+        if start >= self.items.len() {
+            return;
+        }
+        for (item, span) in self.items.split_off(start) {
+            if keep(item.rule) {
+                self.items.push((item, span));
+            } else {
+                self.recorded.remove(&(item.rule, item.message));
+            }
+        }
+    }
 }
 
 /// A shared, append-only list of diagnostics; clones record into the same list.
@@ -124,10 +143,7 @@ impl Diagnostics {
             return;
         }
         inner.explained += explains;
-        let known = |(found, _): &(NameDiagnostic, Span)| {
-            found.rule == item.rule && found.message == item.message
-        };
-        if !inner.items.iter().any(known) {
+        if inner.recorded.insert((item.rule, item.message.clone())) {
             let at = inner.at.last().copied().unwrap_or(Span::empty());
             inner.items.push((item, at));
         }
@@ -177,18 +193,13 @@ impl Diagnostics {
     /// whole turned out typed needs no explanation.
     pub(crate) fn rewind(&self, (items, explained): (usize, usize)) {
         let mut inner = self.0.borrow_mut();
-        inner.items.truncate(items);
+        inner.drop_since(items, |_| false);
         inner.explained = explained;
     }
 
     /// Drop what was recorded after `mark` under a rule `keep` rejects.
     pub(crate) fn retain_since(&self, (items, _): (usize, usize), keep: impl Fn(Rule) -> bool) {
-        let mut inner = self.0.borrow_mut();
-        let mut index = 0;
-        inner.items.retain(|(item, _)| {
-            index += 1;
-            index <= items || keep(item.rule)
-        });
+        self.0.borrow_mut().drop_since(items, keep);
     }
 
     /// Everything recorded so far, in order, without spans.
