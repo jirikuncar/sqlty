@@ -167,3 +167,42 @@ fn completions_qualify_columns_of_several_relations() {
     assert_eq!(labels("SELECT | FROM t, u"), ["t.a", "u.b"]);
     assert_eq!(labels("SELECT | FROM v, nope WHERE ("), ["a"]);
 }
+
+/// On a pool, schema statements are parsed in batches while the batch before them is
+/// applied: the schema reads as it does on one thread.
+#[test]
+fn a_schema_loads_on_a_pool_as_on_one_thread() {
+    let mut sql = String::from("CREATE VIEW early AS SELECT * FROM t1;\n");
+    for i in 0..1000 {
+        sql += &format!("CREATE TABLE t{i} (id int PRIMARY KEY, parent int REFERENCES t0 (id));\n");
+    }
+    sql += "CREATE TABLE broken (;\nCREATE TABLE late (x int);\n";
+    sql += "CREATE SCHEMA s;\nSET search_path TO s;\nCREATE TABLE inner_t (y text);\nSET search_path TO public;";
+    let read = || {
+        let (schema, skipped) = analyzer::load_schema_with_skipped(&sql, "postgres");
+        let columns = |table: &str| {
+            let sql = format!("SELECT * FROM {table}");
+            let columns = analyzer::analyze_select(&sql, "postgres", Some(&schema));
+            let typed = columns.unwrap_or_default().into_iter();
+            typed
+                .map(|column| format!("{}:{}", column.name, column.sql_type.unwrap_or_default()))
+                .collect::<Vec<_>>()
+                .join(" ")
+        };
+        (
+            skipped,
+            ["public.t999", "public.early", "late", "s.inner_t"].map(columns),
+        )
+    };
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(3)
+        .build()
+        .unwrap();
+    let (skipped, tables) = pool.install(read);
+    assert_eq!((skipped.clone(), tables.clone()), read());
+    assert_eq!(skipped, [("table", "broken".to_string())]);
+    assert_eq!(
+        tables,
+        ["id:INT parent:INT", "id:INT parent:INT", "x:INT", "y:TEXT"]
+    );
+}

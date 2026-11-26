@@ -1,8 +1,9 @@
 //! Reading schema statements into loader operations, and the [`load`] entry point.
 
 use std::rc::Rc;
-use std::sync::{Arc, LazyLock};
+use std::sync::{Arc, LazyLock, OnceLock};
 
+use rayon::prelude::*;
 use sqlparser::ast::{
     ColumnOption, ColumnOptionDef, CreateTable, Statement, UserDefinedTypeRepresentation,
 };
@@ -58,44 +59,129 @@ static FK_ACTION_COLUMNS: LazyLock<regex::Regex> =
 static DROP_EXPRESSION: LazyLock<regex::Regex> =
     LazyLock::new(|| crate::regex(r"(?i)\bDROP\s+EXPRESSION(?:\s+IF\s+EXISTS)?\b"));
 
-/// Apply each statement as it is read, so a parsed statement lives only until it is
-/// applied; the ones waiting on a later definition are returned for [`Loader::run`].
+/// SQL bytes of the statements parsed together while the batch before them is applied.
+const BATCH_BYTES: usize = 1 << 14;
+
+/// What one statement reads as: the operations it adds and what it skips, or the
+/// `search_path` it sets.
+struct Read<'a> {
+    stmt: ddl::Statement<'a>,
+    ops: Vec<OpKind>,
+    skipped: Vec<SkippedObject>,
+    search_path: Option<Vec<String>>,
+}
+
+impl<'a> Read<'a> {
+    fn new(stmt: ddl::Statement<'a>, dialect: SqlDialect) -> Self {
+        let (mut ops, mut skipped) = (Vec::new(), Vec::new());
+        let search_path = read_statement(&stmt, dialect, &mut |op| ops.push(op), &mut skipped);
+        Self {
+            stmt,
+            ops,
+            skipped,
+            search_path,
+        }
+    }
+}
+
+/// Apply each statement in order; the ones waiting on a later definition are returned
+/// for [`Loader::run`]. On a rayon thread, batches of statements are parsed on the pool
+/// while the batch before them is applied, so at most two batches of parsed statements
+/// are held; elsewhere a statement lives only until it is applied.
 pub(super) fn read_statements<'a>(
     source: &'a str,
-    statements: impl IntoIterator<Item = ddl::Statement<'a>>,
+    statements: impl IntoIterator<Item = ddl::Statement<'a>, IntoIter: Send>,
     dialect: SqlDialect,
     loader: &mut Loader,
     skipped: &mut Vec<SkippedObject>,
 ) -> Vec<Op> {
-    let postgres = dialect == SqlDialect::Postgres;
     let mut path = Rc::new(vec!["public".to_string()]);
     let mut pending = Vec::new();
-    let parser_dialect = dialect.parser_dialect();
-    let parse_part = |text: &str| Parser::new(parser_dialect.as_ref()).try_with_sql(text).ok();
-    for stmt in statements {
-        let stmt = &stmt;
+    let mut apply = |read: Read| {
         if loader.exhausted() {
-            skipped.push(("limit", format!("{} and later", statement_text(stmt))));
-            break;
+            skipped.push(("limit", format!("{} and later", statement_text(&read.stmt))));
+            return false;
         }
-        if postgres {
-            if let Some(schemas) = stmt.search_path() {
-                loader.search_path = schemas.clone();
-                path = Rc::new(schemas);
-                continue;
-            }
+        if let Some(schemas) = read.search_path {
+            loader.search_path = schemas.clone();
+            path = Rc::new(schemas);
+            return true;
         }
-        let mut push = |kind: OpKind| {
+        let (size, at) = (
+            read.stmt.size(),
+            read.stmt.range_in(source).unwrap_or_default(),
+        );
+        for kind in read.ops {
             let op = Op {
                 path: path.clone(),
                 kind,
-                size: stmt.size(),
-                at: stmt.range_in(source).unwrap_or_default(),
+                size,
+                at: at.clone(),
             };
             if !loader.apply(&op, false) {
                 pending.push(op);
             }
-        };
+        }
+        skipped.extend(read.skipped);
+        true
+    };
+    let mut statements = statements.into_iter();
+    if rayon::current_thread_index().is_none() {
+        for stmt in statements {
+            if !apply(Read::new(stmt, dialect)) {
+                break;
+            }
+        }
+        return pending;
+    }
+    let mut parsed = read_batch(&mut statements, dialect);
+    let mut reading = true;
+    while reading && !parsed.is_empty() {
+        let mut next = Vec::new();
+        reading = rayon::in_place_scope(|scope| {
+            scope.spawn(|_| next = read_batch(&mut statements, dialect));
+            parsed.into_iter().all(&mut apply)
+        });
+        parsed = next;
+    }
+    pending
+}
+
+/// The next statements of about [`BATCH_BYTES`], read on the pool.
+fn read_batch<'a>(
+    statements: &mut impl Iterator<Item = ddl::Statement<'a>>,
+    dialect: SqlDialect,
+) -> Vec<Read<'a>> {
+    let mut batch = Vec::new();
+    let mut bytes = 0;
+    while bytes < BATCH_BYTES {
+        let Some(stmt) = statements.next() else { break };
+        bytes += stmt.size();
+        batch.push(stmt);
+    }
+    batch
+        .into_par_iter()
+        .map(|stmt| Read::new(stmt, dialect))
+        .collect()
+}
+
+/// Read `stmt` into operations, given to `push`, and what it skips; the `search_path`
+/// it sets instead, when it sets one.
+fn read_statement(
+    stmt: &ddl::Statement,
+    dialect: SqlDialect,
+    push: &mut impl FnMut(OpKind),
+    skipped: &mut Vec<SkippedObject>,
+) -> Option<Vec<String>> {
+    let postgres = dialect == SqlDialect::Postgres;
+    if postgres {
+        if let Some(schemas) = stmt.search_path() {
+            return Some(schemas);
+        }
+    }
+    let parser_dialect = dialect.parser_dialect();
+    let parse_part = |text: &str| Parser::new(parser_dialect.as_ref()).try_with_sql(text).ok();
+    {
         // PostgreSQL and MySQL copy a table's columns with `LIKE`.
         let reads_like = postgres || dialect == SqlDialect::MySql;
         if let Some((name, module, args)) = (dialect == SqlDialect::Sqlite)
@@ -206,7 +292,7 @@ pub(super) fn read_statements<'a>(
                             .map(|attr| (fold(&attr.name, dialect), attr.data_type))
                             .collect(),
                     ),
-                    _ => continue,
+                    _ => return None,
                 };
                 push(OpKind::Type(name, def));
             }
@@ -270,10 +356,10 @@ pub(super) fn read_statements<'a>(
             dialect,
             SqlDialect::Postgres | SqlDialect::MySql | SqlDialect::Sqlite
         ) {
-            read_alter_or_drop(stmt, dialect, &mut push, skipped);
+            read_alter_or_drop(stmt, dialect, push, skipped);
         }
     }
-    pending
+    None
 }
 
 fn without_fk_action_columns(sql: &str) -> String {
@@ -404,7 +490,10 @@ pub(crate) fn load_with(
     overrides: Arc<TypeOverrides>,
 ) -> (Catalog, Vec<SkippedObject>) {
     // The built-ins are read once per process: parsing them costs more than most schemas.
-    static BUILTIN: LazyLock<Loader> = LazyLock::new(|| {
+    // Not a `LazyLock`: a thread waiting on the pool while it reads them may take another
+    // load, which then reads its own copy instead of waiting on itself.
+    static BUILTIN: OnceLock<Loader> = OnceLock::new();
+    let builtin = || {
         let mut loader = Loader::new(SqlDialect::Postgres);
         let builtin = ddl::statements(BUILTIN_SQL, false);
         let ops = read_statements(
@@ -417,10 +506,16 @@ pub(crate) fn load_with(
         loader.run(ops);
         loader.search_path = vec!["public".to_string()];
         loader
-    });
+    };
     let dialect = SqlDialect::from_name(dialect);
     let mut loader = if dialect == SqlDialect::Postgres {
-        BUILTIN.fork()
+        match BUILTIN.get() {
+            Some(loader) => loader.fork(),
+            None => {
+                let read = builtin();
+                BUILTIN.get_or_init(|| read).fork()
+            }
+        }
     } else {
         Loader::new(dialect)
     };
