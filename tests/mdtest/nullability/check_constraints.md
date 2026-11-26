@@ -146,11 +146,27 @@ SELECT CASE WHEN kind = 'card' THEN card_last4 ELSE 'none' END AS last4 FROM pay
 -- inferred: tuple[str]
 ```
 
+### Where WHERE makes the row present
+
+A `WHERE` that a null-extended row fails, such as `p.kind = 'card'`, keeps only the rows
+the join matched, so the `CHECK` holds for them. So does one that proves a nullable
+discriminator set.
+
+```sql
+SELECT p.card_last4 FROM refunds r LEFT JOIN payments p ON p.id = r.payment_id WHERE p.kind = 'card'
+-- inferred: tuple[str]
+```
+
+```sql
+SELECT card_last4 FROM loose WHERE kind = 'card'
+-- inferred: tuple[str]
+```
+
 ### What is not narrowed
 
 Without a condition on `kind`, under `OR` that keeps both arms, on the side an outer join
-null-extends (even where `WHERE` drops its NULL rows), or where the `CHECK` can be NULL
-(`loose.kind` is nullable), the columns keep their declared nullability.
+null-extends, or where the `CHECK` can be NULL (`loose.kind` is nullable, and `OR` keeps
+its NULL rows), the columns keep their declared nullability.
 
 ```sql
 SELECT card_last4 FROM payments
@@ -159,11 +175,6 @@ SELECT card_last4 FROM payments
 
 ```sql
 SELECT iban FROM payments WHERE kind = 'card' OR kind = 'iban'
--- inferred: tuple[str | None]
-```
-
-```sql
-SELECT p.card_last4 FROM refunds r LEFT JOIN payments p ON p.id = r.payment_id WHERE p.kind = 'card'
 -- inferred: tuple[str | None]
 ```
 
@@ -178,7 +189,12 @@ SELECT CASE WHEN kind = 'card' THEN iban ELSE '-' END AS iban FROM payments
 ```
 
 ```sql
-SELECT card_last4 FROM loose WHERE kind = 'card'
+SELECT card_last4 FROM loose WHERE kind = 'card' OR id > 1
+-- inferred: tuple[str | None]
+```
+
+```sql
+SELECT p.card_last4 FROM refunds r LEFT JOIN payments p ON p.id = r.payment_id WHERE p.kind = 'card' OR r.id > 1
 -- inferred: tuple[str | None]
 ```
 
