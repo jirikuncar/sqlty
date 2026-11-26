@@ -6,19 +6,25 @@
 //! source is pinned when one of its tenant keys equals a parameter, or a pinned tenant key of
 //! another source, through `=` or `IN` in `WHERE` or a join condition that holds for its rows.
 
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
+use std::ops::ControlFlow;
+use std::rc::Rc;
 
 use sqlparser::ast::{
-    Assignment, AssignmentTarget, BinaryOperator, Expr, Ident, InTarget, Insert, JoinConstraint,
-    JoinOperator, ObjectName, OnConflictAction, OnInsert, SetExpr, Spanned, Statement, TableFactor,
-    TableObject, TableWithJoins, Value,
+    visit_expressions, Assignment, AssignmentTarget, BinaryOperator, Distinct, Expr, GroupByExpr,
+    Ident, InTarget, Insert, JoinConstraint, JoinOperator, ObjectName, OnConflictAction, OnInsert,
+    Query, Select, SelectItem, SelectItemQualifiedWildcardKind, SetExpr, Spanned, Statement,
+    TableFactor, TableObject, TableWithJoins, Value, WildcardAdditionalOptions,
 };
+use sqlparser::tokenizer::Span;
 
 use super::dml::{assigned_names, written_rows};
 use super::fanout::{conjuncts, strip};
+use super::grouping::has_aggregate;
 use super::names::{object_name, table_key};
-use super::query::Analyzer;
-use super::scope::{relation_name, Scope};
+use super::query::{Analyzer, Column};
+use super::scope::{any_merging_join, relation_name, Scope};
 use crate::diagnostics::{Diagnostics, Rule};
 
 /// A column of a source: its reference and name.
@@ -30,6 +36,59 @@ type Node = (String, String);
 struct Pins {
     pinned: Vec<Node>,
     arcs: HashMap<Node, Vec<Node>>,
+}
+
+/// What a CTE or derived table tells the query reading it: its outputs pinned to a
+/// parameter, and the tenant tables it reads unpinned, by the outputs that carry each key
+/// column.
+#[derive(Debug)]
+pub(super) struct Carried {
+    pub(super) pinned: Vec<String>,
+    pub(super) unpinned: Vec<Unpinned<(String, String)>>,
+}
+
+/// A tenant table read without a whole tenant key pinned: its message, where, and per
+/// tenant key, the columns that would pin each of its columns.
+#[derive(Clone, Debug)]
+pub(super) struct Unpinned<N> {
+    message: String,
+    span: Span,
+    alternatives: Vec<Vec<Vec<N>>>,
+}
+
+impl<N> Unpinned<N> {
+    fn map<M>(self, f: impl Fn(N) -> M) -> Unpinned<M> {
+        Unpinned {
+            message: self.message,
+            span: self.span,
+            alternatives: (self.alternatives.into_iter())
+                .map(|key| {
+                    key.into_iter()
+                        .map(|options| options.into_iter().map(&f).collect())
+                        .collect()
+                })
+                .collect(),
+        }
+    }
+
+    fn reported(self) -> Unpinned<Node> {
+        self.map(|_| (String::new(), String::new()))
+    }
+}
+
+/// The SELECTs a CTE or derived table returns, and what each leaves to the query reading
+/// it, by address: their analysis meets them again under every clone of the analyzer.
+pub(super) struct TenantSink {
+    selects: HashSet<*const Select>,
+    found: RefCell<HashMap<*const Select, Branch>>,
+}
+
+/// What one SELECT of a [`TenantSink`] leaves: its width, its outputs its pins reach and
+/// its tenant tables by the positions of the outputs that carry their keys.
+struct Branch {
+    width: usize,
+    pinned: Vec<usize>,
+    unpinned: Vec<Unpinned<usize>>,
 }
 
 /// The sources a condition holds for: all of them, those of a join's right side, or all
@@ -52,26 +111,225 @@ impl Holds<'_> {
 }
 
 impl Analyzer<'_> {
-    /// Records `tenant-scope` for each tenant table `from` and `selection` read without
-    /// pinning its tenant key.
-    pub(super) fn check_tenant_select(
-        &self,
-        from: &[TableWithJoins],
-        selection: Option<&Expr>,
-        scope: &Scope,
-    ) {
+    /// Records `tenant-scope` for each tenant table `select` reads without pinning its tenant
+    /// key. A SELECT that a CTE or derived table returns leaves those whose key it passes to
+    /// an output column to the query reading it instead.
+    pub(super) fn check_tenant_select(&self, select: &Select, scope: &Scope) {
         if !self.judges_tenancy() {
             return;
         }
         let mut pins = Pins::default();
-        for table in from {
+        self.pin_carried(scope, &mut pins);
+        for table in &select.from {
             self.read_joins(table, scope, &mut pins);
         }
-        for term in selection.into_iter().flat_map(conjuncts) {
+        for term in select.selection.iter().flat_map(conjuncts) {
             self.read_term(term, scope, Holds::All, &mut pins);
         }
-        let factors = from.iter().flat_map(factors);
-        self.report_unpinned(factors, scope, &pins, |_| "read");
+        let factors = select.from.iter().flat_map(factors);
+        let unpinned = self.unpinned(factors, scope, &pins, |_| "read");
+        match &self.tenant_sink {
+            Some(sink) if sink.selects.contains(&(select as *const Select)) => {
+                let branch = self.carry(select, scope, &pins, unpinned);
+                sink.found
+                    .borrow_mut()
+                    .insert(select as *const Select, branch);
+            }
+            _ => self.report(unpinned),
+        }
+    }
+
+    /// A sink for the SELECTs `query`, the body of a CTE or derived table, returns.
+    pub(super) fn tenant_sink(&self, query: &Query) -> Option<Rc<TenantSink>> {
+        let mut selects = HashSet::new();
+        (self.judges_tenancy() && body_selects(query, &mut selects)).then(|| {
+            Rc::new(TenantSink {
+                selects,
+                found: RefCell::default(),
+            })
+        })
+    }
+
+    /// What the SELECTs of [`Self::tenant_sink`] leave to the query reading `columns`: the
+    /// outputs every one pins, and their unpinned tenant tables. Reported here instead
+    /// when a SELECT was not judged or returns another width.
+    pub(super) fn carried(&self, columns: &[Column]) -> Option<Carried> {
+        let sink = self.tenant_sink.as_ref()?;
+        let found = std::mem::take(&mut *sink.found.borrow_mut());
+        let whole = found.len() == sink.selects.len()
+            && found.values().all(|branch| branch.width == columns.len());
+        if !whole {
+            for branch in found.into_values() {
+                self.report(
+                    branch
+                        .unpinned
+                        .into_iter()
+                        .map(Unpinned::reported)
+                        .collect(),
+                );
+            }
+            return None;
+        }
+        let name = |at: usize| self.column_key(&columns[at].name);
+        let mut branches = found.into_values();
+        let first = branches.next()?;
+        let mut pinned = first.pinned.clone();
+        let mut unpinned = first.unpinned;
+        for branch in branches {
+            pinned.retain(|at| branch.pinned.contains(at));
+            unpinned.extend(branch.unpinned);
+        }
+        Some(Carried {
+            pinned: pinned.into_iter().map(name).collect(),
+            unpinned: (unpinned.into_iter())
+                .map(|found| found.map(|at| (String::new(), name(at))))
+                .collect(),
+        })
+    }
+
+    /// The branch `select` leaves to the query reading it: the outputs its pins reach, and
+    /// each tenant table whose key some output carries; the others are reported.
+    fn carry(
+        &self,
+        select: &Select,
+        scope: &Scope,
+        pins: &Pins,
+        unpinned: Vec<Unpinned<Node>>,
+    ) -> Branch {
+        let passed = self.passed(select, scope);
+        let width = passed.as_ref().map_or(usize::MAX, Vec::len);
+        let passed = passed.unwrap_or_default();
+        let reached = pins.reached();
+        let pinned = (0..passed.len())
+            .filter(|&at| {
+                passed[at]
+                    .as_ref()
+                    .is_some_and(|node| reached.contains(node))
+            })
+            .collect();
+        let feeders = pins.feeders();
+        let mut carried = Vec::new();
+        let mut lost = Vec::new();
+        for found in unpinned {
+            let alternatives: Vec<Vec<Vec<usize>>> = (found.alternatives.iter())
+                .map(|key| {
+                    key.iter()
+                        .map(|options| {
+                            let sources = feeders.reaching(options);
+                            (0..passed.len())
+                                .filter(|&at| {
+                                    passed[at].as_ref().is_some_and(|n| sources.contains(n))
+                                })
+                                .collect()
+                        })
+                        .collect()
+                })
+                .filter(|key: &Vec<Vec<usize>>| key.iter().all(|options| !options.is_empty()))
+                .collect();
+            match alternatives.is_empty() {
+                true => lost.push(found),
+                false => carried.push(Unpinned {
+                    message: found.message,
+                    span: found.span,
+                    alternatives,
+                }),
+            }
+        }
+        self.report(lost);
+        Branch {
+            width,
+            pinned,
+            unpinned: carried,
+        }
+    }
+
+    /// The column each output of `select` passes on unchanged, `None` for one it computes.
+    /// `None` when a window or `DISTINCT ON` reads rows of every tenant, or a `*` is unknown.
+    fn passed(&self, select: &Select, scope: &Scope) -> Option<Vec<Option<Node>>> {
+        if matches!(select.distinct, Some(Distinct::On(_))) || select.qualify.is_some() {
+            return None;
+        }
+        let keys: Vec<Node> = match &select.group_by {
+            GroupByExpr::Expressions(keys, _) => keys,
+            GroupByExpr::All(_) => return None,
+        }
+        .iter()
+        .filter_map(|key| self.local_node(key, scope))
+        .collect();
+        let grouped = select.having.is_some()
+            || !matches!(&select.group_by, GroupByExpr::Expressions(keys, _) if keys.is_empty());
+        let mut passed = Vec::new();
+        for item in &select.projection {
+            let (reference, options) = match item {
+                SelectItem::UnnamedExpr(expr) | SelectItem::ExprWithAlias { expr, .. } => {
+                    if has_window(expr) {
+                        return None;
+                    }
+                    let grouped = grouped || has_aggregate(expr);
+                    let node = self.local_node(expr, scope);
+                    passed.push(node.filter(|node| !grouped || keys.contains(node)));
+                    continue;
+                }
+                SelectItem::Wildcard(options) => (None, options),
+                SelectItem::QualifiedWildcard(
+                    SelectItemQualifiedWildcardKind::ObjectName(name),
+                    options,
+                ) => (Some(object_name(name)), options),
+                _ => return None,
+            };
+            if *options != WildcardAdditionalOptions::default()
+                || reference.is_none() && any_merging_join(&select.from)
+            {
+                return None;
+            }
+            for source in Self::star_sources(reference.as_deref(), scope) {
+                let table = source.table.named()?;
+                let names: Vec<String> = match self.virtual_columns(table) {
+                    Some(columns) if columns.iter().any(Column::is_unknown_star) => return None,
+                    Some(columns) => columns
+                        .iter()
+                        .map(|column| self.column_key(&column.name))
+                        .collect(),
+                    None => (self.schema.table(table)?.iter())
+                        .filter(|column| !column.invisible)
+                        .map(|column| column.name.clone())
+                        .collect(),
+                };
+                for name in names {
+                    passed.push((!grouped).then(|| (source.reference.clone(), name)));
+                }
+            }
+        }
+        Some(passed)
+    }
+
+    /// The column of a source of `scope` (not of an enclosing query) that `expr` reads.
+    fn local_node(&self, expr: &Expr, scope: &Scope) -> Option<Node> {
+        let (node, _) = self.tenant_node(expr, scope)?;
+        scope
+            .iter()
+            .any(|source| source.reference == node.0)
+            .then_some(node)
+    }
+
+    /// Pins the outputs a CTE or derived table of `scope` pins itself.
+    fn pin_carried(&self, scope: &Scope, pins: &mut Pins) {
+        for source in scope {
+            let carried = source
+                .table
+                .named()
+                .and_then(|table| self.virtuals.carried(table));
+            for column in carried.iter().flat_map(|carried| &carried.pinned) {
+                pins.pinned.push((source.reference.clone(), column.clone()));
+            }
+        }
+    }
+
+    fn report(&self, unpinned: Vec<Unpinned<Node>>) {
+        for found in unpinned {
+            let _at = self.diag.at(found.span);
+            self.diag.record(Rule::TenantScope, found.message);
+        }
     }
 
     /// Records `tenant-scope` for an UPDATE or DELETE that does not pin the tenant key of
@@ -115,10 +373,12 @@ impl Analyzer<'_> {
             _ => return,
         };
         let tables: Vec<TableWithJoins> = joined.into_iter().cloned().collect();
+        // Collects, so that derived tables leave their tenant tables, into a list dropped.
         let mut quiet = self.clone();
-        quiet.diag = Diagnostics::default();
+        quiet.diag = Diagnostics::collecting();
         let Ok((analyzer, scope)) = quiet.scope_of(&tables);
         let mut pins = Pins::default();
+        analyzer.pin_carried(&scope, &mut pins);
         for table in &tables {
             analyzer.read_joins(table, &scope, &mut pins);
         }
@@ -127,12 +387,13 @@ impl Analyzer<'_> {
         }
         let target = target.and_then(relation_name);
         let factors = tables.iter().flat_map(factors);
-        self.report_unpinned(factors, &scope, &pins, |reference| {
+        let unpinned = analyzer.unpinned(factors, &scope, &pins, |reference| {
             match Some(reference) == target.as_deref() {
                 true => verb,
                 false => "read",
             }
         });
+        self.report(unpinned);
     }
 
     fn judges_tenancy(&self) -> bool {
@@ -362,28 +623,46 @@ impl Analyzer<'_> {
     }
 
     /// The column `expr` reads, as a node. A tenant key of an enclosing query's row counts
-    /// as pinned: that query is judged on its own.
+    /// as pinned, and so does an output of a CTE or derived table that pins or carries one:
+    /// that query is judged on its own.
     fn tenant_node(&self, expr: &Expr, scope: &Scope) -> Option<(Node, bool)> {
         let expr = match strip(expr) {
             Expr::Cast { expr, .. } => strip(expr),
             expr => expr,
         };
-        let (reference, table, column, _) = self.locate_table_column(expr, scope)?;
+        let (reference, table, column) = self.locate_column(expr, scope)?;
         let outer = !scope.iter().any(|source| source.reference == reference);
-        let keyed = outer
-            && (self.schema.catalog().tenant_keys(&table))
-                .is_some_and(|keys| keys.iter().flatten().any(|key| *key == column));
-        Some(((reference, column), keyed))
+        let (column, keyed) = match self.virtuals.carried(&table) {
+            Some(carried) => {
+                let column = self.column_key(&column);
+                let keyed = carried.pinned.contains(&column)
+                    || (carried.unpinned.iter())
+                        .flat_map(|found| found.alternatives.iter().flatten().flatten())
+                        .any(|(_, carrier)| *carrier == column);
+                (column, keyed)
+            }
+            None if self.virtual_columns(&table).is_some() => (self.column_key(&column), false),
+            None => {
+                let keys = self.schema.catalog().tenant_keys(&table);
+                let keyed =
+                    keys.is_some_and(|keys| keys.iter().flatten().any(|key| *key == column));
+                (column, keyed)
+            }
+        };
+        Some(((reference, column), outer && keyed))
     }
 
-    fn report_unpinned<'f>(
+    /// The tenant tables of `factors`, and those CTEs and derived tables of `scope` leave
+    /// to it, that `pins` does not reach a whole tenant key of.
+    fn unpinned<'f>(
         &self,
         factors: impl Iterator<Item = &'f TableFactor>,
         scope: &Scope,
         pins: &Pins,
         verb: impl Fn(&str) -> &'static str,
-    ) {
+    ) -> Vec<Unpinned<Node>> {
         let reached = pins.reached();
+        let mut found = Vec::new();
         for factor in factors {
             let TableFactor::Table { name, alias, .. } = factor else {
                 continue;
@@ -400,15 +679,8 @@ impl Analyzer<'_> {
             let Some(keys) = keys else {
                 continue;
             };
-            let pinned = keys.iter().any(|key| {
-                key.iter()
-                    .all(|column| reached.contains(&(reference.clone(), column.clone())))
-            });
-            if pinned {
-                continue;
-            }
             let short = object_name(name);
-            let keys: Vec<String> = keys
+            let pinned: Vec<String> = keys
                 .iter()
                 .map(|key| {
                     let pins: Vec<String> = key
@@ -418,16 +690,42 @@ impl Analyzer<'_> {
                     pins.join(" and ")
                 })
                 .collect();
-            let _at = self.diag.at(factor.span());
-            self.diag.record(
-                Rule::TenantScope,
-                format!(
+            found.push(Unpinned {
+                message: format!(
                     "`{short}` is {} without {}",
                     verb(&reference),
-                    keys.join(" or ")
+                    pinned.join(" or ")
                 ),
-            );
+                span: factor.span(),
+                alternatives: (keys.iter())
+                    .map(|key| {
+                        (key.iter())
+                            .map(|column| vec![(reference.clone(), column.clone())])
+                            .collect()
+                    })
+                    .collect(),
+            });
         }
+        for source in scope {
+            let carried = source
+                .table
+                .named()
+                .and_then(|table| self.virtuals.carried(table));
+            for inner in carried.iter().flat_map(|carried| &carried.unpinned) {
+                found.push(
+                    inner
+                        .clone()
+                        .map(|(_, column)| (source.reference.clone(), column)),
+                );
+            }
+        }
+        found.retain(|found| {
+            !found.alternatives.iter().any(|key| {
+                key.iter()
+                    .all(|options| options.iter().any(|node| reached.contains(node)))
+            })
+        });
+        found
     }
 }
 
@@ -452,6 +750,17 @@ impl Pins {
         }
     }
 
+    /// The arcs reversed: the columns each column takes its value from.
+    fn feeders(&self) -> Feeders {
+        let mut feeders: HashMap<Node, Vec<Node>> = HashMap::new();
+        for (from, to) in &self.arcs {
+            for to in to {
+                feeders.entry(to.clone()).or_default().push(from.clone());
+            }
+        }
+        Feeders(feeders)
+    }
+
     /// Every column a pinned column passes its value to, itself included.
     fn reached(&self) -> HashSet<Node> {
         let mut reached: HashSet<Node> = HashSet::new();
@@ -464,6 +773,47 @@ impl Pins {
         }
         reached
     }
+}
+
+struct Feeders(HashMap<Node, Vec<Node>>);
+
+impl Feeders {
+    /// The columns whose value reaches one of `nodes`, those included.
+    fn reaching(&self, nodes: &[Node]) -> HashSet<Node> {
+        let mut found: HashSet<Node> = HashSet::new();
+        let mut queue = nodes.to_vec();
+        while let Some(node) = queue.pop() {
+            if let Some(next) = self.0.get(&node) {
+                queue.extend(next.iter().filter(|n| !found.contains(*n)).cloned());
+            }
+            found.insert(node);
+        }
+        found
+    }
+}
+
+/// Collects the SELECTs whose rows `query` returns as they are; `false` when a `LIMIT` or
+/// a statement picks them.
+fn body_selects(query: &Query, into: &mut HashSet<*const Select>) -> bool {
+    fn set(body: &SetExpr, into: &mut HashSet<*const Select>) -> bool {
+        match body {
+            SetExpr::Select(select) => into.insert(&**select as *const Select) || true,
+            SetExpr::SetOperation { left, right, .. } => set(left, into) && set(right, into),
+            SetExpr::Query(query) => body_selects(query, into),
+            _ => false,
+        }
+    }
+    query.limit_clause.is_none() && query.fetch.is_none() && set(&query.body, into)
+}
+
+/// Whether `expr` calls a window function outside a subquery.
+fn has_window(expr: &Expr) -> bool {
+    let mut found = false;
+    let _ = visit_expressions(expr, |expr| {
+        found |= matches!(expr, Expr::Function(func) if func.over.is_some());
+        ControlFlow::<()>::Continue(())
+    });
+    found
 }
 
 /// A parameter, cast or not: `%s`, `$1`, `:name`, `?`.
