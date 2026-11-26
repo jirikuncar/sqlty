@@ -8,6 +8,8 @@
 use std::borrow::Cow;
 use std::rc::Rc;
 
+use rustc_hash::{FxHashMap, FxHashSet};
+
 use sqlparser::ast::{Expr, Ident, TableFactor, TableWithJoins};
 
 use crate::catalog::{fold, folded, lowercase};
@@ -133,7 +135,8 @@ impl<'a> Analyzer<'a> {
         {
             return;
         }
-        let mut seen: Vec<(String, Option<String>)> = Vec::new();
+        // Per name: whether an alias or a derived table took it, and the tables read by it.
+        let mut seen: FxHashMap<String, (bool, FxHashSet<Cow<'_, str>>)> = FxHashMap::default();
         let names = relations(from).filter_map(|factor| match factor {
             TableFactor::Table {
                 alias: None, name, ..
@@ -153,10 +156,11 @@ impl<'a> Analyzer<'a> {
             _ => None,
         });
         for (ident, key) in names {
-            let name = fold(ident, self.dialect);
-            let clash = seen.iter().any(|(seen, seen_key)| {
-                *seen == name && (key.is_none() || seen_key.is_none() || *seen_key == key)
-            });
+            let (aliased, keys) = seen.entry(fold(ident, self.dialect)).or_default();
+            let clash = match &key {
+                None => *aliased || !keys.is_empty(),
+                Some(key) => *aliased || keys.contains(key),
+            };
             if clash {
                 let _at = self.diag.at(ident.span);
                 self.diag.record(
@@ -164,7 +168,12 @@ impl<'a> Analyzer<'a> {
                     format!("table name `{}` is specified more than once", ident.value),
                 );
             }
-            seen.push((name, key));
+            match key {
+                None => *aliased = true,
+                Some(key) => {
+                    keys.insert(key);
+                }
+            }
         }
     }
 

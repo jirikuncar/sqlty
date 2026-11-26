@@ -328,6 +328,8 @@ d = SQL[tuple[int]]("--sql\nSELECT 1 FROM users JOIN teams users ON true")
 # error: [unknown-table] "table `other.users` is not defined in the schema"
 e = SQL[tuple[int]]("--sql\nSELECT 1 FROM public.users, other.users")
 f = SQL[tuple[int]]("--sql\nSELECT 1 FROM users u JOIN users v ON u.id = v.id")
+# error: [duplicate-alias] "table name `users` is specified more than once"
+g = SQL[tuple[int]]("--sql\nSELECT 1 FROM teams users JOIN users ON true")
 ```
 
 ##### Duplicate FROM names in SQLite
