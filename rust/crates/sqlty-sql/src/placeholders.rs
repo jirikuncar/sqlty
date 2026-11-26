@@ -35,7 +35,7 @@ pub struct Styles {
 }
 
 impl Styles {
-    fn number(self, number: usize) -> String {
+    pub(crate) fn number(self, number: usize) -> String {
         let sigil = if self.dollar_numbers { '$' } else { '?' };
         format!("{sigil}{number}")
     }
@@ -50,6 +50,8 @@ pub struct Rewritten {
     /// Name of `$1`, `$2`, ... as far as the rewrite numbered them: `None` for a positional
     /// placeholder. `$N` written in the query are not listed.
     pub names: Vec<Option<String>>,
+    /// Where each respelled placeholder starts in the query, with its number.
+    pub(crate) numbered: Vec<(usize, usize)>,
 }
 
 /// `sql` with its placeholders respelled `$N`, numbered in order of appearance; a name
@@ -69,28 +71,36 @@ pub fn rewrite(sql: &str, styles: Styles) -> Rewritten {
     let mut out = String::with_capacity(sql.len() + 8);
     let mut names: Vec<Option<String>> = Vec::new();
     let mut named: HashMap<String, usize> = HashMap::new();
+    let mut numbered = Vec::new();
     let mut copied = 0;
     scan(sql, styles, |at, end, token| {
         out.push_str(&sql[copied..at]);
-        match token {
-            Token::Percent => out.push('%'),
+        let number = match token {
+            Token::Percent => {
+                out.push('%');
+                copied = end;
+                return;
+            }
             Token::Positional => {
                 names.push(None);
-                out.push_str(&styles.number(names.len()));
+                names.len()
             }
-            Token::Numbered(number) => out.push_str(&styles.number(number)),
-            Token::Named(name) => {
-                let number = *named.entry(name.to_string()).or_insert_with(|| {
-                    names.push(Some(name.to_string()));
-                    names.len()
-                });
-                out.push_str(&styles.number(number));
-            }
-        }
+            Token::Numbered(number) => number,
+            Token::Named(name) => *named.entry(name.to_string()).or_insert_with(|| {
+                names.push(Some(name.to_string()));
+                names.len()
+            }),
+        };
+        out.push_str(&styles.number(number));
+        numbered.push((at, number));
         copied = end;
     });
     out.push_str(&sql[copied..]);
-    Rewritten { text: out, names }
+    Rewritten {
+        text: out,
+        names,
+        numbered,
+    }
 }
 
 /// The byte ranges of the `%s` and `%(name)s` placeholders of `sql`, which sqlparser reads

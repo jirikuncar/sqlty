@@ -104,6 +104,23 @@ execute("DELETE FROM users WHERE id = %(id)s", {"id": 1, "age": 3})
 execute("DELETE FROM users WHERE id = %(id)s", {"ident": 1})
 ```
 
+## Placeholders anywhere in the query
+
+The parameters of a query come from the same parse as its columns, so a placeholder
+counts wherever it is: a `LIMIT`, a later line, next to an escaped `%%`.
+
+```python
+from typing import Annotated, LiteralString
+from sqlty import SQL
+
+def execute(query: Annotated[LiteralString, SQL], params: dict[str, object], /) -> None: ...
+
+# error: [param-count-mismatch] "call is missing parameter 'limit'"
+execute("SELECT name FROM users\nWHERE id = %(id)s\nLIMIT %(limit)s", {"id": 1})
+# error: [param-count-mismatch] "call is missing parameter 'id'"
+execute("SELECT name, age %% 2 AS parity FROM users WHERE id = %(id)s", {})
+```
+
 ## Positional arguments for named placeholders are not compared
 
 ```python

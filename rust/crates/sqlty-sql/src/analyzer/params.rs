@@ -5,6 +5,7 @@
 //! signature, `LIMIT`/`OFFSET`, or the array it is searched in (`= ANY(%s)`). A parameter
 //! used where nothing says what it is stays untyped.
 
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::ops::ControlFlow;
 use std::rc::Rc;
@@ -23,6 +24,7 @@ use sqlparser::ast::{
 use crate::catalog::fold;
 use crate::placeholders::{self, Rewritten, Styles};
 
+use super::api::Parsed;
 use super::dialect::SqlDialect;
 use super::expr::{array_element, from_sql_type};
 use super::functions::{arg_list, positional_args};
@@ -205,13 +207,13 @@ thread_local! {
     pub(super) static PARSED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
-/// [`analyze_params`] of `sql` as routed; `parsed` is the first statement of `sql` as
-/// written, which is used instead of parsing when no placeholder needs rewriting.
+/// [`analyze_params`] of `sql` as routed; `parsed` is `sql` as written, whose tree is used,
+/// its placeholders numbered, instead of parsing the numbered text.
 pub(super) fn params_of(
     sql: &str,
     dialect: SqlDialect,
     schema: Option<&SchemaData>,
-    parsed: Option<&Statement>,
+    parsed: Option<&Parsed>,
 ) -> Option<Vec<Param>> {
     let styles = Styles {
         question_marks: dialect != SqlDialect::Postgres,
@@ -228,8 +230,21 @@ pub(super) fn params_of(
         let stmt = parse(input.text(), dialect)?.into_iter().next()?;
         Some((stmt, rewritten.names))
     };
+    // `%%s` is `%s` once the rewrite unescapes it, which a parse of the rewritten text reads
+    // as a placeholder.
+    let shared = parsed.and_then(|parsed| {
+        if rewritten.text == sql {
+            parsed.first().map(Cow::Borrowed)
+        } else if sql.contains("%%") {
+            None
+        } else {
+            parsed
+                .numbered(&rewritten.numbered, |n| styles.number(n))
+                .map(Cow::Owned)
+        }
+    });
     let (owned, names);
-    let stmt = match parsed.filter(|_| rewritten.text == sql) {
+    let stmt = match shared {
         Some(stmt) => {
             names = rewritten.names;
             stmt
@@ -246,9 +261,10 @@ pub(super) fn params_of(
                     ))
                 })?
             })?;
-            &owned
+            Cow::Borrowed(&owned)
         }
     };
+    let stmt: &Statement = &stmt;
     let analyzer = Analyzer::new(
         schema.unwrap_or_else(|| crate::catalog::empty(dialect)),
         dialect,
@@ -1607,20 +1623,50 @@ mod tests {
     }
 
     #[test]
-    fn a_rewritten_query_is_parsed_for_its_parameters() {
-        for (dialect, sql) in [
-            ("postgres", "SELECT %s::int"),
-            ("postgres", "SELECT %(name)s::int"),
-            ("postgres", "SELECT :name"),
-            ("postgres", "SELECT data ? 'a' FROM t WHERE x = ?"),
-            ("mysql", "SELECT ?"),
-            ("sqlite", "SELECT ?"),
-            ("sqlite", "SELECT :name"),
-            ("sqlite", "SELECT @name"),
+    fn a_rewritten_query_shares_the_tree_when_it_can() {
+        for (dialect, sql, reparses) in [
+            ("postgres", "SELECT %s::int", 0),
+            ("postgres", "--sql\nSELECT %(name)s::int, %s, %(name)s", 0),
+            (
+                "postgres",
+                "SELECT * FROM t WHERE a = %(a)s AND b IN (%s, %s) LIMIT %s",
+                0,
+            ),
+            (
+                "postgres",
+                "INSERT INTO t (a, b) VALUES (%s, %s), (%s, %s)",
+                0,
+            ),
+            ("postgres", "SELECT :name::int, :name", 0),
+            (
+                "postgres",
+                "SELECT '%s', %s FROM t FOR NO KEY UPDATE OF t, u",
+                0,
+            ),
+            ("postgres", "SELECT data ? 'a', %s FROM t", 0),
+            ("postgres", "SELECT 5 %% 2, %s", 1),
+            ("mysql", "SELECT ?, ?", 0),
+            ("mysql", "SELECT %s,\n %(a)s", 0),
+            ("sqlite", "SELECT ?2, ?", 0),
+            ("sqlite", "SELECT :name, @name", 0),
+            ("sqlite", "SELECT 'é', ? || 'ü', ?", 0),
         ] {
             let parsed = crate::analyzer::parse(sql, dialect);
-            let count = parses(|| drop(parsed.params(sql, None)));
-            assert!(count >= 1, "{dialect}: {sql}");
+            let mut shared = None;
+            assert_eq!(
+                parses(|| shared = parsed.params(sql, None)),
+                reparses,
+                "{dialect}: {sql}"
+            );
+            assert_eq!(
+                shared,
+                analyze_params(sql, dialect, None),
+                "{dialect}: {sql}"
+            );
+            assert!(
+                shared.is_some_and(|params| !params.is_empty()),
+                "{dialect}: {sql}"
+            );
         }
     }
 

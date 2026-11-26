@@ -105,6 +105,29 @@ impl Input<'_> {
         self.marker + offset.saturating_add_signed(-shift)
     }
 
+    /// [`Input::original`] of each of `sorted` offsets, in one pass over the edits.
+    pub(super) fn originals(&self, sorted: &[usize]) -> Vec<usize> {
+        let mut moves = self.moves.iter().peekable();
+        let mut shift = 0isize;
+        sorted
+            .iter()
+            .map(|&offset| {
+                while let Some(&&(start, stop, len)) = moves.peek() {
+                    let at = start.saturating_add_signed(shift);
+                    if offset < at {
+                        break;
+                    }
+                    if offset < at + len {
+                        return self.marker + start;
+                    }
+                    shift += len as isize - (stop - start) as isize;
+                    moves.next();
+                }
+                self.marker + offset.saturating_add_signed(-shift)
+            })
+            .collect()
+    }
+
     pub(super) fn into_owned(self) -> Input<'static> {
         Input {
             source: Cow::Owned(self.source.into_owned()),
