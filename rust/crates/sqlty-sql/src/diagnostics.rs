@@ -8,6 +8,7 @@ use std::cell::RefCell;
 use std::ops::Range;
 use std::rc::Rc;
 
+use rustc_hash::FxHashMap;
 use sqlparser::tokenizer::Span;
 
 pub use sqlty_rules::Rule;
@@ -39,12 +40,41 @@ struct Inner {
     enabled: bool,
     /// Each diagnostic with where sqlparser read its node, empty when unknown.
     items: Vec<(NameDiagnostic, Span)>,
+    /// The rules of `items` by message, each pair recorded once.
+    recorded: FxHashMap<String, Vec<Rule>>,
     /// The spans of the nodes being analyzed, innermost last; see [`Diagnostics::at`].
     at: Vec<Span>,
     /// Untyped results accounted for so far, recorded or deliberately silent.
     explained: usize,
     /// The columns the completion placeholder could name, once the analyzer reaches it.
     probe: Option<Vec<crate::analyzer::Candidate>>,
+}
+
+impl Inner {
+    /// Drop the items from `start` on that `keep` rejects.
+    fn drop_since(&mut self, start: usize, keep: impl Fn(Rule) -> bool) {
+        if self
+            .items
+            .get(start..)
+            .is_none_or(|tail| tail.iter().all(|(item, _)| keep(item.rule)))
+        {
+            return;
+        }
+        for (item, span) in self.items.split_off(start) {
+            if keep(item.rule) {
+                self.items.push((item, span));
+            } else if self
+                .recorded
+                .get_mut(item.message.as_str())
+                .is_none_or(|rules| {
+                    rules.retain(|rule| *rule != item.rule);
+                    rules.is_empty()
+                })
+            {
+                self.recorded.remove(item.message.as_str());
+            }
+        }
+    }
 }
 
 /// A shared, append-only list of diagnostics; clones record into the same list.
@@ -124,10 +154,18 @@ impl Diagnostics {
             return;
         }
         inner.explained += explains;
-        let known = |(found, _): &(NameDiagnostic, Span)| {
-            found.rule == item.rule && found.message == item.message
+        let new = match inner.recorded.get_mut(item.message.as_str()) {
+            Some(rules) if rules.contains(&item.rule) => false,
+            Some(rules) => {
+                rules.push(item.rule);
+                true
+            }
+            None => {
+                inner.recorded.insert(item.message.clone(), vec![item.rule]);
+                true
+            }
         };
-        if !inner.items.iter().any(known) {
+        if new {
             let at = inner.at.last().copied().unwrap_or(Span::empty());
             inner.items.push((item, at));
         }
@@ -177,18 +215,13 @@ impl Diagnostics {
     /// whole turned out typed needs no explanation.
     pub(crate) fn rewind(&self, (items, explained): (usize, usize)) {
         let mut inner = self.0.borrow_mut();
-        inner.items.truncate(items);
+        inner.drop_since(items, |_| false);
         inner.explained = explained;
     }
 
     /// Drop what was recorded after `mark` under a rule `keep` rejects.
     pub(crate) fn retain_since(&self, (items, _): (usize, usize), keep: impl Fn(Rule) -> bool) {
-        let mut inner = self.0.borrow_mut();
-        let mut index = 0;
-        inner.items.retain(|(item, _)| {
-            index += 1;
-            index <= items || keep(item.rule)
-        });
+        self.0.borrow_mut().drop_since(items, keep);
     }
 
     /// Everything recorded so far, in order, without spans.
@@ -288,6 +321,23 @@ mod tests {
         diag.rewind(mark);
         assert_eq!(diag.items(), [found(Rule::UnknownType, "kept")]);
         assert_eq!(diag.explained(), 1);
+        diag.record(Rule::UnknownType, "dropped");
+        let mark = diag.mark();
+        diag.record(Rule::UnknownColumn, "dropped");
+        diag.record(Rule::UnknownTable, "kept too");
+        diag.retain_since(mark, |rule| rule == Rule::UnknownTable);
+        diag.record(Rule::UnknownColumn, "dropped");
+        let rules: Vec<_> = diag.items().into_iter().map(|d| d.rule).collect();
+        assert_eq!(
+            rules,
+            [
+                Rule::UnknownType,
+                Rule::UnknownType,
+                Rule::UnknownTable,
+                Rule::UnknownColumn
+            ],
+            "what was dropped is recorded again"
+        );
     }
 
     #[test]
