@@ -50,8 +50,8 @@ pub struct Rewritten {
     /// Name of `$1`, `$2`, ... as far as the rewrite numbered them: `None` for a positional
     /// placeholder. `$N` written in the query are not listed.
     pub names: Vec<Option<String>>,
-    /// Where each respelled placeholder starts in the query, with its number.
-    pub(crate) numbered: Vec<(usize, usize)>,
+    /// The bytes of each respelled placeholder in the query, with its number.
+    pub(crate) numbered: Vec<(std::ops::Range<usize>, usize)>,
 }
 
 /// `sql` with its placeholders respelled `$N`, numbered in order of appearance; a name
@@ -92,7 +92,7 @@ pub fn rewrite(sql: &str, styles: Styles) -> Rewritten {
             }),
         };
         out.push_str(&styles.number(number));
-        numbered.push((at, number));
+        numbered.push((at..end, number));
         copied = end;
     });
     out.push_str(&sql[copied..]);

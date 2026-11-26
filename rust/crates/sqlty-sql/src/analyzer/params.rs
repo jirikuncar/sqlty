@@ -239,7 +239,7 @@ pub(super) fn params_of(
             None
         } else {
             parsed
-                .numbered(&rewritten.numbered, |n| styles.number(n))
+                .numbered(sql, &rewritten.numbered, |n| styles.number(n))
                 .map(Cow::Owned)
         }
     });
@@ -1645,6 +1645,8 @@ mod tests {
             ),
             ("postgres", "SELECT data ? 'a', %s FROM t", 0),
             ("postgres", "SELECT 5 %% 2, %s", 1),
+            ("postgres", "SELECT $$%s$$, %s", 1),
+            ("postgres", "SELECT 1 WHERE id = %sabc", 1),
             ("mysql", "SELECT ?, ?", 0),
             ("mysql", "SELECT %s,\n %(a)s", 0),
             ("sqlite", "SELECT ?2, ?", 0),
@@ -1705,6 +1707,8 @@ mod tests {
             "SELECT * FROM users WHERE data ? 'a'",
             "SELECT * FROM users WHERE data ? 'a' AND id = ?",
             "SELECT * FROM users LIMIT %s OFFSET %s",
+            "SELECT * FROM users WHERE id = %sabc",
+            "SELECT :a$b",
             "SELECT * FROM users WHERE born + INTERVAL '1 day' > %s",
             "SELECT %s + INTERVAL '1 day'",
             "SELECT SUBSTRING(%s FROM 1 FOR %s)",

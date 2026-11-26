@@ -13,7 +13,7 @@ use crate::diagnostics::{Diagnostics, NameDiagnostic};
 use super::dialect::SqlDialect;
 use super::dml::statement_returns_rows;
 use super::expr::from_sql_type;
-use super::input::{parser_input, Input};
+use super::input::{parser_input, Input, PSYCOPG};
 use super::names::alias_name;
 use super::params::{params_of, Param};
 use super::preprocess::{parse_input_as_written, parse_query, too_deep, MAX_DEPTH};
@@ -273,30 +273,40 @@ impl Parsed {
         )
     }
 
-    /// The first statement with the placeholder at each byte of `numbered` spelled as
-    /// `spell` numbers it; `None` when one of them is not a placeholder of the tree.
+    /// The first statement with the placeholder at each range of `sql` in `numbered`
+    /// spelled as `spell` numbers it; `None` when one of them is not a placeholder of the
+    /// tree, or one of the tree's runs past it (`%sabc`).
     pub(super) fn numbered(
         &self,
-        numbered: &[(usize, usize)],
+        sql: &str,
+        numbered: &[(std::ops::Range<usize>, usize)],
         spell: impl Fn(usize) -> String,
     ) -> Option<Statement> {
         let mut stmt = self.first()?.clone();
         let mut starts = Vec::new();
         let _ = visit_expressions(&stmt, |expr| {
             if let Expr::Value(value) = expr {
-                if let Value::Placeholder(_) = value.value {
-                    starts.push(value.span.start);
+                if let Value::Placeholder(text) = &value.value {
+                    starts.push((value.span.start, text.clone()));
                 }
             }
             ControlFlow::<()>::Continue(())
         });
         starts.sort_unstable();
-        let offsets = self.offsets(&starts)?;
-        let number: HashMap<usize, usize> = numbered.iter().copied().collect();
+        let locations: Vec<Location> = starts.iter().map(|(at, _)| *at).collect();
+        let offsets = self.offsets(&locations)?;
+        let number: HashMap<usize, (&std::ops::Range<usize>, usize)> = numbered
+            .iter()
+            .map(|(range, n)| (range.start, (range, *n)))
+            .collect();
         let by_start: HashMap<Location, usize> = starts
             .into_iter()
             .zip(offsets)
-            .filter_map(|(start, offset)| Some((start, *number.get(&offset)?)))
+            .filter_map(|((start, text), offset)| {
+                let (range, n) = number.get(&offset)?;
+                (PSYCOPG.contains(&text.as_str()) || sql.get((*range).clone()) == Some(&text))
+                    .then_some((start, *n))
+            })
             .collect();
         if by_start.len() != numbered.len() {
             return None;
