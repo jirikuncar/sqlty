@@ -40,16 +40,16 @@ fn sources<'s>(scope: &'s Scope, outer: &'s Scope) -> impl Iterator<Item = &'s S
 }
 
 /// A column found in one source, borrowed from where it is declared.
-enum ColumnRef<'s> {
+enum ColumnRef<'s, 'c> {
     /// A column of a CTE, derived table or table function (`local`), or of a schema view.
     Virtual { column: &'s Column, local: bool },
-    /// A column of a schema table.
-    Schema(&'s SchemaColumn),
+    /// A column of a schema table, borrowed from the catalog.
+    Schema(&'c SchemaColumn),
     /// A column every table has without declaring it.
     System(Typed),
 }
 
-impl ColumnRef<'_> {
+impl ColumnRef<'_, '_> {
     fn typed(&self, dialect: SqlDialect) -> Typed {
         match self {
             ColumnRef::Virtual { column, .. } => column.typed(),
@@ -70,14 +70,14 @@ impl ColumnRef<'_> {
 }
 
 /// A column reference resolved to the source it reads.
-pub(super) struct Resolved<'r> {
+pub(super) struct Resolved<'r, 'c> {
     /// The alias or table name the source is read by.
     pub(super) reference: Cow<'r, str>,
     /// The key of the source's table.
     pub(super) table: Cow<'r, str>,
     /// The column, as the resolver names it (case folded).
     pub(super) column: Cow<'r, str>,
-    found: ColumnRef<'r>,
+    found: ColumnRef<'r, 'c>,
 }
 
 impl<'a> Analyzer<'a> {
@@ -169,7 +169,7 @@ impl<'a> Analyzer<'a> {
     }
 
     /// A column of one source, when it has it.
-    fn find_column(&self, table: &str, column: &str) -> Option<ColumnRef<'_>> {
+    fn find_column(&self, table: &str, column: &str) -> Option<ColumnRef<'_, 'a>> {
         if let Some(found) = self.virtual_column(table, column) {
             return found.map(|column| ColumnRef::Virtual {
                 column,
@@ -183,7 +183,7 @@ impl<'a> Analyzer<'a> {
     }
 
     /// Where a column found in `table` comes from, for explaining why it is untyped.
-    fn origin(found: &ColumnRef<'_>, table: &str, column: &str) -> Origin {
+    fn origin(found: &ColumnRef<'_, '_>, table: &str, column: &str) -> Origin {
         let label = || format!("{table}.{column}");
         match found {
             ColumnRef::Virtual { local: false, .. } => Origin::View(label()),
@@ -217,7 +217,7 @@ impl<'a> Analyzer<'a> {
         &'r self,
         expr: &'r Expr,
         scope: &'r Scope,
-    ) -> Option<Resolved<'r>> {
+    ) -> Option<Resolved<'r, 'a>> {
         match expr {
             Expr::Identifier(ident) => {
                 let column = folded(ident, self.dialect);
@@ -291,27 +291,22 @@ impl<'a> Analyzer<'a> {
         self.resolve_reference(expr, scope).is_some()
     }
 
-    /// [`Self::locate_column`] of a schema table column, and whether the column is part of
-    /// a foreign key.
-    pub(super) fn locate_table_column(
-        &self,
-        expr: &Expr,
-        scope: &Scope,
-    ) -> Option<(String, String, String, bool)> {
+    /// [`Self::resolve_reference`] of a schema table column, and whether the column is part
+    /// of a foreign key.
+    pub(super) fn locate_table_column<'r>(
+        &'r self,
+        expr: &'r Expr,
+        scope: &'r Scope,
+    ) -> Option<(Resolved<'r, 'a>, &'a SchemaColumn)> {
         let found = self.resolve_reference(expr, scope)?;
         let ColumnRef::Schema(column) = found.found else {
             return None;
         };
-        Some((
-            found.reference.into_owned(),
-            found.table.into_owned(),
-            found.column.into_owned(),
-            column.foreign_key,
-        ))
+        Some((found, column))
     }
 
     /// Whether the source of `resolved` says its column can be NULL (see [`ColumnRef`]).
-    pub(super) fn declared_nullability(&self, resolved: &Resolved<'_>) -> Nullability {
+    pub(super) fn declared_nullability(&self, resolved: &Resolved<'_, '_>) -> Nullability {
         let (table, column) = (&*resolved.table, &*resolved.column);
         match &resolved.found {
             // `CHECK (column IS NOT NULL)` or `CHECK (num_nulls(column, ...) = 0)`.

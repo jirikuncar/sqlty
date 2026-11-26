@@ -8,14 +8,14 @@
 use super::query::Analyzer;
 use crate::diagnostics::Rule;
 
-impl Analyzer<'_> {
+impl<'s> Analyzer<'s> {
     /// The key `column` of `table` holds, when it is a key or references one.
-    pub(super) fn entity_side(&self, table: &str, column: &str) -> Option<Side> {
-        let (root, key) = self.schema.entity(table, column)?;
-        let name = table.rsplit('.').next().unwrap_or(table);
+    pub(super) fn entity_side(&self, table: &'s str, column: &'s str) -> Option<Side<'s>> {
+        let entity = self.schema.catalog().entity(table, column)?;
         Some(Side {
-            column: format!("{name}.{column}"),
-            entity: (root.to_string(), key),
+            table: table.rsplit('.').next().unwrap_or(table),
+            column,
+            entity,
         })
     }
 
@@ -35,9 +35,11 @@ impl Analyzer<'_> {
             }
         };
         let message = format!(
-            "{} holds {} keys, {} holds {} keys",
+            "{}.{} holds {} keys, {}.{} holds {} keys",
+            a.table,
             a.column,
             named(a),
+            b.table,
             b.column,
             named(b)
         );
@@ -52,9 +54,10 @@ impl Analyzer<'_> {
 
 /// A column and the key it holds.
 #[derive(Clone)]
-pub(super) struct Side {
-    /// `table.column`, for messages.
-    column: String,
+pub(super) struct Side<'r> {
+    /// The table without its schema, and the column, for messages.
+    table: &'r str,
+    column: &'r str,
     /// The `(table key, column)` its foreign keys lead to.
-    entity: (String, String),
+    entity: (&'r str, &'r str),
 }

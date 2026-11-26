@@ -46,15 +46,15 @@ use rustc_hash::FxHashSet;
 #[derive(Clone, Default, PartialEq, Eq)]
 pub(super) struct Learned {
     /// `(reference, column)` pairs.
-    columns: HashSet<(String, String)>,
+    columns: FxHashSet<(String, String)>,
     /// References whose relation has a row, because a column of it is not NULL.
-    present: HashSet<String>,
+    present: FxHashSet<String>,
     /// Expressions such as `doc -> 'k'`.
     exprs: FxHashSet<ExprKey>,
     /// `(reference, column, values)`: the values `col = 'x'` or `col IN (...)` leaves.
     values: Vec<ColumnValues>,
     /// `(reference, column)` pairs proven NULL, by `col IS NULL`.
-    null: HashSet<(String, String)>,
+    null: FxHashSet<(String, String)>,
 }
 
 /// `into` with `other` added, moving the smaller set into the larger.

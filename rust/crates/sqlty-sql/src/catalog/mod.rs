@@ -730,20 +730,18 @@ impl Catalog {
     /// The entity a column of the table `name` holds a key of: the primary or unique key
     /// column its foreign keys lead to, as `(table key, column)`. `None` when the column
     /// is no key and references none.
-    pub(crate) fn entity(&self, name: &str, column: &str) -> Option<(&str, String)> {
+    pub(crate) fn entity<'c>(&'c self, name: &str, column: &'c str) -> Option<(&'c str, &'c str)> {
         let mut table = self.table_id(name)?;
-        let mut column = column.to_string();
+        let mut column = column;
         // A foreign key cycle has no root; stop after any chain a schema could hold.
         for _ in 0..32 {
             let next = self.table_at(table)?.foreign_keys.iter().find_map(|fk| {
                 let at = fk.columns.iter().position(|c| *c == column)?;
                 let (parent, _) = self.relations.get_key_value(fk.table.as_str())?;
-                Some((&**parent, fk.referred.get(at)?.clone()))
+                Some((&**parent, fk.referred.get(at)?.as_str()))
             });
             match next {
-                Some((parent, referred)) if (parent, &referred) != (table, &column) => {
-                    (table, column) = (parent, referred);
-                }
+                Some(found) if found != (table, column) => (table, column) = found,
                 _ => {
                     let keys = self.unique_keys(table)?;
                     let keyed = keys.iter().flatten().any(|c| *c == column);
@@ -1364,8 +1362,8 @@ mod tests {
              CREATE TABLE x (id int PRIMARY KEY, y_id int UNIQUE); \
              CREATE TABLE y (id int PRIMARY KEY, x_id int UNIQUE REFERENCES x (y_id)); \
              ALTER TABLE x ADD FOREIGN KEY (y_id) REFERENCES y (x_id);");
-        let root = |table: &str, column: &str| c.entity(table, column);
-        assert_eq!(root("c", "b_id"), Some(("public.a", "id".to_string())));
+        let root = |table: &str, column: &'static str| c.entity(table, column);
+        assert_eq!(root("c", "b_id"), Some(("public.a", "id")));
         assert_eq!(root("b", "a_id"), root("a", "id"));
         assert_eq!(root("a", "note"), None);
         assert_eq!(root("x", "y_id"), None, "a cycle has no root");
