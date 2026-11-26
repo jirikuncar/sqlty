@@ -571,7 +571,7 @@ pub(super) fn join_conditions<'a>(
 }
 
 /// The terms of a condition joined by `AND`.
-pub(super) fn conjuncts(expr: &Expr) -> Vec<&Expr> {
+pub(crate) fn conjuncts(expr: &Expr) -> Vec<&Expr> {
     match expr {
         Expr::BinaryOp {
             left,
@@ -587,7 +587,7 @@ pub(super) fn conjuncts(expr: &Expr) -> Vec<&Expr> {
     }
 }
 
-pub(super) fn strip(expr: &Expr) -> &Expr {
+pub(crate) fn strip(expr: &Expr) -> &Expr {
     match expr {
         Expr::Nested(inner) => strip(inner),
         other => other,

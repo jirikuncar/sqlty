@@ -14,6 +14,7 @@ const KEYS = [
   "preview",
   "max-query-variants",
   "rules",
+  "tenancy",
   "types",
 ];
 

@@ -30,6 +30,7 @@ use super::names::{alias_name, column_name, object_name};
 use super::nullability::{Facts, Nullability};
 use super::operators::{common_of, common_type};
 use super::scope::{any_merging_join, NameIndex, Scope, Table, Virtuals};
+use super::tenancy::TenantSink;
 use super::text_names::{item_texts, line_starts, offset, returning_start, text_column_name};
 use super::typed::Typed;
 use super::{Inferred, SchemaData};
@@ -129,6 +130,8 @@ pub(super) struct Analyzer<'a> {
     pub(super) source: Option<Rc<str>>,
     /// The names of the wide schema views read so far.
     pub(super) view_names: Rc<RefCell<HashMap<String, Rc<NameIndex>>>>,
+    /// Where the SELECTs a CTE or derived table returns leave their tenant tables.
+    pub(super) tenant_sink: Option<Rc<TenantSink>>,
 }
 
 impl<'a> Analyzer<'a> {
@@ -144,6 +147,7 @@ impl<'a> Analyzer<'a> {
             explain: None,
             source: None,
             view_names: Rc::default(),
+            tenant_sink: None,
         }
     }
 
@@ -216,6 +220,12 @@ impl<'a> Analyzer<'a> {
                         recursive = true;
                     }
                 }
+                let mut body = inner.clone();
+                // MERGE is not judged, so its CTEs are judged by their bodies.
+                let merge = matches!(query.body.as_ref(), SetExpr::Merge(_));
+                body.tenant_sink = (!recursive && !merge)
+                    .then(|| inner.tenant_sink(&cte.query))
+                    .flatten();
                 let columns_of = |inner: &Self| -> Inferred<Vec<Column>> {
                     let mut columns = inner
                         .query_columns(&cte.query)?
@@ -223,7 +233,8 @@ impl<'a> Analyzer<'a> {
                     rename_columns(&mut columns, &cte.alias, self.dialect);
                     Ok(columns)
                 };
-                let mut columns = columns_of(&inner)?;
+                let mut columns = columns_of(&body)?;
+                let carried = body.carried(&columns);
                 // A column of a recursive CTE is non-null only if it is in the anchor and in
                 // the recursive term reading the rows so far: repeat until nothing changes.
                 for _ in 0..=columns.len() + 1 {
@@ -249,6 +260,7 @@ impl<'a> Analyzer<'a> {
                     .flatten();
                 inner.virtuals.insert(name.clone(), columns);
                 inner.virtuals.set_key(&name, key);
+                inner.virtuals.set_carried(&name, carried);
             }
             return inner.query_body(query);
         }
@@ -389,6 +401,7 @@ impl<'a> Analyzer<'a> {
             analyzer.check_grouping(select, &scope);
             analyzer.check_fanout(select, &scope);
             analyzer.check_comparisons(select, &scope);
+            analyzer.check_tenant_select(select, &scope);
             if let Some(selection) = &select.selection {
                 analyzer.check_unmatched(selection, &scope);
             }
