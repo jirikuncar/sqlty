@@ -1650,6 +1650,7 @@ mod tests {
             ("mysql", "SELECT ?, ?", 0),
             ("mysql", "SELECT %s,\n %(a)s", 0),
             ("sqlite", "SELECT ?2, ?", 0),
+            ("sqlite", "SELECT ?, %s", 0),
             ("sqlite", "SELECT :name, @name", 0),
             ("sqlite", "SELECT 'é', ? || 'ü', ?", 0),
         ] {
