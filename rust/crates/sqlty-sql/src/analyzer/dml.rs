@@ -372,6 +372,7 @@ impl Analyzer<'_> {
         for source in &scope {
             self.check_table(&source.table);
         }
+        self.check_tenant_dml(stmt);
         // Conditions and values may also read the tables of UPDATE's FROM and DELETE's USING,
         // and those MySQL's multi-table UPDATE and DELETE join, targets included.
         let multi = multi_table(stmt);

@@ -113,6 +113,22 @@ pub fn types(section: &Section, defaults: Vec<(String, String)>) -> Vec<(String,
             part("remove-after"),
         ));
     }
+    let tenancy = section.setting("tenancy").and_then(toml::Value::as_table);
+    if let Some(table) = tenancy.and_then(|t| t.get("table")?.as_str()) {
+        let list = |key: &str| -> Vec<&str> {
+            let listed = tenancy.and_then(|t| t.get(key)?.as_array());
+            listed
+                .into_iter()
+                .flatten()
+                .filter_map(toml::Value::as_str)
+                .collect()
+        };
+        types.push(analyzer::tenancy_type(
+            table,
+            &list("exclude"),
+            &list("columns"),
+        ));
+    }
     types
 }
 

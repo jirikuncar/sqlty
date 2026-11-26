@@ -30,7 +30,7 @@ use sqlty_sql::Dialect;
 pub const CONFIG_FILES: [&str; 3] = ["sqlty.toml", "pyproject.toml", "Cargo.toml"];
 
 /// Keys of `[tool.sqlty]` that are not file discovery; see also [`DISCOVERY_KEYS`].
-pub const TOOL_KEYS: [&str; 20] = [
+pub const TOOL_KEYS: [&str; 21] = [
     "dialect",
     "driver",
     "schema",
@@ -48,6 +48,7 @@ pub const TOOL_KEYS: [&str; 20] = [
     "functions",
     "types",
     "deprecated-columns",
+    "tenancy",
     "format-command",
     "extend",
     "databases",
@@ -381,6 +382,9 @@ pub fn validate(mut table: Table, source: &str) -> Result<Config, InvalidConfig>
     if let Some(columns) = table.get("deprecated-columns") {
         check_deprecated(columns).map_err(named)?;
     }
+    if let Some(tenancy) = table.get("tenancy") {
+        check_tenancy(tenancy).map_err(named)?;
+    }
     if table.get("types").is_some_and(|types| {
         types
             .as_table()
@@ -581,18 +585,65 @@ fn check_deprecated(columns: &Value) -> Result<(), String> {
     Ok(())
 }
 
-/// The `deprecated-columns` of a checked table as the `types` pairs
+/// Keys of `[tool.sqlty.tenancy]`.
+pub const TENANCY_KEYS: [&str; 3] = ["table", "exclude", "columns"];
+
+fn check_tenancy(tenancy: &Value) -> Result<(), String> {
+    let place = "[tool.sqlty.tenancy]";
+    let Some(tenancy) = tenancy.as_table() else {
+        return Err(format!(
+            "{place} must be a table of table, exclude and columns"
+        ));
+    };
+    for (key, value) in tenancy {
+        if !TENANCY_KEYS.contains(&key.as_str()) {
+            return Err(format!(
+                "unknown key '{key}' in {place}{}; expected one of: {}",
+                suggest(key, &TENANCY_KEYS),
+                TENANCY_KEYS.join(", ")
+            ));
+        }
+        let columns = || value.as_array().into_iter().flatten().map(Value::as_str);
+        let listed = value.is_array() && columns().all(|c| c.is_some_and(|c| c.contains('.')));
+        if key != "table" && !listed {
+            return Err(format!("{place} {key} must be a list of table.column"));
+        }
+    }
+    match tenancy.get("table").and_then(Value::as_str) {
+        Some(table) if !table.is_empty() && !table.contains(['\t', ',']) => Ok(()),
+        _ => Err(format!("{place} table must name the tenant table")),
+    }
+}
+
+/// The `deprecated-columns` and `tenancy` of a checked table as the `types` pairs
 /// `TypeOverrides::new` reads.
 pub fn deprecated_types(table: &Table) -> Vec<(String, String)> {
     let columns = table.get("deprecated-columns").and_then(Value::as_table);
-    columns
+    let mut types: Vec<(String, String)> = columns
         .into_iter()
         .flatten()
         .map(|(key, entry)| {
             let part = |name: &str| entry.get(name).and_then(Value::as_str);
             sqlty_sql::analyzer::deprecated_type(key, part("use"), part("remove-after"))
         })
-        .collect()
+        .collect();
+    let tenancy = table.get("tenancy").and_then(Value::as_table);
+    if let Some(table) = tenancy.and_then(|t| t.get("table")).and_then(Value::as_str) {
+        let list = |key: &str| -> Vec<&str> {
+            let listed = tenancy.and_then(|t| t.get(key)).and_then(Value::as_array);
+            listed
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+                .collect()
+        };
+        types.push(sqlty_sql::analyzer::tenancy_type(
+            table,
+            &list("exclude"),
+            &list("columns"),
+        ));
+    }
+    types
 }
 
 fn is_strings(value: &Value) -> bool {
@@ -705,6 +756,18 @@ mod tests {
     }
 
     #[test]
+    fn tenancy_is_carried_with_the_types() {
+        let table = "[tenancy]\ntable = 'public.orgs'\nexclude = ['a.b', 'c.d']";
+        let table = validate(table.parse().unwrap(), "sqlty.toml")
+            .unwrap()
+            .table;
+        assert_eq!(
+            deprecated_types(&table),
+            [("&tenancy".to_string(), "public.orgs\ta.b,c.d\t".to_string())]
+        );
+    }
+
+    #[test]
     fn rules_merge_rule_by_rule() {
         let merged = |under: &str, over: &str| {
             let mut under: Table = under.parse().unwrap();
@@ -786,6 +849,24 @@ mod tests {
             (
                 "[deprecated-columns]\n'u.e' = { use = 1 }",
                 "'u.e' use must be a string",
+            ),
+            ("tenancy = 'orgs'", "tenancy] must be a table"),
+            ("[tenancy]\ntabel = 'orgs'", "did you mean 'table'?"),
+            (
+                "[tenancy]\nexclude = ['a.b']",
+                "table must name the tenant table",
+            ),
+            (
+                "[tenancy]\ntable = 'a,b'",
+                "table must name the tenant table",
+            ),
+            (
+                "[tenancy]\ntable = 'orgs'\ncolumns = ['org']",
+                "columns must be a list of table.column",
+            ),
+            (
+                "[tenancy]\ntable = 'orgs'\nexclude = 'a.b'",
+                "exclude must be a list of table.column",
             ),
         ] {
             assert!(invalid(toml).contains(message), "{toml}");

@@ -241,6 +241,46 @@ pub struct TypeOverrides {
     columns: FxHashMap<String, String>,
     /// `table.column`, folded -> the deprecation `[tool.sqlty.deprecated-columns]` gives it.
     deprecated: FxHashMap<String, Deprecation>,
+    /// The tenant table and the tenant keys `[tool.sqlty.tenancy]` excludes or adds.
+    tenancy: Option<Tenancy>,
+}
+
+/// `[tool.sqlty.tenancy]`: the table whose rows are the tenants, and the `table.column`
+/// keys it excludes or adds, folded and without a schema.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct Tenancy {
+    table: String,
+    exclude: Vec<String>,
+    columns: Vec<String>,
+}
+
+/// The key of the tenancy among the `types` pairs of [`TypeOverrides::new`]; the value is
+/// `table\texclude\tcolumns`, each list comma-separated.
+const TENANCY: &str = "&tenancy";
+
+/// The `types` pair [`TypeOverrides::new`] reads as `[tool.sqlty.tenancy]`: the tenant
+/// table, and the `table.column` tenant keys it excludes and adds.
+///
+/// ```
+/// use sqlty_sql::analyzer::tenancy_type;
+///
+/// let pair = tenancy_type("orgs", &["audit_log.org_id"], &["events.org"]);
+/// assert_eq!(pair, ("&tenancy".to_string(), "orgs\taudit_log.org_id\tevents.org".to_string()));
+/// ```
+pub fn tenancy_type(table: &str, exclude: &[&str], columns: &[&str]) -> (String, String) {
+    let value = format!("{table}\t{}\t{}", exclude.join(","), columns.join(","));
+    (TENANCY.to_string(), value)
+}
+
+/// `table.column` folded, without the table's schema.
+fn column_key(key: &str) -> String {
+    let (table, column) = key.rsplit_once('.').unwrap_or(("", key));
+    format!("{}.{}", short_name(table), column.to_lowercase())
+}
+
+/// A table name folded, without its schema.
+fn short_name(table: &str) -> String {
+    table.rsplit('.').next().unwrap_or(table).to_lowercase()
 }
 
 /// A column scheduled for removal: what replaces it and when it goes, as configured.
@@ -287,6 +327,23 @@ impl TypeOverrides {
         let dialect = SqlDialect::from_name(dialect);
         let mut overrides = TypeOverrides::default();
         for (key, python) in entries {
+            if key == TENANCY {
+                let mut parts = python.split('\t');
+                let table = parts.next().map(short_name).unwrap_or_default();
+                let mut list = || {
+                    let part = parts.next().unwrap_or_default();
+                    part.split(',')
+                        .filter(|key| !key.is_empty())
+                        .map(column_key)
+                        .collect()
+                };
+                overrides.tenancy = Some(Tenancy {
+                    table,
+                    exclude: list(),
+                    columns: list(),
+                });
+                continue;
+            }
             if let Some((table, column)) = key
                 .strip_prefix(DEPRECATED)
                 .and_then(|key| key.rsplit_once('.'))
@@ -326,7 +383,10 @@ impl TypeOverrides {
 
     /// Whether there are none.
     pub fn is_empty(&self) -> bool {
-        self.types.is_empty() && self.columns.is_empty() && self.deprecated.is_empty()
+        self.types.is_empty()
+            && self.columns.is_empty()
+            && self.deprecated.is_empty()
+            && self.tenancy.is_none()
     }
 
     /// The modules the Python types name, to import where a row type spells one:
@@ -444,6 +504,54 @@ impl Catalog {
             key,
             table.declared_foreign_keys.iter().filter(current).collect(),
         ))
+    }
+
+    /// The tenant keys of the table `name`, in column order, as `[tool.sqlty.tenancy]` makes
+    /// them: the primary key of the tenant table and each column of a foreign key to it,
+    /// less `exclude`, plus `columns`. `None` without a tenancy, for a table that has none,
+    /// and for one with row-level security, which the database scopes itself.
+    pub(crate) fn tenant_keys(&self, name: &str) -> Option<Vec<&str>> {
+        let tenancy = self.overrides.tenancy.as_ref()?;
+        let (key, table) = self.table_entry(name)?;
+        if table.row_security {
+            return None;
+        }
+        let own = short_name(key);
+        let tenant = own == tenancy.table;
+        let referencing = || {
+            let keys = table.declared_foreign_keys.iter();
+            keys.filter(|fk| short_name(&fk.table) == tenancy.table)
+        };
+        let listed = |list: &[String], column: &SchemaColumn| {
+            let name = column.name.to_lowercase();
+            let key = (own.as_str(), name.as_str());
+            list.iter()
+                .any(|listed| listed.split_once('.') == Some(key))
+        };
+        let keys: Vec<&str> = table
+            .columns
+            .iter()
+            .filter(|column| {
+                let keyed = (tenant && column.primary_key)
+                    || referencing().any(|fk| fk.columns.contains(&column.name));
+                (keyed && !listed(&tenancy.exclude, column)) || listed(&tenancy.columns, column)
+            })
+            .map(|column| column.name.as_str())
+            .collect();
+        (!keys.is_empty()).then_some(keys)
+    }
+
+    /// Whether `name` is the tenant table of `[tool.sqlty.tenancy]`.
+    pub(crate) fn is_tenant_table(&self, name: &str) -> bool {
+        match (&self.overrides.tenancy, self.table_id(name)) {
+            (Some(tenancy), Some(key)) => short_name(key) == tenancy.table,
+            _ => false,
+        }
+    }
+
+    /// Whether `[tool.sqlty.tenancy]` is configured.
+    pub(crate) fn has_tenancy(&self) -> bool {
+        self.overrides.tenancy.is_some()
     }
 
     /// The keys of the table `name`: its primary key, then each `UNIQUE` constraint or

@@ -389,6 +389,7 @@ impl<'a> Analyzer<'a> {
             analyzer.check_grouping(select, &scope);
             analyzer.check_fanout(select, &scope);
             analyzer.check_comparisons(select, &scope);
+            analyzer.check_tenant_select(&select.from, select.selection.as_ref(), &scope);
             if let Some(selection) = &select.selection {
                 analyzer.check_unmatched(selection, &scope);
             }
