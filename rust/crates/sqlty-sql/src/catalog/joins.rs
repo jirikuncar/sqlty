@@ -22,7 +22,7 @@ pub struct Join<'a> {
 
 /// Foreign keys by the table they reference: `(parent key, child key, index of the key in
 /// the child's list)`, sorted by parent, then child name.
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub(super) struct ReferencedBy(Vec<(Arc<str>, Arc<str>, usize)>);
 
 impl ReferencedBy {

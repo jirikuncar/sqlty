@@ -97,10 +97,9 @@ impl SchemaData {
         self.databases.as_deref()
     }
 
-    /// This schema, routing queries to `databases`. `None` when it is shared already.
-    pub fn with_databases(mut schema: Schema, databases: Databases) -> Option<Schema> {
-        Arc::get_mut(&mut schema)?.databases = Some(Arc::new(databases));
-        Some(schema)
+    /// This schema, routing queries to `databases`; it shares the tables of `schema`.
+    pub fn with_databases(schema: &SchemaData, databases: Databases) -> Schema {
+        Arc::new(schema.routed(databases))
     }
 }
 
@@ -113,7 +112,7 @@ mod tests {
     fn project() -> Schema {
         let analytics = load_schema("CREATE TABLE events (n INTEGER NOT NULL)", "sqlite");
         SchemaData::with_databases(
-            load_schema("CREATE TABLE users (id TEXT NOT NULL)", "postgres"),
+            &load_schema("CREATE TABLE users (id TEXT NOT NULL)", "postgres"),
             Databases {
                 name: DEFAULT.to_string(),
                 absent: false,
@@ -123,7 +122,6 @@ mod tests {
                 ],
             },
         )
-        .unwrap()
     }
 
     #[test]
@@ -187,9 +185,10 @@ mod tests {
     }
 
     #[test]
-    fn a_shared_schema_takes_no_databases() {
-        let schema = project();
-        let _shared = Arc::clone(&schema);
-        assert!(SchemaData::with_databases(schema, Databases::default()).is_none());
+    fn a_routed_schema_shares_its_tables() {
+        let plain = load_schema("CREATE TABLE users (id TEXT NOT NULL)", "postgres");
+        let routed = SchemaData::with_databases(&plain, Databases::default());
+        assert!(routed.shares_data(&plain));
+        assert!(plain.databases().is_none() && routed.databases().is_some());
     }
 }

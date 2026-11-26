@@ -1384,7 +1384,7 @@ mod tests {
 
     #[test]
     fn queries_of_another_dialect_are_counted_and_typed() {
-        const CONFIG: &str = "[project]\nrequires-python = \">=3.15\"\n\n[tool.sqlty]\nschema = \"app.sql\"\n\n[tool.sqlty.databases.lite]\ndialect = \"sqlite\"\nschema = \"lite.sql\"\n";
+        const CONFIG: &str = "[project]\nrequires-python = \">=3.15\"\n\n[tool.sqlty]\nschema = \"app.sql\"\n\n[tool.sqlty.databases.lite]\ndialect = \"sqlite\"\nschema = \"lite.sql\"\n\n[tool.sqlty.databases.copy]\ninclude = [\"copy/**\"]\n";
         let mut workspace = opened(&[
             ("/repo/pyproject.toml", CONFIG),
             ("/repo/app.sql", "CREATE TABLE users (id INT NOT NULL);"),
@@ -1394,6 +1394,16 @@ mod tests {
                 "q = \"--sql sqlty: db=lite\\nSELECT n FROM events\"\nu = \"--sql sqlty: db=lite\\nSELECT nope FROM events\"\n",
             ),
         ]);
+        let schemas: Vec<_> = workspace
+            .databases(Path::new("/repo/q.py"))
+            .expect("reads")
+            .into_iter()
+            .map(|(_, settings)| settings.schema.clone().expect("loaded"))
+            .collect();
+        let [own, lite, copy] = &schemas[..] else {
+            panic!("three databases: {}", schemas.len());
+        };
+        assert!(copy.shares_data(own) && !lite.shares_data(own));
         let counts = workspace.statistics_all().expect("counts");
         assert_eq!(counts[0].get("typed"), Some(&1));
         assert_eq!(counts[0].get("partially typed"), Some(&1));

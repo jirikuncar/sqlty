@@ -19,8 +19,8 @@ use super::index::NameIndex;
 use super::loader::{Loader, RawFunction, RawReturn, Rel, TypeDef};
 use super::names::{lookup_key, type_key};
 use super::{
-    Catalog, Function, FunctionReturn, Relation, SchemaColumn, TableRelation, TypeOverrides,
-    UserType, BUILTIN_SCHEMAS,
+    Catalog, CatalogData, Function, FunctionReturn, Relation, SchemaColumn, TableRelation,
+    TypeOverrides, UserType, BUILTIN_SCHEMAS,
 };
 
 /// A catalog map, by `schema.name`.
@@ -99,7 +99,7 @@ impl Loader {
             }
         }
         let (functions, unknown_functions) = self.build_functions(&resolver, &relations);
-        Catalog {
+        let data = CatalogData {
             relations,
             types: user_types,
             composites,
@@ -116,8 +116,11 @@ impl Loader {
             postgres: self.postgres,
             overrides: Arc::clone(&self.overrides),
             index: NameIndex::default(),
-            databases: None,
             tenants: OnceLock::new(),
+        };
+        Catalog {
+            data: Arc::new(data),
+            databases: None,
         }
     }
 
