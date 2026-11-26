@@ -221,7 +221,9 @@ impl<'a> Analyzer<'a> {
                     }
                 }
                 let mut body = inner.clone();
-                body.tenant_sink = (!recursive)
+                // MERGE is not judged, so its CTEs are judged by their bodies.
+                let merge = matches!(query.body.as_ref(), SetExpr::Merge(_));
+                body.tenant_sink = (!recursive && !merge)
                     .then(|| inner.tenant_sink(&cte.query))
                     .flatten();
                 let columns_of = |inner: &Self| -> Inferred<Vec<Column>> {

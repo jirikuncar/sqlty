@@ -189,5 +189,6 @@ still skip the policy: connect as a role that has neither.
 
 An `INSERT ... SELECT` is judged as the query it runs, and the tenant table itself may be
 inserted into freely. A recursive CTE is judged by its own body: a pin in the query that
-reads it does not reach it, so pin the key inside the CTE. Views and `MERGE` are not judged.
+reads it does not reach it, so pin the key inside the CTE. So is a CTE or derived table a
+`MERGE` reads. Views and `MERGE` itself are not judged.
 The rule runs for PostgreSQL, MySQL and SQLite, the dialects whose names sqlty checks.

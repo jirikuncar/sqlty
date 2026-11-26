@@ -79,8 +79,9 @@ impl<N> Unpinned<N> {
 /// The SELECTs a CTE or derived table returns, and what each leaves to the query reading
 /// it, by address: their analysis meets them again under every clone of the analyzer.
 pub(super) struct TenantSink {
-    selects: HashSet<*const Select>,
-    found: RefCell<HashMap<*const Select, Branch>>,
+    at: HashMap<*const Select, usize>,
+    /// By query order, which keeps the first span of a repeated message stable.
+    found: RefCell<Vec<Option<Branch>>>,
 }
 
 /// What one SELECT of a [`TenantSink`] leaves: its width, its outputs its pins reach and
@@ -129,11 +130,9 @@ impl Analyzer<'_> {
         let factors = select.from.iter().flat_map(factors);
         let unpinned = self.unpinned(factors, scope, &pins, |_| "read");
         match &self.tenant_sink {
-            Some(sink) if sink.selects.contains(&(select as *const Select)) => {
+            Some(sink) if sink.at.contains_key(&(select as *const Select)) => {
                 let branch = self.carry(select, scope, &pins, unpinned);
-                sink.found
-                    .borrow_mut()
-                    .insert(select as *const Select, branch);
+                sink.found.borrow_mut()[sink.at[&(select as *const Select)]] = Some(branch);
             }
             _ => self.report(unpinned),
         }
@@ -141,11 +140,15 @@ impl Analyzer<'_> {
 
     /// A sink for the SELECTs `query`, the body of a CTE or derived table, returns.
     pub(super) fn tenant_sink(&self, query: &Query) -> Option<Rc<TenantSink>> {
-        let mut selects = HashSet::new();
+        let mut selects = Vec::new();
         (self.judges_tenancy() && body_selects(query, &mut selects)).then(|| {
             Rc::new(TenantSink {
-                selects,
-                found: RefCell::default(),
+                at: selects
+                    .iter()
+                    .enumerate()
+                    .map(|(at, &select)| (select, at))
+                    .collect(),
+                found: RefCell::new(selects.iter().map(|_| None).collect()),
             })
         })
     }
@@ -156,10 +159,13 @@ impl Analyzer<'_> {
     pub(super) fn carried(&self, columns: &[Column]) -> Option<Carried> {
         let sink = self.tenant_sink.as_ref()?;
         let found = std::mem::take(&mut *sink.found.borrow_mut());
-        let whole = found.len() == sink.selects.len()
-            && found.values().all(|branch| branch.width == columns.len());
+        let names: Vec<String> = columns.iter().map(|c| self.column_key(&c.name)).collect();
+        let unique = names.iter().collect::<HashSet<_>>().len() == names.len();
+        let whole = unique
+            && (found.iter())
+                .all(|branch| branch.as_ref().is_some_and(|b| b.width == columns.len()));
         if !whole {
-            for branch in found.into_values() {
+            for branch in found.into_iter().flatten() {
                 self.report(
                     branch
                         .unpinned
@@ -170,8 +176,8 @@ impl Analyzer<'_> {
             }
             return None;
         }
-        let name = |at: usize| self.column_key(&columns[at].name);
-        let mut branches = found.into_values();
+        let name = |at: usize| names[at].clone();
+        let mut branches = found.into_iter().flatten();
         let first = branches.next()?;
         let mut pinned = first.pinned.clone();
         let mut unpinned = first.unpinned;
@@ -208,12 +214,14 @@ impl Analyzer<'_> {
             })
             .collect();
         let feeders = pins.feeders();
+        let reached_nodes = &reached;
         let mut carried = Vec::new();
         let mut lost = Vec::new();
         for found in unpinned {
             let alternatives: Vec<Vec<Vec<usize>>> = (found.alternatives.iter())
                 .map(|key| {
                     key.iter()
+                        .filter(|options| !options.iter().any(|n| reached_nodes.contains(n)))
                         .map(|options| {
                             let sources = feeders.reaching(options);
                             (0..passed.len())
@@ -257,7 +265,11 @@ impl Analyzer<'_> {
         .filter_map(|key| self.local_node(key, scope))
         .collect();
         let grouped = select.having.is_some()
-            || !matches!(&select.group_by, GroupByExpr::Expressions(keys, _) if keys.is_empty());
+            || !matches!(&select.group_by, GroupByExpr::Expressions(keys, _) if keys.is_empty())
+            || select.projection.iter().any(|item| {
+                matches!(item, SelectItem::UnnamedExpr(expr) | SelectItem::ExprWithAlias { expr, .. }
+                    if has_aggregate(expr))
+            });
         let mut passed = Vec::new();
         for item in &select.projection {
             let (reference, options) = match item {
@@ -265,7 +277,6 @@ impl Analyzer<'_> {
                     if has_window(expr) {
                         return None;
                     }
-                    let grouped = grouped || has_aggregate(expr);
                     let node = self.local_node(expr, scope);
                     passed.push(node.filter(|node| !grouped || keys.contains(node)));
                     continue;
@@ -369,6 +380,20 @@ impl Analyzer<'_> {
                     delete.selection.as_ref(),
                     "deleted from",
                 )
+            }
+            Statement::Merge(merge) => {
+                // MERGE is not judged, but a CTE or derived table it reads leaves its tenant
+                // tables to it: report them as read.
+                let source = vec![TableWithJoins {
+                    relation: merge.source.clone(),
+                    joins: Vec::new(),
+                }];
+                let mut quiet = self.clone();
+                quiet.diag = Diagnostics::collecting();
+                let Ok((analyzer, scope)) = quiet.scope_of(&source);
+                let none = Pins::default();
+                return self
+                    .report(analyzer.unpinned(std::iter::empty(), &scope, &none, |_| "read"));
             }
             _ => return,
         };
@@ -794,10 +819,13 @@ impl Feeders {
 
 /// Collects the SELECTs whose rows `query` returns as they are; `false` when a `LIMIT` or
 /// a statement picks them.
-fn body_selects(query: &Query, into: &mut HashSet<*const Select>) -> bool {
-    fn set(body: &SetExpr, into: &mut HashSet<*const Select>) -> bool {
+fn body_selects(query: &Query, into: &mut Vec<*const Select>) -> bool {
+    fn set(body: &SetExpr, into: &mut Vec<*const Select>) -> bool {
         match body {
-            SetExpr::Select(select) => into.insert(&**select as *const Select) || true,
+            SetExpr::Select(select) => {
+                into.push(&**select as *const Select);
+                true
+            }
             SetExpr::SetOperation { left, right, .. } => set(left, into) && set(right, into),
             SetExpr::Query(query) => body_selects(query, into),
             _ => false,

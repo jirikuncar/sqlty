@@ -225,6 +225,24 @@ one_branch = SQL[tuple[int]]("--sql\nWITH u AS (SELECT id, org_id FROM projects 
 
 # error: [tenant-scope] "`projects` is read without `projects.org_id = <parameter>`"
 shadowed = SQL[tuple[int]]("--sql\nWITH projects AS (SELECT id, org_id FROM projects) SELECT id FROM projects")
+
+# error: [tenant-scope] "`invoices` is read without `invoices.org_id = <parameter>`"
+same_name = SQL[tuple[str]]("--sql\nWITH x AS (SELECT p.name, p.org_id, i.org_id FROM projects p, invoices i WHERE p.org_id = %s) SELECT name FROM x")
+
+# error: [tenant-scope] "`projects` is read without `projects.org_id = <parameter>`"
+recursive = SQL[tuple[int]]("--sql\nWITH RECURSIVE r AS (SELECT id, org_id FROM projects UNION ALL SELECT id, org_id FROM r) SELECT id FROM r WHERE org_id = %s")
+```
+
+MERGE is not judged, so a CTE or derived table it reads is judged by its body.
+
+```python
+from sqlty import SQL
+
+# error: [tenant-scope] "`projects` is read without `projects.org_id = <parameter>`"
+merge_cte = SQL("--sql\nWITH p AS (SELECT id, org_id FROM projects) MERGE INTO invoices i USING p ON i.project_id = p.id WHEN MATCHED THEN DELETE")
+
+# error: [tenant-scope] "`projects` is read without `projects.org_id = <parameter>`"
+merge_derived = SQL("--sql\nMERGE INTO invoices i USING (SELECT id, org_id FROM projects) p ON i.project_id = p.id WHEN MATCHED THEN DELETE")
 ```
 
 A window, `DISTINCT ON`, a `LIMIT` or a grouping that is not by the tenant key reads the
@@ -364,6 +382,9 @@ from sqlty import SQL
 by_region = SQL[tuple[int]]("--sql\nSELECT id FROM sites WHERE region = %s")
 
 # error:
+split = SQL[tuple[int]]("--sql\nWITH s AS (SELECT id, org_id FROM sites WHERE region = %s) SELECT id FROM s WHERE org_id = %s")
+
+# error:
 by_org = SQL[tuple[int]]("--sql\nSELECT id FROM sites WHERE org_id = %s AND region = %s")
 
 # error: [tenant-scope] "`orgs` is read without `orgs.id = <parameter>` and `orgs.region = <parameter>`"
@@ -437,6 +458,12 @@ mine = SQL[tuple[str]]("--sql\nSELECT name FROM projects WHERE org_id = ?")
 
 # error:
 named = SQL[tuple[str]]("--sql\nSELECT name FROM projects WHERE org_id = :org")
+
+# error: [tenant-scope] "`projects` is read without `projects.org_id = <parameter>`"
+counted = SQL[tuple[int]]("--sql\nSELECT n FROM (SELECT org_id, count(*) AS n FROM projects) c WHERE c.org_id = ?")
+
+# error: [tenant-scope] "`projects` is read without `projects.org_id = <parameter>`"
+unaliased = SQL[tuple[str]]("--sql\nSELECT name FROM (SELECT name, org_id FROM projects) WHERE org_id = ?")
 ```
 
 ## Without a tenancy
