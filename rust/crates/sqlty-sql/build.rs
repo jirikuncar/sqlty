@@ -14,6 +14,8 @@
 use std::path::{Path, PathBuf};
 use std::{env, fs};
 
+#[path = "functions/compile.rs"]
+mod functions;
 #[path = "rules/compile.rs"]
 mod inference;
 
@@ -35,6 +37,30 @@ fn main() {
     let code = inference::compile(&files).unwrap_or_else(|e| panic!("inference rules: {e}"));
     let out = PathBuf::from(env::var("OUT_DIR").unwrap()).join("inference_rules.rs");
     fs::write(out, code).unwrap();
+    fs::write(
+        PathBuf::from(env::var("OUT_DIR").unwrap()).join("function_catalog.rs"),
+        function_catalog(&crate_dir),
+    )
+    .unwrap();
+}
+
+/// The dialects with a `functions/<dialect>.txt`.
+const CATALOGS: &[&str] = &["postgres"];
+
+/// `functions/<dialect>.txt`, compiled to a `Catalog` static per dialect.
+fn function_catalog(crate_dir: &Path) -> String {
+    let dir = crate_dir.join("functions");
+    println!("cargo:rerun-if-changed={}", dir.display());
+    let mut code = String::new();
+    for dialect in CATALOGS {
+        let file = format!("functions/{dialect}.txt");
+        let text =
+            fs::read_to_string(crate_dir.join(&file)).unwrap_or_else(|e| panic!("{file}: {e}"));
+        let name = dialect.to_ascii_uppercase();
+        code += &functions::compile(&file, &name, &text)
+            .unwrap_or_else(|e| panic!("function catalog: {e}"));
+    }
+    code
 }
 
 fn collect(dir: &Path, files: &mut Vec<PathBuf>) {

@@ -26,7 +26,7 @@ use sqlty_sql::analyzer::{self, CandidateKind, Schema};
 use sqlty_sql::highlight::Highlight;
 
 const VERSION: (u8, u8) = (3, 14);
-const PYTHON: [&str; 8] = [
+const PYTHON: [&str; 9] = [
     "error",
     "rewritten",
     "rewritten-file",
@@ -34,6 +34,7 @@ const PYTHON: [&str; 8] = [
     "stripped",
     "completions",
     "hover",
+    "signature",
     "highlighted",
 ];
 /// `# completions:` lists the first ones, then `...`: the system catalogs make lists long.
@@ -316,6 +317,12 @@ impl<'s> Run<'s> {
                 let queries = self.queries_of(text)?;
                 locate::hover(&queries, offset, self.dialect, self.schema.as_deref())
                     .map_or_else(|| "None".to_string(), |found| found.contents)
+            }
+            "signature" => {
+                let offset = self.cursor(unit, kind)?;
+                let queries = self.queries_of(text)?;
+                locate::signature_help(&queries, offset, self.dialect, self.schema.as_deref())
+                    .map_or_else(|| "None".to_string(), |help| signature_lines(&help))
             }
             "highlighted" => {
                 let queries = self.queries_of(text)?;
@@ -677,4 +684,33 @@ fn without_imports(source: &str, imports: &HashSet<String>) -> String {
         })
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+/// `# signature:` lines: each overload, the active one after `> ` with its active parameter
+/// in `**`.
+fn signature_lines(help: &analyzer::SignatureHelp) -> String {
+    let lines: Vec<String> = help
+        .signatures
+        .iter()
+        .enumerate()
+        .map(|(at, signature)| {
+            if at != help.active_signature {
+                return signature.label.to_string();
+            }
+            let label = match help.active_parameter.map(|p| signature.parameters[p].label) {
+                Some((start, end)) => {
+                    let label = signature.label;
+                    format!(
+                        "{}**{}**{}",
+                        &label[..start],
+                        &label[start..end],
+                        &label[end..]
+                    )
+                }
+                None => signature.label.to_string(),
+            };
+            format!("> {label}")
+        })
+        .collect();
+    lines.join("\n")
 }

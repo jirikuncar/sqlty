@@ -42,6 +42,7 @@ pub mod highlight;
 pub mod json;
 pub mod migrations;
 pub mod placeholders;
+pub mod signatures;
 pub(crate) mod values;
 
 /// The most columns a table or a result has: MySQL's limit, above PostgreSQL's 1600 and

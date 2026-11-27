@@ -20,7 +20,7 @@
 
 use std::ops::Range;
 
-use sqlty_sql::analyzer::{self, Completions, Hover, SchemaData};
+use sqlty_sql::analyzer::{self, Completions, Hover, SchemaData, SignatureHelp};
 use sqlty_sql::highlight::{highlight, Highlight};
 
 use crate::rewriter::{after_marker, escapes, extract_string_content, ImportStyle};
@@ -291,6 +291,22 @@ pub fn hover(
     let at = queries.at(offset)?;
     let mut found = analyzer::hover(&at.text, at.offset, dialect, schema)?;
     found.range = at.source_offset(found.range.start)?..at.source_offset(found.range.end)?;
+    Some(found)
+}
+
+/// The call of a built-in function at byte `offset` of `source`, `None` outside a query
+/// `check` reads: [`Queries::at`], then
+/// [`signature_help`](sqlty_sql::analyzer::signature_help) on the query, with
+/// [`SignatureHelp::name`] mapped back to the bytes of the source.
+pub fn signature_help(
+    queries: &Queries<'_>,
+    offset: usize,
+    dialect: &str,
+    schema: Option<&SchemaData>,
+) -> Option<SignatureHelp> {
+    let at = queries.at(offset)?;
+    let mut found = analyzer::signature_help(&at.text, at.offset, dialect, schema)?;
+    found.name = at.source_offset(found.name.start)?..at.source_offset(found.name.end)?;
     Some(found)
 }
 

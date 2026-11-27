@@ -15,7 +15,7 @@ pub const CURSOR: &str = "<CURSOR>";
 
 const SQL_KINDS: &str = "inferred|expanded|columns|json|params|rules|error";
 const PY_KINDS: &str =
-    "rewritten|rewritten-file|stripped|fixed|formatted|error|decoded|completions|hover|highlighted";
+    "rewritten|rewritten-file|stripped|fixed|formatted|error|decoded|completions|hover|signature|highlighted";
 
 static PY_ASSERTION: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(&format!(r"^(\s*)#\s+({PY_KINDS})(\[[^\]]*\])?:(?: (.*))?$")).unwrap()
