@@ -625,13 +625,11 @@ impl Statement<'_> {
         if !items.iter().any(is_like) {
             return None;
         }
-        let mut prefix = LIKE_COLUMN.to_string();
-        if placeholders {
-            let text = render(pieces).to_lowercase();
-            while text.contains(&prefix) {
-                prefix.push('_');
-            }
-        }
+        let prefix = if placeholders {
+            unused_prefix(&render(pieces).to_lowercase())
+        } else {
+            LIKE_COLUMN.to_string()
+        };
         let mut kept = Vec::new();
         let mut sources = Vec::new();
         for item in items {
@@ -851,6 +849,22 @@ pub(crate) fn statement_ranges(sql: &str, mysql: bool) -> Vec<std::ops::Range<us
 }
 
 /// Split on `sep` outside parentheses.
+/// [`LIKE_COLUMN`] with more underscores than follow it anywhere in `text`, so no name in
+/// `text` starts with it. One pass over `text`.
+fn unused_prefix(text: &str) -> String {
+    let longest = text
+        .match_indices(LIKE_COLUMN)
+        .map(|(at, _)| {
+            text[at + LIKE_COLUMN.len()..]
+                .bytes()
+                .take_while(|&b| b == b'_')
+                .count()
+        })
+        .max();
+    let extra = longest.map_or(0, |run| run + 1);
+    format!("{LIKE_COLUMN}{}", "_".repeat(extra))
+}
+
 fn split_top_level<'a, 'b>(pieces: &'b [Piece<'a>], sep: &str) -> Vec<&'b [Piece<'a>]> {
     let (mut parts, mut depth, mut from) = (Vec::new(), 0usize, 0);
     for (at, piece) in pieces.iter().enumerate() {
