@@ -22,6 +22,7 @@ export type FormatRequest = Source & { op: "format" };
 /** `offset` counts UTF-16 code units, as JavaScript strings do. */
 export type CompleteRequest = Source & { op: "complete"; offset: number };
 export type HoverRequest = Source & { op: "hover"; offset: number };
+export type SignatureRequest = Source & { op: "signature"; offset: number };
 /** The diagnostics `source` gets against `schema` but not against `before`, as `sqlty breaking` reports. */
 export type BreakingRequest = Source & { op: "breaking"; before: string };
 /** Validates the sqlty table of the file `path` holding `source`. */
@@ -37,6 +38,7 @@ export type Request =
   | FormatRequest
   | CompleteRequest
   | HoverRequest
+  | SignatureRequest
   | BreakingRequest
   | ConfigRequest
   | ProjectRequest;
@@ -106,6 +108,15 @@ export type Completions = {
 /** Markdown about the word at `offset`. */
 export type Hover = { start: number; end: number; contents: string };
 
+/** The overloads of the built-in function whose arguments hold `offset`. */
+export type Signatures = {
+  /** Each `parameters` entry is the `[start, end]` of a parameter in `label`. */
+  signatures: { label: string; url: string; parameters: [number, number][] }[];
+  active_signature: number;
+  /** Past the last parameter, the count of parameters, which Monaco and VS Code highlight none for. */
+  active_parameter: number;
+};
+
 export type ProjectAnswer =
   | { config: Settings; file: string }
   | { need: string }
@@ -117,6 +128,7 @@ export type Answer =
   | { formatted: string }
   | Completions
   | Hover
+  | Signatures
   | { diagnostics: Diagnostic[] }
   | { config: Settings }
   | ProjectAnswer
@@ -128,6 +140,7 @@ export interface Engine {
   (request: FormatRequest): { formatted: string } | Failure;
   (request: CompleteRequest): Completions | null | Failure;
   (request: HoverRequest): Hover | null | Failure;
+  (request: SignatureRequest): Signatures | null | Failure;
   (request: BreakingRequest): { diagnostics: Diagnostic[] } | Failure;
   (request: ConfigRequest): { config: Settings } | null | Failure;
   (request: ProjectRequest): ProjectAnswer | Failure;

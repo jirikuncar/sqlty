@@ -40,6 +40,7 @@ A request takes the module as `source`, the `CREATE TABLE` statements as `schema
 | `analyze` | | `diagnostics`, `queries` (row type, columns and parameters), `highlights`, and the source as `sqlty rewrite`, `strip` and `check --fix` leave it: `rewritten`, `stripped`, `fixed` |
 | `complete` | `offset` | The tables and columns to complete at `offset`, and the range they replace; `null` outside a query |
 | `hover` | `offset` | What the word at `offset` is, in Markdown; `null` for nothing |
+| `signature` | `offset` | The overloads of the built-in function whose arguments hold `offset`, with the active one and its parameter; `null` outside a call |
 | `format` | | `formatted`, as `sqlty format` leaves the source |
 | `config` | `path` | The validated sqlty table of the file `path` holding `source` |
 | `project` | `path`, `files` | The configuration `sqlty check` finds for the directory `path`, asking for each file it reads |
