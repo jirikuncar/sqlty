@@ -1,0 +1,6 @@
+tables = "--sql\nSELECT id FROM ord"
+view_columns = "--sql\nSELECT i FROM active_users"
+cte = "--sql\nWITH recent AS (SELECT id FROM users) SELECT * FROM rec"
+join = "--sql\nSELECT id FROM orders JOIN us"
+accent = "--sql\nSELECT 'é', na FROM users"
+view = "--sql\nSELECT id FROM act"
