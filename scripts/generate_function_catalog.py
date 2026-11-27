@@ -1,6 +1,7 @@
 """Write the signatures of each dialect's built-in functions, read from its documentation.
 
     uv run python scripts/generate_function_catalog.py postgres
+    uv run --with duckdb python scripts/generate_function_catalog.py duckdb
 
 Writes `rust/crates/sqlty-sql/functions/<dialect>.txt`, one overload per line:
 
@@ -15,6 +16,11 @@ files into `sqlty_sql::signatures`.
 PostgreSQL: the function tables of `doc/src/sgml/func.sgml` at the tag of the version the
 rules cite. A signature written with keywords (`substring(s FROM n)`, `trim(BOTH ...)`)
 is SQL syntax, not a call, and is left out.
+
+DuckDB: `duckdb_functions()` of the version the rules cite, with an overload per arity, and
+`varargs` as optional repeated arguments, `[, type, ...]`. More than four overloads with the same parameter names are written as
+one, `ANY` where their types differ. A table function returns `TABLE`; a macro's untyped parameter is `ANY`.
+The page is the documentation page of the function's first category, or of its kind.
 """
 
 from __future__ import annotations
@@ -116,6 +122,80 @@ def postgres() -> list[str]:
     return [f"{line}\t{doc}" for line, doc in lines.items()]
 
 
+DUCKDB_VERSION = "2.0.0"
+DUCKDB_DOCS = "https://duckdb.org/docs/2.0/sql/functions/"
+DUCKDB_PAGES = {
+    "aggregate": "aggregates",
+    "array": "array",
+    "bitstring": "bitstring",
+    "blob": "blob",
+    "date": "date",
+    "geometry": "geometry",
+    "lambda": "lambda",
+    "list": "list",
+    "numeric": "numeric",
+    "regex": "regular_expressions",
+    "string": "text",
+    "text_similarity": "text",
+    "timestamp": "timestamp",
+    "variant": "variant",
+    "window": "window_functions",
+}
+DUCKDB_KINDS = ("scalar", "aggregate", "window", "macro", "table", "table_macro")
+# More overloads than this with the same parameter names are one, typed where they agree.
+DUCKDB_OVERLOADS = 4
+DUCKDB_NAME = re.compile(r"[a-z][a-z0-9_]*")
+
+
+def duckdb_catalog() -> list[str]:
+    import duckdb  # noqa: PLC0415  # only this dialect needs it
+
+    if duckdb.__version__ != DUCKDB_VERSION:
+        raise SystemExit(f"DuckDB {DUCKDB_VERSION} expected, found {duckdb.__version__}")
+    rows = (
+        duckdb.connect()
+        .execute(
+            """
+        SELECT function_name, function_type, parameters, parameter_types, varargs, return_type,
+            categories
+        FROM duckdb_functions()
+        WHERE schema_name IN ('main', 'pg_catalog') AND function_type IN ?
+        ORDER BY function_name, len(parameters), function_oid
+        """,
+            [list(DUCKDB_KINDS)],
+        )
+        .fetchall()
+    )
+    groups: dict[tuple[object, ...], list[tuple[list[str], str, str]]] = {}
+    for name, kind, names, types, varargs, returns, categories in rows:
+        if not DUCKDB_NAME.fullmatch(name) or name.startswith(("__", "pg_")):
+            continue
+        types = [t or "ANY" for t in (types or [None] * len(names))]
+        result = "TABLE" if kind in ("table", "table_macro") else (returns or "ANY")
+        page = next((DUCKDB_PAGES[c] for c in categories if c in DUCKDB_PAGES), None)
+        page = page or DUCKDB_PAGES.get(kind, "overview")
+        key = (name, kind in ("table", "table_macro"), tuple(names), varargs)
+        groups.setdefault(key, []).append((types, result, page))
+    lines: dict[str, str] = {}
+    for (name, _, names, varargs), overloads in groups.items():
+        if len(overloads) > DUCKDB_OVERLOADS:
+            merged = [{types[i] for types, _, _ in overloads} for i in range(len(names))]
+            results = {result for _, result, _ in overloads}
+            overloads = [
+                (
+                    [kinds.pop() if len(kinds) == 1 else "ANY" for kinds in merged],
+                    results.pop() if len(results) == 1 else "ANY",
+                    overloads[0][2],
+                )
+            ]
+        for types, result, page in overloads:
+            params = ", ".join(f"{n}: {t}" for n, t in zip(names, types, strict=True))
+            if varargs:
+                params += f"[{', ' if params else ''}{varargs}, ...]"
+            lines.setdefault(f"{name}({params}) -> {result}", f"{page}.html")
+    return [f"{line}\t{doc}" for line, doc in lines.items()]
+
+
 def write(dialect: str, docs: str, source: str, lines: list[str]) -> None:
     header = [
         f"# Built-in functions of {dialect}, from {source}.",
@@ -130,10 +210,13 @@ def write(dialect: str, docs: str, source: str, lines: list[str]) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
-    parser.add_argument("dialect", choices=["postgres"])
+    parser.add_argument("dialect", choices=["postgres", "duckdb"])
     args = parser.parse_args()
     if args.dialect == "postgres":
         write("postgres", POSTGRES_DOCS, POSTGRES_SOURCE, postgres())
+    else:
+        source = f"duckdb_functions() of DuckDB {DUCKDB_VERSION}"
+        write("duckdb", DUCKDB_DOCS, source, duckdb_catalog())
 
 
 if __name__ == "__main__":

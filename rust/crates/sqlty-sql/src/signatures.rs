@@ -87,8 +87,10 @@ impl Signature {
 /// The catalogs `dialect` reads, in order: its own, or for `generic` those it extends.
 fn catalogs(dialect: SqlDialect) -> &'static [&'static Catalog] {
     static PG: [&Catalog; 1] = [&POSTGRES];
+    static DUCK: [&Catalog; 1] = [&DUCKDB];
     match dialect {
         SqlDialect::Postgres | SqlDialect::Other("generic") => &PG,
+        SqlDialect::Other("duckdb") => &DUCK,
         _ => &[],
     }
 }

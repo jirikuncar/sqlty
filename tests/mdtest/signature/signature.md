@@ -167,6 +167,26 @@ q = "--sql\nSELECT my_function(<CURSOR>) FROM users"
 # signature: None
 ```
 
+## DuckDB
+
+DuckDB's catalog is its own `duckdb_functions()`.
+
+```toml
+[tool.sqlty]
+dialect = "duckdb"
+```
+
+```python
+q = "--sql\nSELECT list_value(1, 2, <CURSOR>)"
+# signature: list_value() -> "NULL"[]
+# signature: > list_value(value: T[, **T**, ...]) -> T[]
+```
+
+```python
+q = "--sql\nSELECT concat_ws(', ', <CURSOR>) FROM users"
+# signature: > concat_ws(separator: VARCHAR, **string: ANY**[, ANY, ...]) -> VARCHAR
+```
+
 ## Dialects without a catalog
 
 ```toml
