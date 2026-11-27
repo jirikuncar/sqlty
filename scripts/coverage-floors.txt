@@ -3,4 +3,4 @@
 sqlty-python 856
 sqlty-sql 131
 sqlty-project 42
-sqlty-cli 541
+sqlty-cli 304

@@ -15,6 +15,16 @@ $ sqlty check --output-format sarif
           "informationUri": "https://sqlty.kuncar.dev/",
           "rules": [
 ...
+              "id": "redundant-optional",
+              "shortDescription": {
+                "text": "Row type field is optional but its column cannot be NULL"
+              },
+              "helpUri": "https://sqlty.kuncar.dev/reference/rules/redundant-optional/",
+              "defaultConfiguration": {
+                "level": "none"
+              }
+            },
+...
       "columnKind": "unicodeCodePoints",
       "results": [
         {

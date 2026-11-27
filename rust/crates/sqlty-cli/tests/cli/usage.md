@@ -1,6 +1,18 @@
 # Version and usage errors
 
 ```console
+$ sqlty
+Type-safe SQL queries for Python.
+
+Usage: sqlty [COMMAND]
+...
+
+$ sqlty --help
+Type-safe SQL queries for Python.
+
+Usage: sqlty [COMMAND]
+...
+
 $ sqlty --version
 sqlty [VERSION]
 
