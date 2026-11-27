@@ -38,6 +38,17 @@ SELECT tags[1], users.tags[2], tags[1:2], tags[1]::TEXT, (tags)[1] FROM users
 -- columns: tags: str | None (TEXT)
 ```
 
+## A subscript of a multi-dimensional array is an element
+
+PostgreSQL does not track an array's dimensions: `text[][]` is `text[]`, and any
+subscript yields `text` ([Arrays](https://www.postgresql.org/docs/17/arrays.html)).
+
+```sql
+SELECT ('{{a,b},{c,d}}'::text[][])[1], ('{{a,b},{c,d}}'::text[][])[1][2]
+-- columns: text: str | None (TEXT)
+-- columns: text: str | None (TEXT)
+```
+
 ## Field access of a composite
 
 The field names the column, and a known composite types it.

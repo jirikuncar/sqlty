@@ -458,13 +458,27 @@ impl<'a> Analyzer<'a> {
         let (root, chain) = split_access(root, access_chain);
         let mark = self.diag.mark();
         let mut typed = self.expr(&root, scope)?;
+        let mut indexed = false;
         for access in chain {
+            let after_index = std::mem::replace(
+                &mut indexed,
+                self.dialect == SqlDialect::Postgres
+                    && matches!(access, AccessExpr::Subscript(Subscript::Index { .. })),
+            );
             typed = match access {
                 AccessExpr::Subscript(Subscript::Index { .. })
                     if self.dialect == SqlDialect::Postgres
                         && operand_type(&typed) == Some("JSONB") =>
                 {
                     from_sql_type("JSONB", self.dialect)
+                }
+                // PostgreSQL does not track dimensions: `c[1]` and `c[1][2]` of `text[][]` are
+                // both `text`.
+                AccessExpr::Subscript(Subscript::Index { .. }) if after_index => typed,
+                AccessExpr::Subscript(Subscript::Index { .. })
+                    if self.dialect == SqlDialect::Postgres =>
+                {
+                    self.unnested_typed(typed.sql())
                 }
                 AccessExpr::Subscript(Subscript::Index { .. }) => self.element_typed(typed.sql()),
                 AccessExpr::Subscript(Subscript::Slice { .. }) => typed,
