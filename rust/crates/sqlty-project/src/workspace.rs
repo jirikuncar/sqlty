@@ -204,7 +204,7 @@ impl Workspace {
         for (path, read) in collected.into_iter().zip(read) {
             match read {
                 Ok(module) => {
-                    workspace.settings_at(&module.resolved)?;
+                    workspace.directory_at(parent(&module.resolved))?;
                     workspace.order.push(path.clone());
                     workspace.modules.insert(path, module);
                 }
@@ -252,6 +252,8 @@ impl Workspace {
             return;
         }
         let module = self.module(path, Arc::from(text), true);
+        // Loaded now, as `open` loads it; a failure is reported with the module's settings.
+        let _ = self.directory_at(parent(&module.resolved));
         if self.modules.insert(path.to_path_buf(), module).is_none() {
             self.order.push(path.to_path_buf());
         }
@@ -591,9 +593,12 @@ impl Workspace {
     }
 
     fn index(&mut self) -> Arc<HelperIndex> {
-        if let Some(index) = &self.index {
-            return Arc::clone(index);
-        }
+        let index = self.index.clone().unwrap_or_else(|| self.built_index());
+        self.index = Some(Arc::clone(&index));
+        index
+    }
+
+    fn built_index(&self) -> Arc<HelperIndex> {
         let mut builder = Builder::new(self.version);
         for path in &self.order {
             let module = &self.modules[path];
@@ -602,9 +607,7 @@ impl Workspace {
                 builder.add_found(name, Arc::clone(source), &module.helpers);
             }
         }
-        let index = builder.build();
-        self.index = Some(Arc::clone(&index));
-        index
+        builder.build()
     }
 
     /// The index with the `functions` of `settings` registered.
@@ -670,15 +673,16 @@ impl Workspace {
     fn load_directory(&self, directory: &Path) -> Result<Arc<Directory>, String> {
         let mut warn = |warning| self.schemas.warn(warning);
         let loaded = self.flags.load(directory, &self.discovery, &mut warn)?;
-        let mut configs = self.configs.lock().unwrap_or_else(PoisonError::into_inner);
         let key = (
             loaded.label.clone(),
             loaded.base.clone(),
             loaded.table.clone(),
         );
-        if let Some((_, made)) = configs.iter().find(|(known, _)| *known == key) {
+        let configs = || self.configs.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some((_, made)) = configs().iter().find(|(known, _)| *known == key) {
             return made.clone();
         }
+        // Not under the lock: a schema load waits on the pool, which may run another load.
         let made = Directory::new(
             loaded,
             &self.flags,
@@ -687,7 +691,7 @@ impl Workspace {
             self.version,
         )
         .map(Arc::new);
-        configs.push((key, made.clone()));
+        configs().push((key, made.clone()));
         made
     }
 
@@ -853,15 +857,42 @@ impl Workspace {
         Ok(lines)
     }
 
-    /// Every module with its settings and helpers.
+    /// Every module with its settings and helpers: the index is built while the settings
+    /// of the modules are found, on all cores.
     fn prepared(&mut self) -> Result<Vec<Prepared>, String> {
-        self.order
-            .clone()
+        let this = &*self;
+        let (index, found) = pool().install(|| {
+            rayon::join(
+                || this.index.clone().unwrap_or_else(|| this.built_index()),
+                || {
+                    this.order
+                        .par_iter()
+                        .map(|path| {
+                            // `open` and `update` load the directory of every module.
+                            let resolved = &this.modules[path].resolved;
+                            let directory = this.directories[parent(resolved)].clone();
+                            let settings = directory
+                                .map(|directory| directory.file(resolved, &this.discovery));
+                            (path.clone(), settings)
+                        })
+                        .collect::<Vec<_>>()
+                },
+            )
+        });
+        self.index = Some(index);
+        let mut helpers: HashMap<*const FileSettings, Arc<HelperIndex>> = HashMap::new();
+        found
             .into_iter()
-            .map(|path| {
-                let resolved = self.modules[&path].resolved.clone();
-                let settings = self.settings_at(&resolved)?;
-                let helpers = self.helpers(&settings);
+            .map(|(path, settings)| {
+                let settings = settings?;
+                let helpers = match helpers.get(&Arc::as_ptr(&settings)) {
+                    Some(found) => Arc::clone(found),
+                    None => {
+                        let found = self.helpers(&settings);
+                        helpers.insert(Arc::as_ptr(&settings), Arc::clone(&found));
+                        found
+                    }
+                };
                 Ok((path, settings, helpers))
             })
             .collect()
