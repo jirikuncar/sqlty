@@ -412,6 +412,15 @@ impl Loader {
     /// Apply `op`; `false` when what it needs is not defined yet. `force` applies a view
     /// whatever it reads.
     pub(super) fn apply(&mut self, op: &Op, force: bool) -> bool {
+        // A statement waiting on a later one reads names under its own `search_path`.
+        if *op.path != self.search_path {
+            let current = std::mem::replace(&mut self.search_path, op.path.to_vec());
+            self.cache = None;
+            let applied = self.apply(op, force);
+            self.search_path = current;
+            self.cache = None;
+            return applied;
+        }
         let path = op.path.clone();
         self.at = op.at.clone();
         let blocked = match &op.kind {
@@ -1007,6 +1016,12 @@ impl Loader {
     /// SQLite's `a,`: those take time and memory in proportion to the schema.
     pub(super) fn allow(&mut self, schema: &str) {
         self.allowance += schema.len() / 2;
+    }
+
+    /// Read the statements that follow under `path`.
+    pub(super) fn set_search_path(&mut self, path: Vec<String>) {
+        self.search_path = path;
+        self.cache = None;
     }
 
     /// Whether the loader wrote [`MAX_WRITTEN`] columns: it reads no more statements.

@@ -17,9 +17,9 @@ arbitrary = "1"
 postgres = "0.19"
 proptest = "1.12"
 regex = "1"
-ruff_python_ast = "=0.0.21"
-ruff_python_parser = "=0.0.21"
-ruff_text_size = "=0.0.21"
+ruff_python_ast = "=0.0.23"
+ruff_python_parser = "=0.0.23"
+ruff_text_size = "=0.0.23"
 rusqlite = { version = "0.43", features = ["bundled"] }
 sqlty-project = { path = "../crates/sqlty-project" }
 sqlty-python = { path = "../crates/sqlty-python" }

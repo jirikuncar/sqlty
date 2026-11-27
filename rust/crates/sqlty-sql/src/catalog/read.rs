@@ -106,7 +106,7 @@ pub(super) fn read_statements<'a>(
             return false;
         }
         if let Some(schemas) = read.search_path {
-            loader.search_path = schemas.clone();
+            loader.set_search_path(schemas.clone());
             path = Rc::new(schemas);
             return true;
         }
