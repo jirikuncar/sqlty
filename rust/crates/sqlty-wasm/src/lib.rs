@@ -650,14 +650,17 @@ fn constant_sql_type(python_type: &str) -> Option<&'static str> {
         Some(_) => "int",
         None => python_type,
     };
-    match base {
-        "int" => Some("INT"),
-        "str" => Some("TEXT"),
-        "bool" => Some("BOOLEAN"),
-        "float" => Some("DOUBLE"),
-        "decimal.Decimal" => Some("DECIMAL"),
-        _ => None,
-    }
+    const TYPES: [(&str, &str); 5] = [
+        ("int", "INT"),
+        ("str", "TEXT"),
+        ("bool", "BOOLEAN"),
+        ("float", "DOUBLE"),
+        ("decimal.Decimal", "DECIMAL"),
+    ];
+    TYPES
+        .iter()
+        .find(|(python, _)| *python == base)
+        .map(|(_, sql)| *sql)
 }
 
 /// The byte of `source` at `units` UTF-16 code units, clamped to its end.
