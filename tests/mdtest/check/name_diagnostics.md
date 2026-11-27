@@ -61,6 +61,15 @@ e = SQL[tuple[int]]("--sql\nSELECT * FROM missing")
 f = SQL[tuple[int]]("--sql\nINSERT INTO missing (a) VALUES (1) RETURNING a")
 ```
 
+An unaliased subquery has no name to show.
+
+```python
+from sqlty import SQL
+
+# error: [unknown-column] "column `x` does not exist in the subquery"
+q = SQL[tuple[int]]("--sql\nSELECT x FROM (SELECT 1)")
+```
+
 #### A qualifier no FROM item names
 
 PostgreSQL rejects a qualifier that names a schema table missing from `FROM`, and one that

@@ -835,8 +835,15 @@ impl<'a> Analyzer<'a> {
     }
 }
 
+/// Names quoted and joined; an unaliased subquery, whose reference is empty, by what it is.
 fn list(names: &[&str]) -> String {
-    let names: Vec<String> = names.iter().map(|name| format!("`{name}`")).collect();
+    let names: Vec<String> = names
+        .iter()
+        .map(|name| match *name {
+            "" => "the subquery".to_string(),
+            name => format!("`{name}`"),
+        })
+        .collect();
     names.join(", ")
 }
 
