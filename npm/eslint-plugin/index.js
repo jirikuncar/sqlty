@@ -102,6 +102,8 @@ const checkSql = {
       .map(([rule, severity]) => `${JSON.stringify(rule)} = ${JSON.stringify(severity)}`)
       .join("\n");
     const { sourceCode } = context;
+    // JavaScript has no type arguments to write.
+    const typed = !/\.[cm]?jsx?$/.test(context.filename);
     const targeted = (node) => {
       const name = tagName(node);
       return name && targets.find((target) => target.matches(name));
@@ -129,7 +131,7 @@ const checkSql = {
           config: config && `[rules]\n${config}\n`,
           driver: options.driver,
           overrides: options.overrides?.types,
-          target,
+          target: typed ? target : { ...target, skipTypeAnnotations: true },
         });
         if (found.error) throw new Error(`sqlty: ${found.error}`);
         for (const problem of found.problems) {

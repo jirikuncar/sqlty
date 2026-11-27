@@ -32,6 +32,13 @@ tester.run("check-sql", rule, {
   ],
   invalid: [
     {
+      name: "a JavaScript file gets SQL problems, not row types",
+      filename: "queries.js",
+      options: options(),
+      code: "sql`SELECT nme FROM users`; sql`SELECT id FROM users`",
+      errors: [{ messageId: "sql", suggestions: 1 }],
+    },
+    {
       name: "a missing row type is added after the tag",
       options: options(),
       code: "const rows = await sql`SELECT id, name, email FROM users WHERE id = ${id}`",
