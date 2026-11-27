@@ -142,6 +142,17 @@ def test_generated_rules_are_current() -> None:
         assert output.read_text() == text, "run `make generate-duckdb-rules`"
 
 
+def test_function_catalog_is_current() -> None:
+    """``functions/duckdb.txt`` is what DuckDB lists (``generate_function_catalog.py duckdb``)."""
+    script = _script("scripts/generate_function_catalog.py")
+    text = script.render(
+        "duckdb", script.DUCKDB_DOCS, script.DUCKDB_SOURCE, script.duckdb_catalog()
+    )
+    assert (script.OUTPUT / "duckdb.txt").read_text() == text, (
+        "run `uv run python scripts/generate_function_catalog.py duckdb`"
+    )
+
+
 def test_functions_match_duckdb() -> None:
     """Every call of a DuckDB built-in that sqlty types has the type DuckDB gives it."""
     engine_functions = _script("scripts/compat/engine_functions.py")
