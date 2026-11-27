@@ -40,6 +40,22 @@ f = SQL[tuple[int]]("--sql\nSELECT name \
 FROM users")
 ```
 
+## Named Unicode escapes
+
+`\N{NAME}` is decoded by its Unicode name, in any case, as Python decodes it; a column after
+one is underlined where it is written.
+
+```python
+from sqlty import SQL
+
+# error: [narrow-type] "SQL[tuple[int]] should be SQL[tuple[str]]"
+a = SQL[tuple[int]]("--sql\nSELECT \N{LATIN SMALL LETTER N}ame FROM users")
+# error: [narrow-type] "SQL[tuple[int]] should be SQL[tuple[str]]"
+b = SQL[tuple[int]]("--sql\nSELECT \N{latin small letter n}ame FROM users")
+# error[55:59]: [unknown-column] "column `nope` does not exist in `users`"
+c = SQL[tuple[str, str]]("--sql\nSELECT '\N{BULLET}', nope FROM users")
+```
+
 ## Row types
 
 ```python
