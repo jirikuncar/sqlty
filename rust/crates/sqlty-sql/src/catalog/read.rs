@@ -196,7 +196,7 @@ fn read_statement(
                 None => skipped.push(("table", name)),
             }
         } else if stmt.is_create_table() {
-            let (likes, text) = match reads_like.then(|| stmt.without_like()).flatten() {
+            let (likes, text) = match reads_like.then(|| stmt.without_like(true)).flatten() {
                 Some((text, likes)) => (likes, Some(text)),
                 None => (Vec::new(), None),
             };
