@@ -88,6 +88,8 @@ fn query_names() {
         pg("SELECT users|.id FROM users u"),
         pg("WITH c AS (SELECT 1 AS x) SELECT c|.x FROM c AS d"),
         pg("SELECT o|.id FROM (users JOIN app.orders o ON true)"),
+        pg("SELECT 1 FROM (SELECT u|.id FROM users u) s"),
+        pg("SELECT s|.id FROM (SELECT u.id FROM users u) s, users"),
     ];
     assert_eq!(
         found.map(Option::unwrap_or_default),
@@ -106,6 +108,8 @@ fn query_names() {
             "schema 1 users",
             "query c",
             "query o",
+            "query u",
+            "query s",
         ]
         .map(str::to_string)
     );

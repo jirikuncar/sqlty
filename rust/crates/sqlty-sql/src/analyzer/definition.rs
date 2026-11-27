@@ -339,6 +339,7 @@ fn items(tokens: &[Tok]) -> Vec<Item> {
             subquery: None,
             depth,
         };
+        let mut resume = None;
         if tokens.get(i).is_some_and(|tok| tok.text == "(") {
             let Some(close) = (i + 1..tokens.len())
                 .find(|&at| tokens[at].depth == depth && tokens[at].text == ")")
@@ -354,6 +355,8 @@ fn items(tokens: &[Tok]) -> Vec<Item> {
                 continue;
             }
             item.subquery = Some(i);
+            // Its own items follow, read once its alias is.
+            resume = Some(i + 1);
             i = close + 1;
         } else {
             while tokens
@@ -395,6 +398,7 @@ fn items(tokens: &[Tok]) -> Vec<Item> {
             i += 1;
         }
         found.push(item);
+        i = resume.unwrap_or(i);
     }
     found
 }
