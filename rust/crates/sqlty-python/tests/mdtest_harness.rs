@@ -183,6 +183,10 @@ fn update_keeps_the_bytes_of_lines_it_does_not_assert() {
         assert!(written.contains(kept), "{kept:?} not in {written:?}");
     }
     assert!(
+        written.contains("# rewritten: a = SQL[tuple[int]]") && !written.contains("stale"),
+        "the stale assertion was not rewritten: {written:?}"
+    );
+    assert!(
         !written.replace("\r\n", "").contains('\n'),
         "written lines lost CRLF: {written:?}"
     );
