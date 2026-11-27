@@ -158,5 +158,4 @@ def test_a_query_without_a_schema_names_no_table() -> None:
 def test_skipped_objects_are_what_the_schema_could_not_parse() -> None:
     sql = "CREATE TABLE sqlty_ext_ok (x INT); CREATE TABLE sqlty_ext_bad (x INT,;"
     skipped = _core.schema_skipped_objects(sql)
-    assert all(name != "sqlty_ext_ok" for _, name in skipped), skipped
-    assert all(kind == "table" for kind, _ in skipped), skipped
+    assert skipped == [("table", "sqlty_ext_bad")]
