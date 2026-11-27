@@ -123,6 +123,49 @@ b = SQL[tuple[int]]("--sql\nSELECT xxxx_id FROM orders o JOIN users u ON u.id = 
 c = SQL[tuple[int]]("--sql\nSELECT idd FROM teams t JOIN users u ON u.team_id = t.id")
 ```
 
+#### The closest table
+
+A table name close to one table, view or CTE gets a hint, and `sqlty check --fix`
+writes that name instead, keeping its schema qualifier and quotes. Only names sharing
+the first two characters are compared.
+
+```python
+from sqlty import SQL
+
+# error: [unknown-table] "table `userz` is not defined in the schema; did you mean `users`?"
+a = SQL[tuple[int]]("--sql\nSELECT id FROM userz")
+# error: [unknown-table] "table `public.ordrs` is not defined in the schema; did you mean `orders`?"
+b = SQL[tuple[int]]("--sql\nSELECT id FROM public.ordrs")
+# error: [unknown-table] "table `teamz` is not defined in the schema; did you mean `teams`?"
+c = SQL[tuple[int]]('--sql\nSELECT id FROM "teamz"')
+# error: [unknown-table] "table `recnt` is not defined in the schema; did you mean `recent`?"
+d = SQL[tuple[int]]("--sql\nWITH recent AS (SELECT id FROM users) SELECT id FROM recnt")
+```
+
+```python
+from sqlty import SQL
+
+a = SQL[tuple[int]]("--sql\nSELECT id FROM userz")
+b = SQL[tuple[int]]("--sql\nSELECT id FROM public.ordrs")
+c = SQL[tuple[int]]('--sql\nSELECT id FROM "teamz"')
+# fixed: from sqlty import SQL
+# fixed:
+# fixed: a = SQL[tuple[int]]("--sql\nSELECT id FROM users")
+# fixed: b = SQL[tuple[int | None]]("--sql\nSELECT id FROM public.orders")
+# fixed: c = SQL[tuple[int]]('--sql\nSELECT id FROM "teams"')
+```
+
+No table is suggested when none is close, or when two are equally close.
+
+```python
+from sqlty import SQL
+
+# error: [unknown-table] "table `customers` is not defined in the schema"
+a = SQL[tuple[int]]("--sql\nSELECT id FROM customers")
+# error: [unknown-table] "table `usera` is not defined in the schema"
+b = SQL[tuple[int]]("--sql\nWITH userx AS (SELECT id FROM users) SELECT id FROM usera")
+```
+
 #### Names a result column's type does not need
 
 A result column's type often needs none of its names: `x IS NULL` is a boolean and

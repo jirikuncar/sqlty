@@ -2,7 +2,7 @@
 order: 180
 group: "names"
 severity: "error"
-fixable: false
+fixable: true
 summary: "Table the schema does not define"
 origin: "SQL"
 ---
@@ -34,6 +34,17 @@ from sqlty import SQL
 
 # error: [unknown-table] "table `user` is not defined in the schema"
 q = SQL[tuple[int]]("--sql\nSELECT id FROM user")
+```
+
+When one table, view or CTE of the schema is close to the name, the message says which,
+and `sqlty check --fix` (or the editor's quick fix) writes it in place of the name, keeping
+its schema qualifier and quotes:
+
+```python
+from sqlty import SQL
+
+# error: [unknown-table] "table `userz` is not defined in the schema; did you mean `users`?"
+q = SQL[tuple[int]]("--sql\nSELECT id FROM userz")
 ```
 
 ## Why is this bad?
