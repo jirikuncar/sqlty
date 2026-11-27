@@ -1,11 +1,11 @@
 //! The settings of one file: the database of `[tool.sqlty.databases]` it belongs to, and
 //! the rules of the `[[tool.sqlty.overrides]]` that match it.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use toml::{Table, Value};
 
-use super::glob::{self, Excludes};
+use super::glob::{self, Globs};
 use super::Files;
 
 /// Where a file of a project stands.
@@ -20,47 +20,126 @@ pub struct Route {
 
 /// The route of the file at `path` in the project of `table`, whose paths are relative to
 /// `base`.
-pub fn route(
-    table: &Table,
-    base: &Path,
-    path: &Path,
-    files: &dyn Files,
-    excludes: &Excludes,
-) -> Route {
-    let resolved = files.canonical(path);
-    let base = files.canonical(base);
-    let matches = |globs: &[String]| excludes.path(&resolved, &base, globs);
-    let applies = |entry: &Table| {
-        let exclude = strings(entry, "exclude");
-        exclude.is_empty() || !matches(&exclude)
-    };
-    let own = strings(table, "queries");
-    let mut found = Route::default();
-    if !names_query_file(path, &resolved, &base, &own) {
+pub fn route(table: &Table, base: &Path, path: &Path, files: &dyn Files) -> Route {
+    let router = Router::new(table, &files.canonical(base));
+    router.route(&router.matched(path, &files.canonical(path)))
+}
+
+/// What a file matches in a project: the index of its database and of its overrides.
+/// Files that match alike share one [`Route`].
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
+pub struct Matched {
+    /// The index of the database among those of `databases` that are tables.
+    pub database: Option<usize>,
+    /// The indices of the matching overrides, in order.
+    pub overrides: Vec<usize>,
+}
+
+/// The `databases` and `overrides` of a project, their globs compiled once.
+pub struct Router {
+    base: PathBuf,
+    queries: Vec<String>,
+    databases: Vec<Database>,
+    overrides: Vec<Override>,
+}
+
+struct Database {
+    name: String,
+    queries: Vec<String>,
+    include: Option<Globs>,
+    exclude: Option<Globs>,
+}
+
+struct Override {
+    include: Option<Globs>,
+    exclude: Option<Globs>,
+    rules: Table,
+}
+
+impl Router {
+    /// The routing of the project of `table`, whose paths are relative to the resolved
+    /// `base`.
+    pub fn new(table: &Table, base: &Path) -> Self {
+        let globs = |entry: &Table, key| {
+            let globs = strings(entry, key);
+            (!globs.is_empty()).then(|| Globs::new(&globs))
+        };
+        let queries = strings(table, "queries");
         let databases = table.get("databases").and_then(Value::as_table);
-        found.database = databases
-            .into_iter()
-            .flatten()
-            .find_map(|(name, database)| {
+        let databases = (databases.into_iter().flatten())
+            .filter_map(|(name, database)| {
                 let database = database.as_table()?;
-                let queries = match database.contains_key("queries") {
-                    true => strings(database, "queries"),
-                    false => own.clone(),
-                };
-                let named = names_query_file(path, &resolved, &base, &queries);
-                (named || (matches(&strings(database, "include")) && applies(database)))
-                    .then(|| name.clone())
-            });
-    }
-    let overrides = table.get("overrides").and_then(Value::as_array);
-    for entry in overrides.into_iter().flatten().filter_map(Value::as_table) {
-        let include = strings(entry, "include");
-        if (include.is_empty() || matches(&include)) && applies(entry) {
-            let rules = entry.get("rules").and_then(Value::as_table).cloned();
-            crate::config::merge_rules(&mut found.rules, rules.unwrap_or_default());
+                Some(Database {
+                    name: name.clone(),
+                    queries: match database.contains_key("queries") {
+                        true => strings(database, "queries"),
+                        false => queries.clone(),
+                    },
+                    include: globs(database, "include"),
+                    exclude: globs(database, "exclude"),
+                })
+            })
+            .collect();
+        let overrides = table.get("overrides").and_then(Value::as_array);
+        let overrides = (overrides.into_iter().flatten())
+            .filter_map(Value::as_table)
+            .map(|entry| Override {
+                include: globs(entry, "include"),
+                exclude: globs(entry, "exclude"),
+                rules: (entry.get("rules").and_then(Value::as_table).cloned()).unwrap_or_default(),
+            })
+            .collect();
+        Self {
+            base: base.to_path_buf(),
+            queries,
+            databases,
+            overrides,
         }
     }
-    found
+
+    /// Whether the project has overrides.
+    pub fn overrides(&self) -> bool {
+        !self.overrides.is_empty()
+    }
+
+    /// What the file at `path`, resolved `resolved`, matches.
+    pub fn matched(&self, path: &Path, resolved: &Path) -> Matched {
+        let matches = |globs: &Option<Globs>| {
+            (globs.as_ref()).is_some_and(|globs| globs.path(resolved, &self.base))
+        };
+        let applies = |exclude: &Option<Globs>| !matches(exclude);
+        let database = match names_query_file(path, resolved, &self.base, &self.queries) {
+            true => None,
+            false => self.databases.iter().position(|database| {
+                names_query_file(path, resolved, &self.base, &database.queries)
+                    || (matches(&database.include) && applies(&database.exclude))
+            }),
+        };
+        let overrides = (self.overrides.iter().enumerate())
+            .filter(|(_, entry)| {
+                (entry.include.is_none() || matches(&entry.include)) && applies(&entry.exclude)
+            })
+            .map(|(index, _)| index)
+            .collect();
+        Matched {
+            database,
+            overrides,
+        }
+    }
+
+    /// The route of what a file matched.
+    pub fn route(&self, matched: &Matched) -> Route {
+        let mut rules = Table::new();
+        for &index in &matched.overrides {
+            crate::config::merge_rules(&mut rules, self.overrides[index].rules.clone());
+        }
+        Route {
+            database: matched
+                .database
+                .map(|index| self.databases[index].name.clone()),
+            rules,
+        }
+    }
 }
 
 /// `table` as the file of `route` reads it: its database's keys on top, `rules` and
@@ -147,13 +226,7 @@ mod tests {
         )
         .unwrap();
         let files = |_: &Path| Read::Missing;
-        let route = route(
-            &table,
-            Path::new("/p"),
-            Path::new(path),
-            &files,
-            &Excludes::default(),
-        );
+        let route = route(&table, Path::new("/p"), Path::new(path), &files);
         let effective = file_table(&table, &route);
         (route, effective)
     }

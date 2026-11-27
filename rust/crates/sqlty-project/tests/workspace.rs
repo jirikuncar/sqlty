@@ -9,7 +9,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use sqlty_project::{Disk, Flags, Options, Shared, Workspace};
+use sqlty_project::{Disk, FileSettings, Flags, Options, Shared, Workspace};
 use sqlty_python::project::Discovery;
 
 fn project(name: &str, files: &[(&str, &str)]) -> PathBuf {
@@ -120,4 +120,43 @@ fn schema_diagnostics_are_those_of_the_schema_files_under_the_paths() {
     assert_eq!(all, [(db.join("1.sql"), 0), (db.join("2.sql"), 1)]);
     assert_eq!(none, []);
     assert_eq!(changed, []);
+}
+
+#[test]
+fn files_that_match_the_same_overrides_share_their_settings() {
+    let root = project(
+        "shared-routes",
+        &[
+            (
+                "pyproject.toml",
+                "[tool.sqlty]\n\n[tool.sqlty.databases.logs]\ninclude = [\"logs\"]\n\n[[tool.sqlty.overrides]]\ninclude = [\"app/tests\", \"logs/tests\"]\nrules = { select-star = \"ignore\" }\n",
+            ),
+            ("app/a.py", ""),
+            ("app/b.py", ""),
+            ("app/tests/c.py", ""),
+            ("app/tests/d.py", ""),
+            ("logs/e.py", ""),
+            ("logs/tests/f.py", ""),
+        ],
+    );
+    let mut workspace = open(&root);
+    let [a, b, c, d, e, f] = [
+        "app/a.py",
+        "app/b.py",
+        "app/tests/c.py",
+        "app/tests/d.py",
+        "logs/e.py",
+        "logs/tests/f.py",
+    ]
+    .map(|path| workspace.settings(&root.join(path)).expect("settings"));
+    fs::remove_dir_all(&root).expect("removes");
+    assert!(Arc::ptr_eq(&a, &b) && Arc::ptr_eq(&c, &d));
+    assert!(!Arc::ptr_eq(&a, &c) && !Arc::ptr_eq(&a, &e) && !Arc::ptr_eq(&e, &f));
+    let ignored = |settings: &Arc<FileSettings>| {
+        settings
+            .rules
+            .get("select-star")
+            .is_some_and(|level| level == "ignore")
+    };
+    assert_eq!([&a, &c, &e, &f].map(ignored), [false, true, false, true]);
 }
