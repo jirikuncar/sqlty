@@ -116,6 +116,21 @@ fn nothing_for_what_neither_defines() {
     assert_eq!(pg("WITH big AS (SELECT 1 AS n) SELECT |n FROM big"), None);
     assert_eq!(pg("SELECT nope| FROM users"), None);
     assert_eq!(pg("SELECT 1 FROM generate_ser|ies(1, 2) g"), None);
+    assert_eq!(pg("SELECT s.tot|al FROM (SELECT 1 AS total) s"), None);
+    assert_eq!(
+        pg("SELECT u|.id FROM users u, (SELECT 1"),
+        Some("query u".to_string())
+    );
+    assert_eq!(
+        pg("SELECT u|.id FROM users u, 'x'"),
+        Some("query u".to_string())
+    );
+    let unknown = "CREATE TABLE u (LIKE missing);";
+    assert_eq!(
+        at(unknown, "postgres", "SELECT 1 FROM |u"),
+        Some("schema 1 u".to_string())
+    );
+    assert_eq!(at(unknown, "postgres", "SELECT u.|a FROM u"), None);
     let (schema, _) = load_schema_with_skipped(SCHEMA, "postgres");
     assert_eq!(
         definition("SELECT 1 FROM users", 15, "postgres", Some(&schema), None),
