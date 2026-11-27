@@ -297,17 +297,17 @@ fn parameters_stored_in_a_column_know_if_they_take_none() {
 
 #[test]
 fn an_offset_past_the_end_is_the_end() {
-    // "é" is one UTF-16 unit but two bytes: an offset past the end clamps to the end, not a panic.
-    let source = "é = \"--sql\\nSELECT na FROM users\"";
+    // "é" is one UTF-16 unit but two bytes: a clamp counted in units would land inside the query.
+    let source = "é = \"--sql\\nSELECT * FROM \"";
     let end = source.encode_utf16().count();
+    let at = |op: &str, offset: usize| {
+        ask(&json!({
+            "op": op, "source": source, "schema": SCHEMA, "dialect": "postgres", "offset": offset,
+        }))
+    };
+    assert_eq!(at("complete", end - 1)["items"][0]["label"], "users");
     for op in ["complete", "hover"] {
-        let at = |offset: usize| {
-            ask(&json!({
-                "op": op, "source": source, "schema": SCHEMA, "dialect": "postgres", "offset": offset,
-            }))
-        };
-        assert_eq!(at(end + 10_000), at(end));
-        assert_eq!(at(end + 10_000), Value::Null);
+        assert_eq!(at(op, end + 10_000), Value::Null);
     }
 }
 
