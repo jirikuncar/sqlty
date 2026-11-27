@@ -59,6 +59,7 @@ impl Analyzer<'_> {
                     | Rule::DeprecatedColumn
                     | Rule::TenantScope
                     | Rule::SetColumnCount
+                    | Rule::PositionOutOfRange
             )
         });
     }
