@@ -25,6 +25,7 @@ x: int | ? | Nullable
 
 SELECT id FROM a UNION SELECT id, label FROM b
 id: int | INT | Unknown
+[set-column-count] each UNION branch must return 1 column, this one returns 2
 
 SELECT id FROM a UNION SELECT id FROM b UNION SELECT id FROM c
 id: int | BIGINT | Nullable
