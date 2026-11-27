@@ -660,7 +660,3 @@ fn project(directory: &str, files: &HashMap<String, Option<String>>) -> Value {
         Err(error) => json!({ "error": error.to_string() }),
     }
 }
-
-#[cfg(test)]
-#[cfg_attr(coverage_nightly, coverage(off))]
-mod tests;
