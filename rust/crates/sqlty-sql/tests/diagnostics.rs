@@ -86,7 +86,7 @@ const CASES: &[Case] = &[
     ("postgres", "WITH RECURSIVE t(n) AS (VALUES (1) UNION ALL SELECT n + 1 FROM t WHERE n < 3) SELECT n FROM t", &[]),
     ("duckdb", "SELECT 1 AS n UNION ALL VALUES (2)", &["[unsupported-syntax] a VALUES list is not typed"]),
     ("postgres", "SELECT 1 AS n UNION ALL (SELECT 2)", &[]),
-    ("postgres", "SELECT id FROM orders UNION TABLE orders", &[]),
+    ("postgres", "SELECT id FROM orders UNION TABLE orders", &["[set-column-count] each UNION branch must return 1 column, this one returns 3"]),
     ("postgres", "SELECT o.note FROM orders o ORDER BY note, nope", &["[unknown-column] column `nope` does not exist in `o`; did you mean `note`?"]),
     ("postgres", "SELECT note AS n FROM orders ORDER BY n, 1", &[]),
     ("postgres", "SELECT unknown_fn(1).* FROM orders", &["[unknown-function] function `unknown_fn` is not known to sqlty, so its result is untyped"]),

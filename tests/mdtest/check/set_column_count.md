@@ -35,6 +35,20 @@ d = SQL("--sql\nSELECT id FROM orgs UNION (SELECT id, name FROM users)")
 e = SQL("--sql\nSELECT id, name FROM users UNION ALL VALUES (1)")
 # error: [set-column-count] "each UNION branch must return 2 columns, this one returns 1"
 f = SQL("--sql\nSELECT * FROM users UNION SELECT id FROM orgs")
+# error: [set-column-count] "each UNION branch must return 1 column, this one returns 2"
+g = SQL("--sql\nSELECT id FROM users WHERE id IN (SELECT id FROM orgs UNION SELECT id, name FROM users)")
+# error: [set-column-count] "each UNION branch must return 1 column, this one returns 2"
+h = SQL("--sql\nSELECT id FROM orgs UNION (SELECT id, name FROM users EXCEPT SELECT id, name FROM users)")
+```
+
+The first branch of known width sets the count:
+
+```python
+from sqlty import SQL
+
+# error: [unknown-table]
+# error: [set-column-count] "each UNION branch must return 1 column, this one returns 2"
+a = SQL("--sql\nSELECT * FROM missing UNION SELECT id FROM orgs UNION SELECT id, name FROM users")
 ```
 
 Branches of the same width, and a branch whose width is unknown, are not
