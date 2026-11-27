@@ -642,12 +642,19 @@ fn completion_hover_and_highlighting_are_advertised_unless_off() {
         (json!({"completion": {"enable": false}}), false, true, true),
         (json!({"hover": {"enable": false}}), true, false, true),
         (
+            json!({"signatureHelp": {"enable": false}}),
+            true,
+            true,
+            true,
+        ),
+        (
             json!({"highlighting": {"enable": false}}),
             true,
             true,
             false,
         ),
     ] {
+        let signatures = options.pointer("/signatureHelp/enable") != Some(&json!(false));
         let (server, connection) = Connection::memory();
         let thread = std::thread::spawn(move || {
             run(&server, |_: &Path, _: &Settings| -> Result<Fake, String> {
@@ -688,6 +695,13 @@ fn completion_hover_and_highlighting_are_advertised_unless_off() {
             result["capabilities"]["hoverProvider"],
             if hover { json!(true) } else { Value::Null }
         );
+        let signature = &result["capabilities"]["signatureHelpProvider"];
+        if signatures {
+            assert_eq!(signature["triggerCharacters"], json!(["(", ","]));
+            assert_eq!(signature["retriggerCharacters"], json!([","]));
+        } else {
+            assert!(signature.is_null(), "{signature}");
+        }
         let provider = &result["capabilities"]["completionProvider"];
         if advertised {
             assert_eq!(provider["triggerCharacters"], json!(["."]));
@@ -894,6 +908,84 @@ fn hover_says_what_a_word_of_a_query_is() {
     client.shutdown();
 }
 
+impl Client {
+    fn signature_help(&mut self, uri: &str, line: u32, character: u32) -> Value {
+        let position = json!({"line": line, "character": character});
+        self.request(
+            "textDocument/signatureHelp",
+            json!({"textDocument": {"uri": uri}, "position": position}),
+        )
+    }
+}
+
+#[test]
+fn signature_help_shows_the_overloads_of_a_call() {
+    let mut client = Client::start(&json!({}));
+    let text = "q = \"--sql\\nSELECT left(name, 3), upper(name) FROM users\"\n";
+    client.open("file:///work/q.py", text);
+    client.notification("textDocument/publishDiagnostics");
+    let found = client.signature_help("file:///work/q.py", 0, 30);
+    assert_eq!(
+        found,
+        json!({
+            "signatures": [{
+                "label": "left(string: text, n: integer) -> text",
+                "documentation": {
+                    "kind": "markdown",
+                    "value": "[Documentation](https://www.postgresql.org/docs/17/functions-string.html#FUNCTIONS-STRING-OTHER)",
+                },
+                "parameters": [{"label": [5, 17]}, {"label": [19, 29]}],
+            }],
+            "activeSignature": 0,
+            "activeParameter": 1,
+        })
+    );
+    let upper = client.signature_help("file:///work/q.py", 0, 40);
+    assert_eq!(upper["signatures"][0]["label"], "upper(text) -> text");
+    assert_eq!(upper["activeParameter"], 0);
+    assert_eq!(
+        client.signature_help("file:///work/q.py", 0, 20),
+        Value::Null
+    );
+    assert_eq!(
+        client.signature_help("file:///nowhere/q.py", 0, 1),
+        Value::Null
+    );
+    client.shutdown();
+}
+
+#[test]
+fn past_the_last_parameter_none_is_active() {
+    let mut client = Client::start(&json!({}));
+    client.open(
+        "file:///work/q.py",
+        "q = \"--sql\\nSELECT left(name, 3, 4)\"\n",
+    );
+    client.notification("textDocument/publishDiagnostics");
+    let found = client.signature_help("file:///work/q.py", 0, 33);
+    assert_eq!(found["activeParameter"], 2);
+    client.shutdown();
+}
+
+#[test]
+fn signature_help_can_be_turned_off() {
+    let mut client = Client::with(
+        &json!({}),
+        &json!([{"uri": "file:///work", "name": "work"}]),
+        &json!({"signatureHelp": {"enable": false}}),
+    );
+    client.open(
+        "file:///work/q.py",
+        "q = \"--sql\\nSELECT upper(name) FROM users\"\n",
+    );
+    client.notification("textDocument/publishDiagnostics");
+    assert_eq!(
+        client.signature_help("file:///work/q.py", 0, 26),
+        Value::Null
+    );
+    client.shutdown();
+}
+
 #[test]
 fn hover_can_be_turned_off() {
     let mut client = Client::with(
@@ -1032,6 +1124,7 @@ fn malformed_and_unknown_messages_change_nothing() {
     for method in [
         "textDocument/completion",
         "textDocument/hover",
+        "textDocument/signatureHelp",
         "textDocument/semanticTokens/full",
         "completionItem/resolve",
         "textDocument/codeAction",

@@ -1,12 +1,12 @@
 //! The language server of `sqlty server`: diagnostics, quick fixes, fix-all, completion,
-//! hover and SQL highlighting for Python files, and the diagnostics of `.sql` query files.
+//! hover, signature help and SQL highlighting for Python files, and the diagnostics of `.sql` query files.
 //!
 //! The protocol runs on the thread that calls [`run`]. Checks run on one worker thread that
 //! owns a [`Workspace`] per project root: a breaking baseline is checked in Python, which
 //! holds the GIL, so two checks could not overlap anyway. The worker checks the newest text of each buffer and publishes the
 //! result only while that text is current. Completion is answered on the protocol thread
 //! from what the buffer's last check left (see [`CompletionContext`]), never behind a check;
-//! so are hover and semantic tokens.
+//! so are hover, signature help and semantic tokens.
 
 #![cfg_attr(coverage_nightly, feature(coverage_attribute), allow(unused_features))]
 
@@ -26,7 +26,7 @@ use lsp_types::notification::{
 };
 use lsp_types::request::{
     CodeActionRequest, Completion, HoverRequest, Request as _, ResolveCompletionItem,
-    SemanticTokensFullRequest, SemanticTokensRefresh,
+    SemanticTokensFullRequest, SemanticTokensRefresh, SignatureHelpRequest,
 };
 use lsp_types::{
     CodeActionKind, CodeActionOptions, CodeActionParams, CodeActionProviderCapability,
@@ -34,14 +34,15 @@ use lsp_types::{
     InitializeParams, LogMessageParams, MessageType, PositionEncodingKind,
     PublishDiagnosticsParams, SemanticTokensFullOptions, SemanticTokensOptions,
     SemanticTokensParams, SemanticTokensServerCapabilities, ServerCapabilities, ServerInfo,
-    ShowMessageParams, TextDocumentSyncCapability, TextDocumentSyncKind, TextDocumentSyncOptions,
-    TextDocumentSyncSaveOptions, Uri,
+    ShowMessageParams, SignatureHelpOptions, SignatureHelpParams, TextDocumentSyncCapability,
+    TextDocumentSyncKind, TextDocumentSyncOptions, TextDocumentSyncSaveOptions, Uri,
 };
 
 mod actions;
 mod completion;
 mod highlight;
 mod hover;
+mod signature;
 mod text;
 mod uri;
 mod worker;
@@ -143,7 +144,8 @@ pub trait Workspace {
 
 /// What the client configures, from the `initializationOptions` of `initialize`:
 /// `{"breaking": {"against": "main", "direction": "both"}, "completion": {"enable": true},
-/// "hover": {"enable": true}, "highlighting": {"enable": true}}`.
+/// "hover": {"enable": true}, "signatureHelp": {"enable": true}, "highlighting": {"enable":
+/// true}}`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Settings {
     /// `sqlty.breaking.against`: the baseline of `sqlty breaking`; `None` checks no baseline.
@@ -154,6 +156,9 @@ pub struct Settings {
     pub completion: bool,
     /// `hover.enable`: whether to say what a word of a query is; on unless `false`.
     pub hover: bool,
+    /// `signatureHelp.enable`: whether to show the overloads of a built-in function while
+    /// its arguments are typed; on unless `false`.
+    pub signature_help: bool,
     /// `highlighting.enable`: whether to send the SQL of checked strings as semantic
     /// tokens; on unless `false`.
     pub highlighting: bool,
@@ -179,6 +184,7 @@ impl Settings {
             direction: text("/breaking/direction"),
             completion: enabled("/completion/enable"),
             hover: enabled("/hover/enable"),
+            signature_help: enabled("/signatureHelp/enable"),
             highlighting: enabled("/highlighting/enable"),
         }
     }
@@ -232,6 +238,7 @@ where
         requests: Arc::default(),
         completion: settings.completion,
         hover: settings.hover,
+        signature_help: settings.signature_help,
         highlighting: settings.highlighting,
     };
     let (jobs, queue) = mpsc::channel();
@@ -298,6 +305,7 @@ struct Shared {
     requests: Arc<AtomicI32>,
     completion: bool,
     hover: bool,
+    signature_help: bool,
     highlighting: bool,
 }
 
@@ -472,6 +480,20 @@ impl Shared {
                     .and_then(|document| hover::hover(document, &params, &self.encoding));
                 self.send(Response::new_ok(request.id, found));
             }
+            SignatureHelpRequest::METHOD => {
+                let Ok(params) = serde_json::from_value::<SignatureHelpParams>(request.params)
+                else {
+                    return self.invalid(request.id, "signature help");
+                };
+                let found = self
+                    .documents()
+                    .get(&params.text_document_position_params.text_document.uri)
+                    .filter(|document| self.signature_help && document.python)
+                    .and_then(|document| {
+                        signature::signature_help(document, &params, &self.encoding)
+                    });
+                self.send(Response::new_ok(request.id, found));
+            }
             SemanticTokensFullRequest::METHOD => {
                 let Ok(params) = serde_json::from_value::<SemanticTokensParams>(request.params)
                 else {
@@ -553,8 +575,8 @@ fn encoding(params: &InitializeParams) -> PositionEncodingKind {
     }
 }
 
-/// What the server does; completion, hover and highlighting only when the client did not
-/// turn them off.
+/// What the server does; completion, hover, signature help and highlighting only when the
+/// client did not turn them off.
 fn capabilities(encoding: PositionEncodingKind, settings: &Settings) -> ServerCapabilities {
     ServerCapabilities {
         position_encoding: Some(encoding),
@@ -591,6 +613,11 @@ fn capabilities(encoding: PositionEncodingKind, settings: &Settings) -> ServerCa
         hover_provider: settings
             .hover
             .then_some(HoverProviderCapability::Simple(true)),
+        signature_help_provider: settings.signature_help.then(|| SignatureHelpOptions {
+            trigger_characters: Some(vec!["(".to_string(), ",".to_string()]),
+            retrigger_characters: Some(vec![",".to_string()]),
+            ..SignatureHelpOptions::default()
+        }),
         ..ServerCapabilities::default()
     }
 }

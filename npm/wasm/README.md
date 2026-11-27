@@ -33,7 +33,7 @@ its URL, a `Response` or its bytes when a bundler moves it, such as
 
 Requests are `analyze` (diagnostics with their quick fixes, row types, and what
 `sqlty rewrite`, `strip` and `check --fix` make of the source), `complete`,
-`hover`, `format`, `config` and `project`. Offsets count UTF-16 code units, as
+`hover`, `signature`, `format`, `config` and `project`. Offsets count UTF-16 code units, as
 JavaScript strings do. `index.d.ts` types each one.
 
 The engine checks one module at a time and runs no Python: a helper or a type

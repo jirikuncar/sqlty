@@ -180,6 +180,24 @@ export class Hover {
   ) {}
 }
 
+export class ParameterInformation {
+  constructor(readonly label: [number, number]) {}
+}
+
+export class SignatureInformation {
+  parameters: ParameterInformation[] = [];
+  constructor(
+    readonly label: string,
+    readonly documentation: MarkdownString,
+  ) {}
+}
+
+export class SignatureHelp {
+  signatures: SignatureInformation[] = [];
+  activeSignature = 0;
+  activeParameter = 0;
+}
+
 /** A Python file holding `text`, as the editor has it open. */
 export function document(path: string, text: string, languageId = "python") {
   const lines = text.split("\n");
@@ -245,8 +263,13 @@ export const event = (name: string) => (listener: Listener) => {
   return new Disposable(() => set.delete(listener));
 };
 
-/** The providers registered, by kind: completion, codeActions (in order) and hover. */
-export const providers: Record<string, any[]> = { completion: [], codeActions: [], hover: [] };
+/** The providers registered, by kind: completion, codeActions (in order), hover and signature. */
+export const providers: Record<string, any[]> = {
+  completion: [],
+  codeActions: [],
+  hover: [],
+  signature: [],
+};
 
 const provide = (kind: string) => (_selector: unknown, provider: unknown) => {
   providers[kind].push(provider);
@@ -349,6 +372,7 @@ export const languages = {
   registerCompletionItemProvider: provide("completion"),
   registerCodeActionsProvider: provide("codeActions"),
   registerHoverProvider: provide("hover"),
+  registerSignatureHelpProvider: provide("signature"),
   getDiagnostics(uri?: Uri): unknown {
     return uri === undefined
       ? this.diagnostics

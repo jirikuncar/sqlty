@@ -61,6 +61,7 @@ enum SourceOp {
     Analyze,
     Complete,
     Hover,
+    Signature,
     Format,
     Breaking,
 }
@@ -127,6 +128,9 @@ fn postgres() -> String {
 /// - `complete`: the completions at `offset`, and the `range` they replace; `null` outside
 ///   a query.
 /// - `hover`: what the word at `offset` is, in Markdown; `null` when nothing.
+/// - `signature`: the overloads of the built-in function whose arguments hold `offset`, each
+///   with its documentation `url` and the `[start, end]` of each parameter in its `label`,
+///   and the active overload and parameter (`null` past the last); `null` outside a call.
 /// - `format`: `formatted`, what `sqlty format` makes of the source. Not part of `analyze`,
 ///   which runs on every keystroke.
 /// - `breaking`: `diagnostics` the source gets against `schema` but not against `before`,
@@ -302,6 +306,20 @@ pub fn run(request: &str) -> String {
             }),
             None => Value::Null,
         },
+        SourceOp::Signature => {
+            match locate::signature_help(&queries, offset, dialect, options.schema) {
+                Some(found) => json!({
+                    "signatures": found.signatures.iter().map(|signature| json!({
+                        "label": signature.label,
+                        "url": signature.url(),
+                        "parameters": signature.parameters.iter().map(|p| [p.label.0, p.label.1]).collect::<Vec<_>>(),
+                    })).collect::<Vec<_>>(),
+                    "active_signature": found.active_signature,
+                    "active_parameter": found.active_parameter,
+                }),
+                None => Value::Null,
+            }
+        }
         SourceOp::Format => {
             json!({ "formatted": sqlty_format::format_source(source, dialect, &options.style) })
         }

@@ -236,6 +236,19 @@ q = "--sql\nSELECT user_id, SUM(total) AS spe<CURSOR>nt FROM orders GROUP BY use
 
 VS Code shows the hovers of every extension together, so sqlty's sits next to Pylance's.
 
+## Signature help
+
+Typing `(` or `,` in a call of a built-in function shows its overloads, with a link to the
+database's documentation, and highlights the parameter the argument binds to. The overload
+shown first is the first that takes as many arguments as the call has so far:
+
+```python
+q = "--sql\nSELECT left(name, <CURSOR>) FROM users"
+# signature: > left(string: text, **n: integer**) -> text
+```
+
+PostgreSQL's catalog comes from its documentation; other dialects show none yet.
+
 ## Highlighting
 
 A string marked `--sql` or `-- sql` is highlighted as SQL: keywords, strings, numbers,

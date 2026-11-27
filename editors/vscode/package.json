@@ -66,7 +66,7 @@
   "capabilities": {
     "untrustedWorkspaces": {
       "supported": "limited",
-      "description": "In Restricted Mode, the bundled engine gives diagnostics, completion and hover, as on the web. sqlty server starts once the workspace is trusted, since it comes from the workspace's environment."
+      "description": "In Restricted Mode, the bundled engine gives diagnostics, completion, hover and signature help, as on the web. sqlty server starts once the workspace is trusted, since it comes from the workspace's environment."
     }
   },
   "contributes": {

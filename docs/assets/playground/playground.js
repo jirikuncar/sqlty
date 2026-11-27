@@ -357,6 +357,29 @@ monaco.languages.registerHoverProvider("python", {
   },
 });
 
+monaco.languages.registerSignatureHelpProvider("python", {
+  signatureHelpTriggerCharacters: ["(", ","],
+  signatureHelpRetriggerCharacters: [","],
+  provideSignatureHelp(model, position) {
+    const found = ask(request("signature", model.getOffsetAt(position)));
+    if (!found?.signatures) return null;
+    const signatures = found.signatures.map((signature) => ({
+      label: signature.label,
+      documentation: { value: `[Documentation](${signature.url})` },
+      parameters: signature.parameters.map((label) => ({ label })),
+    }));
+    const active = signatures[found.active_signature];
+    return {
+      value: {
+        signatures,
+        activeSignature: found.active_signature,
+        activeParameter: found.active_parameter ?? active.parameters.length,
+      },
+      dispose() {},
+    };
+  },
+});
+
 function refresh() {
   const answer = ask(request("analyze"));
   const problems = root.querySelector("[data-problems]");

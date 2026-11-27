@@ -8,7 +8,7 @@ const SELECTOR: vscode.DocumentSelector = { language: "python" };
 
 /**
  * The engine compiled to WebAssembly, run in the extension host instead of `sqlty server`:
- * diagnostics, completion and hover, as the docs playground has them. It runs no process and
+ * diagnostics, completion, hover and signature help, as the docs playground has them. It runs no process and
  * no code of the workspace, so VS Code for the Web and Restricted Mode get it.
  */
 export async function startEngine(
@@ -191,6 +191,36 @@ export async function startEngine(
         );
       },
     }),
+    vscode.languages.registerSignatureHelpProvider(
+      SELECTOR,
+      {
+        async provideSignatureHelp(document, position) {
+          const answer = await ask(document, {
+            op: "signature",
+            offset: document.offsetAt(position),
+          });
+          if (answer == null) {
+            return undefined;
+          }
+          const help = new vscode.SignatureHelp();
+          help.signatures = answer.signatures.map((found: Signature) => {
+            const signature = new vscode.SignatureInformation(
+              found.label,
+              new vscode.MarkdownString(`[Documentation](${found.url})`),
+            );
+            signature.parameters = found.parameters.map(
+              (label) => new vscode.ParameterInformation(label),
+            );
+            return signature;
+          });
+          help.activeSignature = answer.active_signature;
+          help.activeParameter =
+            answer.active_parameter ?? answer.signatures[answer.active_signature].parameters.length;
+          return help;
+        },
+      },
+      { triggerCharacters: ["(", ","], retriggerCharacters: [","] },
+    ),
   ];
   checkAll();
   return vscode.Disposable.from(...subscriptions);
@@ -207,6 +237,7 @@ const WHOLE_FILE: Record<string, [string, string]> = {
 };
 
 type Edit = { start: number; end: number; replacement: string };
+type Signature = { label: string; url: string; parameters: [number, number][] };
 type Found = {
   rule: string;
   message: string;
