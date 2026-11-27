@@ -22,11 +22,11 @@ use sqlty_python::types::symbols::Source;
 use sqlty_python::{
     breaking, check, config, fixer, json_types, locate, params, queries, rewriter, rows,
 };
-use sqlty_sql::analyzer::{self, CandidateKind, Schema};
+use sqlty_sql::analyzer::{self, CandidateKind, Definition, Schema};
 use sqlty_sql::highlight::Highlight;
 
 const VERSION: (u8, u8) = (3, 14);
-const PYTHON: [&str; 8] = [
+const PYTHON: [&str; 9] = [
     "error",
     "rewritten",
     "rewritten-file",
@@ -34,6 +34,7 @@ const PYTHON: [&str; 8] = [
     "stripped",
     "completions",
     "hover",
+    "definition",
     "highlighted",
 ];
 /// `# completions:` lists the first ones, then `...`: the system catalogs make lists long.
@@ -317,6 +318,17 @@ impl<'s> Run<'s> {
                 locate::hover(&queries, offset, self.dialect, self.schema.as_deref())
                     .map_or_else(|| "None".to_string(), |found| found.contents)
             }
+            "definition" => {
+                let offset = self.cursor(unit, kind)?;
+                let queries = self.queries_of(text)?;
+                let sql = self.section.schema_sql();
+                let schema = self.schema.as_deref();
+                match locate::definition(&queries, offset, self.dialect, schema, sql.as_deref()) {
+                    Some(Definition::Query(range)) => format!("query {}", &text[range]),
+                    Some(Definition::Schema(range)) => self.in_schema(range),
+                    None => "None".to_string(),
+                }
+            }
             "highlighted" => {
                 let queries = self.queries_of(text)?;
                 let lines: Vec<String> = queries
@@ -448,6 +460,21 @@ impl<'s> Run<'s> {
             })
             .unwrap_or_default();
         Ok(locate::Queries::new(text, &self.style()?, &starts))
+    }
+
+    /// `file:line text` of `range` of the joined schema files.
+    fn in_schema(&self, range: std::ops::Range<usize>) -> String {
+        let mut start = 0;
+        for (name, text) in self.section.schema_files() {
+            let end = start + text.len();
+            if range.start <= end {
+                let at = range.start - start;
+                let line = text[..at].matches('\n').count() + 1;
+                return format!("{name}:{line} {}", &text[at..range.end - start]);
+            }
+            start = end + 1;
+        }
+        "None".to_string()
     }
 
     fn cursor(&self, unit: &Unit, kind: &str) -> Result<usize, String> {

@@ -119,6 +119,9 @@ impl Workspace for RustWorkspace {
             dialect: found.dialect.to_string(),
             import_style: found.import_style,
             helper_starts: found.helper_starts,
+            schema_sql: found.schema_sql,
+            schema_files: found.schema_files,
+            query_format: found.query_format,
         })
     }
 }

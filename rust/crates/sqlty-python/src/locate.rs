@@ -20,7 +20,7 @@
 
 use std::ops::Range;
 
-use sqlty_sql::analyzer::{self, Completions, Hover, SchemaData};
+use sqlty_sql::analyzer::{self, Completions, Definition, Hover, SchemaData};
 use sqlty_sql::highlight::{highlight, Highlight};
 
 use crate::rewriter::{after_marker, escapes, extract_string_content, ImportStyle};
@@ -292,6 +292,27 @@ pub fn hover(
     let mut found = analyzer::hover(&at.text, at.offset, dialect, schema)?;
     found.range = at.source_offset(found.range.start)?..at.source_offset(found.range.end)?;
     Some(found)
+}
+
+/// Where the name at byte `offset` of `source` is defined, `None` outside a query `check`
+/// reads: [`Queries::at`], then [`definition`](sqlty_sql::analyzer::definition) on the query,
+/// with a [`Definition::Query`] mapped back to the bytes of the source.
+pub fn definition(
+    queries: &Queries<'_>,
+    offset: usize,
+    dialect: &str,
+    schema: Option<&SchemaData>,
+    schema_sql: Option<&str>,
+) -> Option<Definition> {
+    let at = queries.at(offset)?;
+    Some(
+        match analyzer::definition(&at.text, at.offset, dialect, schema, schema_sql)? {
+            Definition::Query(range) => {
+                Definition::Query(at.source_offset(range.start)?..at.source_offset(range.end)?)
+            }
+            found => found,
+        },
+    )
 }
 
 /// The query under a cursor.

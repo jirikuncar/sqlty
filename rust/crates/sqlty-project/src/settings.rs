@@ -34,6 +34,8 @@ type Named = (
 struct SchemaText {
     text: String,
     files: Vec<PathBuf>,
+    /// Where each of `files` starts in `text`.
+    starts: Vec<usize>,
 }
 
 /// A `[[tool.sqlty.functions]]` entry.
@@ -60,6 +62,8 @@ pub struct FileSettings {
     pub schema_sql: Option<Arc<str>>,
     /// The files `schema_sql` was read from, in order.
     pub schema_files: Vec<PathBuf>,
+    /// Where each of `schema_files` starts in `schema_sql`.
+    pub schema_starts: Vec<usize>,
     /// `types`, with those of `driver`, sorted.
     pub types: Vec<(String, String)>,
     /// `import-style`.
@@ -207,9 +211,15 @@ impl Directory {
                 .as_ref()
                 .map(|schema| schemas.load(&schema.text, own.dialect, &own.types))
                 .transpose()?;
-            if let Some(SchemaText { text, files }) = schema_sql {
+            if let Some(SchemaText {
+                text,
+                files,
+                starts,
+            }) = schema_sql
+            {
                 own.schema_sql = Some(Arc::from(text));
                 own.schema_files = files;
+                own.schema_starts = starts;
             }
             return Ok(Self {
                 routing: (base.as_deref())
@@ -274,9 +284,15 @@ impl Directory {
                 others,
             };
             settings.schema = Some(SchemaData::with_databases(&loaded, databases));
-            if let Some(SchemaText { text, files }) = schema {
+            if let Some(SchemaText {
+                text,
+                files,
+                starts,
+            }) = schema
+            {
                 settings.schema_sql = Some(Arc::from(text));
                 settings.schema_files = files;
+                settings.schema_starts = starts;
             }
             settings.types = sorted(types);
             settings.functions.extend(functions.iter().cloned());
@@ -531,6 +547,7 @@ fn settings(
         schema: None,
         schema_sql: None,
         schema_files: Vec::new(),
+        schema_starts: Vec::new(),
         types: Vec::new(),
         import_style,
         untyped,
@@ -569,10 +586,13 @@ fn schema_text(
     for entry in empty {
         schemas.warn(format!("Schema pattern matches no files: {entry}"));
     }
-    let (mut parts, mut read) = (Vec::new(), Vec::new());
+    let (mut parts, mut read, mut starts) = (Vec::new(), Vec::new(), Vec::new());
+    let mut at = 0;
     for path in found {
         match files.text(&path) {
             Some(text) => {
+                starts.push(at);
+                at += text.len() + 1;
                 parts.push(text);
                 read.push(path);
             }
@@ -582,6 +602,7 @@ fn schema_text(
     (!parts.is_empty()).then(|| SchemaText {
         text: parts.join("\n"),
         files: read,
+        starts,
     })
 }
 

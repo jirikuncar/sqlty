@@ -137,6 +137,7 @@ init_options = {
   breaking = { against = "main", direction = "both" },
   completion = { enable = true },
   hover = { enable = true },
+  definition = { enable = true },
   highlighting = { enable = true },
 }
 ```
@@ -147,6 +148,7 @@ init_options = {
 | `breaking.direction` | `both` | `both`, `forward` or `backward` |
 | `completion.enable` | `true` | Complete table and column names in query strings |
 | `hover.enable` | `true` | Say what a word of a query string is: a column's type, a table's columns, a result column's inference rule |
+| `definition.enable` | `true` | Go from a table, column or alias of a query to the schema statement or query text that defines it |
 | `highlighting.enable` | `true` | Send the SQL of checked strings as semantic tokens |
 
 ## Vim

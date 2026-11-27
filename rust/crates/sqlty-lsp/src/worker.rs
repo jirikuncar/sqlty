@@ -149,7 +149,8 @@ where
     let Some(path) = crate::uri::to_path(&uri) else {
         return;
     };
-    let enabled = python && (workspaces.settings.completion || workspaces.settings.highlighting);
+    let settings = &workspaces.settings;
+    let enabled = settings.definition || (python && (settings.completion || settings.highlighting));
     let Some(workspace) = workspaces.of(&path, shared) else {
         return;
     };

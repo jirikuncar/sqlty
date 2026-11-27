@@ -22,7 +22,9 @@ use std::str::FromStr;
 use std::sync::LazyLock;
 
 use regex::Regex;
-use sqlty_sql::analyzer::{database_name, parse, route_named, statement_ranges, unknown_named};
+use sqlty_sql::analyzer::{
+    self, database_name, parse, route_named, statement_ranges, unknown_named,
+};
 
 use crate::checker::{star_finding, unparsed_message, Diagnostic};
 use crate::options::Options;
@@ -167,6 +169,41 @@ pub fn split(source: &str, format: Format, stem: &str) -> Vec<NamedQuery> {
             }
         })
         .collect()
+}
+
+/// Where the name at byte `offset` of `source`, a `.sql` query file, is defined: the
+/// [`definition`](analyzer::definition) in the query that holds it, a
+/// [`Definition::Query`](analyzer::Definition::Query) in the bytes of the file.
+///
+/// ```
+/// use sqlty_python::queries::{definition, Format};
+/// use sqlty_sql::analyzer::{load_schema_with_skipped, Definition};
+///
+/// let schema_sql = "CREATE TABLE users (id INT);";
+/// let (schema, _) = load_schema_with_skipped(schema_sql, "postgres");
+/// let source = "-- name: get-user^\nSELECT u.id FROM users u;\n";
+/// let found = definition(source, Format::Auto, source.find("u.").unwrap(), "postgres", Some(&schema), Some(schema_sql));
+/// assert_eq!(found, Some(Definition::Query(42..43)));
+/// ```
+pub fn definition(
+    source: &str,
+    format: Format,
+    offset: usize,
+    dialect: &str,
+    schema: Option<&analyzer::SchemaData>,
+    schema_sql: Option<&str>,
+) -> Option<analyzer::Definition> {
+    let query = split(source, format, "")
+        .into_iter()
+        .find(|query| query.body.contains(&offset) || query.body.end == offset)?;
+    let start = query.body.start;
+    let found = analyzer::definition(&query.sql, offset - start, dialect, schema, schema_sql)?;
+    Some(match found {
+        analyzer::Definition::Query(range) => {
+            analyzer::Definition::Query(start + range.start..start + range.end)
+        }
+        found => found,
+    })
 }
 
 /// `sql` with sqlc's or aiosql's placeholders rewritten to `:name` and `sqlc.embed(t)` to
@@ -428,8 +465,7 @@ mod tests {
             placeholders("SELECT :u.id, :u.id", Format::Aiosql).1,
             [("u_id".to_string(), "u.id".to_string())]
         );
-        let (schema, _) =
-            sqlty_sql::analyzer::load_schema_with_skipped("CREATE TABLE t (a INT)", "postgres");
+        let (schema, _) = analyzer::load_schema_with_skipped("CREATE TABLE t (a INT)", "postgres");
         let options = Options::new("postgres", Some(&schema), None, false).unwrap();
         let rules = RuleConfig::default().only(&[Rule::UnparsedQuery]);
         let found = check_queries(

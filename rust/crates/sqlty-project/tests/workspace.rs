@@ -160,3 +160,36 @@ fn files_that_match_the_same_overrides_share_their_settings() {
     };
     assert_eq!([&a, &c, &e, &f].map(ignored), [false, true, false, true]);
 }
+
+#[test]
+fn a_query_file_has_a_completion_context_when_the_project_names_it() {
+    let root = project(
+        "query-files",
+        &[
+            (
+                "pyproject.toml",
+                "[tool.sqlty]\nschema = [\"a.sql\", \"b.sql\"]\nqueries = [\"queries/\"]\n",
+            ),
+            ("a.sql", "CREATE TABLE users (id INT);"),
+            ("b.sql", "CREATE TABLE orders (id INT);"),
+            ("queries/q.sql", "-- name: q\nSELECT 1;\n"),
+            ("other.sql", "SELECT 1;\n"),
+        ],
+    );
+    let mut workspace = open(&root);
+    let context = workspace.completion(&root.join("queries/q.sql"));
+    let other = workspace.completion(&root.join("other.sql"));
+    let canonical = root.canonicalize().expect("canonical");
+    fs::remove_dir_all(&root).expect("removes");
+    let context = context.expect("names q.sql");
+    assert!(context.query_format.is_some());
+    assert_eq!(
+        context.schema_files,
+        [(canonical.join("a.sql"), 0), (canonical.join("b.sql"), 29)]
+    );
+    assert_eq!(
+        context.schema_sql.as_deref(),
+        Some("CREATE TABLE users (id INT);\nCREATE TABLE orders (id INT);")
+    );
+    assert!(other.is_none());
+}

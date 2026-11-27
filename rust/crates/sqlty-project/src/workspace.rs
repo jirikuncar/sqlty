@@ -119,6 +119,13 @@ pub struct Completion {
     pub import_style: Option<String>,
     /// Where the helper calls of the buffer pass a query: byte offsets of the literals.
     pub helper_starts: Vec<usize>,
+    /// The SQL the schema was loaded from.
+    pub schema_sql: Option<Arc<str>>,
+    /// Each file of `schema_sql`, and where it starts in it.
+    pub schema_files: Vec<(PathBuf, usize)>,
+    /// How the buffer names its queries, when it is a `.sql` file the project's `queries`
+    /// name; `None` for a Python module.
+    pub query_format: Option<queries::Format>,
 }
 
 impl Workspace {
@@ -929,16 +936,7 @@ impl Workspace {
     /// project's `queries` do not name it.
     pub fn check_queries(&mut self, path: &Path, text: &str) -> Result<Vec<Diagnostic>, String> {
         let settings = self.settings(path)?;
-        let resolved = self.resolved(path);
-        let named = settings.base.as_ref().is_some_and(|base| {
-            project::names_query_file(
-                path,
-                &resolved,
-                &self.files.canonical(base),
-                &settings.queries,
-            )
-        });
-        if !named {
+        if !self.names_query_file(path, &settings) {
             return Ok(Vec::new());
         }
         let name = path
@@ -1042,20 +1040,47 @@ impl Workspace {
     }
 
     /// What completion reads of the buffer [`Workspace::check`] last read for `path`.
+    /// A `.sql` file gets it only when the project's `queries` name it.
     pub fn completion(&mut self, path: &Path) -> Option<Completion> {
         let settings = self.settings(path).ok()?;
-        let helpers = self.helpers(&settings);
-        let module = self.modules.get(path)?;
-        let checker = Checker::of(&settings, Some(&helpers));
-        let helper_starts = match &module.parsed() {
-            Some(parsed) => module::helper_starts(parsed, parsed.module.as_deref(), &checker),
-            None => Vec::new(),
+        let (helper_starts, query_format) = if path.extension().is_some_and(|ext| ext == "sql") {
+            self.names_query_file(path, &settings)
+                .then_some((Vec::new(), Some(settings.query_format)))?
+        } else {
+            let helpers = self.helpers(&settings);
+            let module = self.modules.get(path)?;
+            let checker = Checker::of(&settings, Some(&helpers));
+            let starts = match &module.parsed() {
+                Some(parsed) => module::helper_starts(parsed, parsed.module.as_deref(), &checker),
+                None => Vec::new(),
+            };
+            (starts, None)
         };
+        let schema_files = (settings.schema_files.iter())
+            .map(|path| self.files.canonical(path))
+            .zip(settings.schema_starts.iter().copied())
+            .collect();
         Some(Completion {
             schema: settings.schema.clone(),
             dialect: settings.dialect,
             import_style: settings.import_style.clone(),
             helper_starts,
+            schema_sql: settings.schema_sql.clone(),
+            schema_files,
+            query_format,
+        })
+    }
+
+    /// Whether the project's `queries` name the `.sql` file `path`.
+    fn names_query_file(&self, path: &Path, settings: &FileSettings) -> bool {
+        let resolved = self.resolved(path);
+        settings.base.as_ref().is_some_and(|base| {
+            project::names_query_file(
+                path,
+                &resolved,
+                &self.files.canonical(base),
+                &settings.queries,
+            )
         })
     }
 }
