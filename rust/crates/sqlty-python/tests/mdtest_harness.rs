@@ -168,3 +168,22 @@ fn a_passing_xfail_is_a_failure() {
         vec!["sample.md:1: `A` passes: drop its mdtest:xfail".to_string()]
     );
 }
+
+#[test]
+fn update_keeps_the_bytes_of_lines_it_does_not_assert() {
+    let source = "# Bytes\r\n\r\n```python\r\na = \"--sql\\nSELECT \\x31::INTEGER\"\r\n# rewritten: stale\r\nb = \"\u{c}\\1 \u{b}\"\r\n```\r\n";
+    let path = write("bytes", source);
+    run(&path, true);
+    let written = std::fs::read_to_string(&path).unwrap();
+    for kept in [
+        "# Bytes\r\n",
+        "\\x31::INTEGER\"\r\n",
+        "b = \"\u{c}\\1 \u{b}\"\r\n",
+    ] {
+        assert!(written.contains(kept), "{kept:?} not in {written:?}");
+    }
+    assert!(
+        !written.replace("\r\n", "").contains('\n'),
+        "written lines lost CRLF: {written:?}"
+    );
+}

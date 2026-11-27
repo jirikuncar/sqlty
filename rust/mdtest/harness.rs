@@ -302,9 +302,11 @@ impl Updater {
     }
 
     fn lines(&self) -> Vec<String> {
-        std::fs::read_to_string(&self.path)
-            .unwrap()
-            .lines()
+        // Split on `\n` only: `str::lines` would turn a CRLF into LF in lines it does not edit.
+        let text = std::fs::read_to_string(&self.path).unwrap();
+        text.strip_suffix('\n')
+            .unwrap_or(&text)
+            .split('\n')
             .map(str::to_string)
             .collect()
     }
@@ -323,6 +325,15 @@ impl Updater {
         let mut lines = self.lines();
         let at = self.at(start);
         let delta = new.len() as isize - (end - start) as isize;
+        // A CRLF file keeps CRLF on the lines written too.
+        let eol = if lines.iter().any(|line| line.ends_with('\r')) {
+            "\r"
+        } else {
+            ""
+        };
+        let new = new
+            .into_iter()
+            .map(|line| format!("{}{eol}", line.trim_end_matches('\r')));
         lines.splice(at..at + end - start, new);
         std::fs::write(
             &self.path,
