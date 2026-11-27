@@ -616,6 +616,15 @@ impl Statement<'_> {
         let pieces = &self.0;
         let open = pieces.iter().position(|p| is_punct(p, "("))?;
         let close = matching_paren(pieces, open)?;
+        let items = split_top_level(&pieces[open + 1..close], ",");
+        let is_like = |item: &&[Piece]| {
+            item.iter()
+                .find(|p| significant(p))
+                .is_some_and(|p| is_word(p, "like"))
+        };
+        if !items.iter().any(is_like) {
+            return None;
+        }
         let mut prefix = LIKE_COLUMN.to_string();
         if placeholders {
             let text = render(pieces).to_lowercase();
@@ -625,7 +634,7 @@ impl Statement<'_> {
         }
         let mut kept = Vec::new();
         let mut sources = Vec::new();
-        for item in split_top_level(&pieces[open + 1..close], ",") {
+        for item in items {
             let sig: Vec<&Piece> = item.iter().filter(|p| significant(p)).collect();
             if sig.first().is_some_and(|p| is_word(p, "like")) {
                 let column = format!("{prefix}{}", sources.len());

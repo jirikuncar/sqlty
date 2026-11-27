@@ -618,22 +618,24 @@ impl Loader {
         // A PostgreSQL `PARTITION OF` column without a type only adds constraints; a SQLite
         // column may have no type at all. A `LIKE` item is a placeholder column (see
         // `Statement::without_like`): the columns it copies go where it stands.
+        let mut declared = Vec::with_capacity(create.columns.len());
         for column in &create.columns {
-            let name = fold(&column.name, self.dialect);
-            let like = likes
-                .iter()
-                .find(|(placeholder, _)| *placeholder == name)
+            let like = (!likes.is_empty())
+                .then(|| fold(&column.name, self.dialect))
+                .and_then(|name| likes.iter().find(|(placeholder, _)| *placeholder == name))
                 .map(|(_, source)| source);
             if let Some(source) = like {
+                merge_columns(&mut table.columns, declared.drain(..));
                 if let Some(done) = self.copy_like(&mut table, source, create, path) {
                     return done;
                 }
             } else if column.data_type != DataType::Unspecified
                 || self.dialect == SqlDialect::Sqlite
             {
-                merge_columns(&mut table.columns, [raw_column(column, self.dialect)]);
+                declared.push(raw_column(column, self.dialect));
             }
         }
+        merge_columns(&mut table.columns, declared);
         // SQLite lets a PRIMARY KEY hold NULL, except in a WITHOUT ROWID or STRICT table or
         // as the sole `INTEGER` column, which is the rowid.
         let loose_keys =
