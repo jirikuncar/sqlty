@@ -1,5 +1,6 @@
 //! `textDocument/definition` over the protocol, in each dialect: a table, a column, a
-//! renamed column and an alias, from a Python string and from a `.sql` query file.
+//! renamed column, an alias and an output column, from a Python string and from a `.sql`
+//! query file.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -173,6 +174,22 @@ fn names_go_to_the_statement_that_defines_them() {
                 "q.py 0:46-47",
                 "None",
             ],
+            "{dialect}"
+        );
+        let out = format!("file:///{dialect}/out.py");
+        let line =
+            "q = \"--sql\\nWITH big AS (SELECT id AS k FROM users) SELECT k FROM big ORDER BY 1\"";
+        client.open(&out, "python", &format!("{line}\n"));
+        let item = line.find("id AS k").unwrap_or_default();
+        let at = format!("out.py 0:{item}-{}", item + "id AS k".len());
+        assert_eq!(
+            client.definition(&out, 0, line.rfind(" k ").unwrap_or_default() + 1),
+            at,
+            "{dialect}"
+        );
+        assert_eq!(
+            client.definition(&out, 0, line.rfind('1').unwrap_or_default()),
+            at,
             "{dialect}"
         );
         let sql = format!("file:///{dialect}/q.sql");

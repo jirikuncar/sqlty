@@ -22,7 +22,7 @@ only the schema and the parsed query: no connection, no execution.
 | 4b | Formatting in `sqlty server`: the code action `source.format.sqlty` | merged, [#969](https://github.com/jirikuncar/sqlty/pull/969) |
 | 4c | sqruff's lint rules in `sqlty check`: the `sqruff` rule | in review |
 | 5 | Inlay hints of column types for `SELECT *` | waits for demand after stage 1 |
-| 6 | Go to definition ([#1362](https://github.com/jirikuncar/sqlty/issues/1362)): a table, view or column to the schema statement that last defined it, an alias or CTE to the query; `textDocument/definition`, `definition.enable`, `# definition:` mdtests. Server only: the bundled engine of Restricted Mode, VS Code for the web and the playground has none | in review |
+| 6 | Go to definition ([#1362](https://github.com/jirikuncar/sqlty/issues/1362)): a table, view or column to the schema statement that last defined it, an alias or CTE to the query, an output column ([#1365](https://github.com/jirikuncar/sqlty/issues/1365)) to its select item; `textDocument/definition`, `definition.enable`, `# definition:` mdtests. Server only: the bundled engine of Restricted Mode, VS Code for the web and the playground has none | in review |
 
 ## Stage 1
 

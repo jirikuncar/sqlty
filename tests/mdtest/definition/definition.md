@@ -97,3 +97,72 @@ q = "--sql\nSELECT 1 FROM pg_cl<CURSOR>ass"
 q = "SELECT 1 FROM ord<CURSOR>ers"
 # definition: None
 ```
+
+## Output columns
+
+A column of a CTE or a subquery goes to the select item that gives it, at any depth. An `ORDER BY` or `GROUP BY` alias or position goes to its select item, or on to the
+column a plain item reads; a set operation's are those of its first branch. Column aliases
+rename the first columns of what they alias.
+
+### CTE column
+
+```python
+q = "--sql\nWITH big AS (SELECT user_id, SUM(total) AS spent FROM orders GROUP BY user_id) SELECT spe<CURSOR>nt FROM big"
+# definition: query SUM(total) AS spent
+```
+
+### Position
+
+```python
+q = "--sql\nWITH big AS (SELECT user_id, SUM(total) AS spent FROM orders GROUP BY user_id) SELECT user_id, spent FROM big ORDER BY <CURSOR>2"
+# definition: query SUM(total) AS spent
+```
+
+### Nested subqueries
+
+```python
+q = "--sql\nSELECT t.n FROM (SELECT i.<CURSOR>n FROM (SELECT total AS n FROM orders) i) t"
+# definition: query total AS n
+```
+
+### Alias
+
+```python
+q = "--sql\nSELECT COUNT(*) AS n FROM orders GROUP BY user_id ORDER BY <CURSOR>n"
+# definition: query COUNT(*) AS n
+```
+
+### Set operation
+
+```python
+q = "--sql\nSELECT id FROM users UNION SELECT id FROM orders ORDER BY <CURSOR>1"
+# definition: schema.sql:1 id
+```
+
+### Out of range
+
+```python
+q = "--sql\nSELECT id FROM users ORDER BY <CURSOR>3"
+# definition: None
+```
+
+### Column alias
+
+```python
+q = "--sql\nSELECT s.<CURSOR>n FROM (SELECT user_id, total FROM orders) s (n)"
+# definition: query n
+```
+
+### Renamed column
+
+```python
+q = "--sql\nSELECT s.<CURSOR>user_id FROM (SELECT user_id, total FROM orders) s (n)"
+# definition: None
+```
+
+### After a star
+
+```python
+q = "--sql\nSELECT *, id FROM users ORDER BY <CURSOR>2"
+# definition: None
+```

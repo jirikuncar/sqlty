@@ -116,15 +116,130 @@ fn query_names() {
 }
 
 #[test]
+fn output_columns() {
+    let found = [
+        pg("WITH big AS (SELECT 1 AS n) SELECT big.|n FROM big"),
+        pg("WITH big AS (SELECT 1 AS n) SELECT |n FROM big"),
+        pg("WITH big (m) AS (SELECT 1) SELECT |m FROM big"),
+        pg("SELECT s.tot|al FROM (SELECT 1 AS total) s"),
+        pg("SELECT s.|total FROM (SELECT SUM(total) AS total FROM app.orders) s"),
+        pg("SELECT t.|n FROM (SELECT n FROM (SELECT 2 AS n) i) t"),
+        pg("SELECT t.n FROM (SELECT i.|n FROM (SELECT 2 AS n) i) t"),
+        pg("SELECT t.n FROM (SELECT i.|n FROM (SELECT total AS n FROM app.orders) i) t"),
+        pg("SELECT id AS spent FROM users ORDER BY spe|nt"),
+        pg("SELECT 1 AS id FROM users ORDER BY |id"),
+        pg("SELECT id, full_name FROM users ORDER BY |2"),
+        pg("SELECT id FROM users UNION SELECT id FROM app.orders ORDER BY |1"),
+        pg("SELECT COUNT(*) AS n FROM users GROUP BY |n"),
+        pg("SELECT DISTINCT ON (id) id AS k FROM users ORDER BY |k"),
+        pg("SELECT DISTINCT ON (lower(full_name)) id AS k FROM users ORDER BY |k"),
+        pg("SELECT id FROM users ORDER BY full_n|ame"),
+        pg("SELECT * FROM (SELECT id AS k FROM users ORDER BY |k) s"),
+        pg("SELECT id k FROM users ORDER BY |k"),
+        pg("SELECT (id)k FROM users ORDER BY |k"),
+        pg("SELECT ROW_NUMBER() OVER (PARTITION BY |id) FROM users"),
+        pg("SELECT id FROM users GROUP BY id HAVING true, |id"),
+        pg("SELECT DISTINCT id AS k FROM users ORDER BY |k"),
+        pg("SELECT 'a', id AS k FROM users ORDER BY |2"),
+        pg("SELECT /* x */ 'a' AS k FROM users ORDER BY |k"),
+        pg("SELECT 'x', id FROM users ORDER BY |1"),
+        pg("(SELECT id AS k FROM users) UNION SELECT 1 ORDER BY |1"),
+        pg("SELECT 1; SELECT id AS k FROM users ORDER BY |k"),
+        pg("WITH c (x) AS (SELECT 1 AS y, 2 AS z) SELECT c.|z FROM c"),
+        pg("SELECT s.|x FROM (SELECT 1 AS y) AS s (x)"),
+        pg("SELECT u.|k FROM users u(k)"),
+        pg("SELECT u.|full_name FROM users u(k)"),
+    ];
+    assert_eq!(
+        found.map(Option::unwrap_or_default),
+        [
+            "query 1 AS n",
+            "query 1 AS n",
+            "query m",
+            "query 1 AS total",
+            "query SUM(total) AS total",
+            "query n",
+            "query 2 AS n",
+            "query total AS n",
+            "query id AS spent",
+            "query 1 AS id",
+            "schema 5 full_name",
+            "schema 1 id",
+            "query COUNT(*) AS n",
+            "query id AS k",
+            "query id AS k",
+            "schema 5 full_name",
+            "query id AS k",
+            "query id k",
+            "query (id)k",
+            "schema 1 id",
+            "schema 1 id",
+            "query id AS k",
+            "query id AS k",
+            "query 'a' AS k",
+            "query 'x'",
+            "query id AS k",
+            "query id AS k",
+            "query 2 AS z",
+            "query x",
+            "query k",
+            "schema 5 full_name",
+        ]
+        .map(str::to_string)
+    );
+}
+
+#[test]
+fn the_example_of_the_output_columns_issue() {
+    let schema = "CREATE TABLE orders (user_id INT, total INT);";
+    let sql = "WITH big AS (SELECT user_id, SUM(total) AS spent FROM orders GROUP BY user_id)
+SELECT user_id, spent FROM big ORDER BY 2";
+    let found = [
+        at(
+            schema,
+            "postgres",
+            &sql.replacen("spent FROM big", "spe|nt FROM big", 1),
+        ),
+        at(schema, "postgres", &sql.replacen("BY 2", "BY |2", 1)),
+        at(
+            schema,
+            "postgres",
+            &sql.replacen("SELECT user_id, spent", "SELECT user_|id, spent", 1),
+        ),
+    ];
+    assert_eq!(
+        found.map(Option::unwrap_or_default),
+        [
+            "query SUM(total) AS spent",
+            "query SUM(total) AS spent",
+            "query user_id",
+        ]
+        .map(str::to_string)
+    );
+}
+
+#[test]
 fn nothing_for_what_neither_defines() {
+    assert_eq!(pg("SELECT 1 FROM users ORDER BY |9"), None);
+    assert_eq!(pg("SELECT 1 FROM users ORDER BY |0"), None);
+    assert_eq!(pg("SELECT id, FROM users ORDER BY |2"), None);
+    assert_eq!(pg("SELECT s.|a FROM (VALUES (1)) s"), None);
+    assert_eq!(pg("WITH c (x) AS (SELECT 1 AS y) SELECT c.|y FROM c"), None);
+    assert_eq!(pg("SELECT s.|y FROM (SELECT 1 AS y) s(x)"), None);
+    assert_eq!(pg("SELECT u.|id FROM users u(k)"), None);
+    assert_eq!(pg("SELECT *, id FROM users ORDER BY |2"), None);
+    assert_eq!(pg("SELECT u.* FROM users u ORDER BY |1"), None);
+    assert_eq!(pg("SELECT id > 1 OR k FROM users ORDER BY |k"), None);
+    assert_eq!(
+        pg("SELECT CASE WHEN true THEN 1 END FROM users ORDER BY |end"),
+        None
+    );
     assert_eq!(pg("SEL|ECT 1"), None);
     assert_eq!(pg("SELECT 1 FROM nowh|ere"), None);
     assert_eq!(pg("SELECT 1 FROM pg_cl|ass"), None);
     assert_eq!(pg("SELECT 1 FROM a|pp.orders"), None);
-    assert_eq!(pg("WITH big AS (SELECT 1 AS n) SELECT |n FROM big"), None);
     assert_eq!(pg("SELECT nope| FROM users"), None);
     assert_eq!(pg("SELECT 1 FROM generate_ser|ies(1, 2) g"), None);
-    assert_eq!(pg("SELECT s.tot|al FROM (SELECT 1 AS total) s"), None);
     assert_eq!(
         pg("SELECT id, ema|il AS e FROM (SELECT * FROM users) s"),
         None
