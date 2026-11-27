@@ -105,7 +105,7 @@ const CASES: &[Case] = &[
     ("postgres", "INSERT INTO orders (id, customer_id) SELECT 1, 2 RETURNING *", &[]),
     ("postgres", "WITH a AS (SELECT 1 AS x) TABLE a", &[]),
     ("postgres", "WITH a AS (SELECT 1 AS x) SELECT 1 UNION TABLE a", &[]),
-    ("postgres", "WITH RECURSIVE r(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM r WHERE n < 3) SELECT 1", &[]),
+    ("postgres", "WITH RECURSIVE r(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM r WHERE n < 3) SELECT 1", &["[unused-cte] CTE `r` is never read"]),
     ("postgres", "WITH gone AS (DELETE FROM tags RETURNING order_id) SELECT 1", &[]),
     ("postgres", "WITH c AS (SELECT 1 AS x) SELECT (WITH c AS (SELECT 2 AS x) SELECT x FROM c)", &["[unused-cte] CTE `c` is never read"]),
     ("postgres", "WITH generate_series AS (SELECT 1 AS n) SELECT * FROM generate_series(1, 3)", &["[unused-cte] CTE `generate_series` is never read"]),

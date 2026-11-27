@@ -10,7 +10,7 @@ use super::dialect::SqlDialect;
 use crate::catalog::fold;
 
 /// The name and span of each CTE of `stmt` that nothing reads, innermost first. A
-/// data-modifying CTE runs unread, and a recursive one reading itself counts as read.
+/// data-modifying CTE runs unread; a recursive one reading only itself never runs.
 pub(super) fn unused_ctes(stmt: &Statement, dialect: SqlDialect) -> Vec<(String, Span)> {
     let mut walk = Walk {
         dialect,
@@ -36,8 +36,10 @@ struct Frame {
     ctes: Vec<Entry>,
     /// How many of `ctes` the query being walked sees.
     visible: usize,
-    /// The CTE whose body the walk enters next.
+    /// The CTE whose body the walk enters next, or is in.
     next: usize,
+    /// Whether the walk is in the body of `next`.
+    inside: bool,
 }
 
 struct Walk {
@@ -53,7 +55,11 @@ struct Walk {
 impl Walk {
     fn read(&mut self, name: &str) {
         if let Some(&(frame, cte)) = self.scope.get(name).and_then(|found| found.last()) {
-            self.frames[frame].ctes[cte].read = true;
+            let frame = &mut self.frames[frame];
+            // A recursive CTE reading itself runs only when something else reads it.
+            if !(frame.inside && frame.next == cte) {
+                frame.ctes[cte].read = true;
+            }
         }
     }
 
@@ -80,6 +86,7 @@ impl Walk {
             .get(next)
             .is_some_and(|cte| std::ptr::eq(cte.query, query))
         {
+            frame.inside = !after;
             frame.next += usize::from(after);
             self.show(next + usize::from(after));
         }
@@ -128,6 +135,7 @@ impl Visitor for Walk {
                 ctes,
                 visible: 0,
                 next: 0,
+                inside: false,
             });
             // SQLite lets any CTE of a `WITH` read any other, `RECURSIVE` or not.
             if with.recursive || self.dialect == SqlDialect::Sqlite {
