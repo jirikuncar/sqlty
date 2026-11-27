@@ -14,8 +14,8 @@ repo = "builtin"
 hooks = [
   { id = "fix-byte-order-marker", exclude = '^rust/crates/sqlty-cli/tests/cli/check-fix\.(in|out)/r\.py$', priority = 0 },
   { id = "mixed-line-ending", priority = 1 },
-  { id = "trailing-whitespace", stages = ["pre-commit"], priority = 2 },
-  { id = "end-of-file-fixer", stages = ["pre-commit"], priority = 3 },
+  { id = "trailing-whitespace", stages = ["pre-commit"], exclude = '^rust/crates/sqlty-cli/tests/cli/complete\.md$', priority = 2 },
+  { id = "end-of-file-fixer", stages = ["pre-commit"], exclude = '^rust/crates/sqlty-cli/tests/cli/(complete\.in/multi|diff\.in/q)\.py$', priority = 3 },
   { id = "check-yaml", priority = 10 },
   { id = "check-toml", priority = 10 },
   { id = "check-json", priority = 10 },
