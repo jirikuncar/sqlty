@@ -1,6 +1,8 @@
 //! Where a name of a query is defined, for go to definition: the `CREATE TABLE`, `VIEW` or
-//! column definition of the schema that last defined it, or the alias or CTE of the query
-//! itself.
+//! column definition of the schema that last defined it, or the alias, CTE or select item
+//! of the query itself: a column of a subquery or a CTE goes to the select item that gives
+//! it, and an `ORDER BY` or `GROUP BY` alias or position to the select item it names (the
+//! first branch of a set operation), or on through a plain item to the column it reads.
 //!
 //! A name is read as hover reads it, through completion at the end of the word, so it costs
 //! what completion does; then a lookup by key finds where the schema defines it, and only
@@ -31,7 +33,7 @@ const SHOWN: usize = 50;
 /// Where a name is defined.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Definition {
-    /// Bytes of the query: an alias or a CTE.
+    /// Bytes of the query: an alias, a CTE or a select item.
     Query(Range<usize>),
     /// Bytes of the schema text the catalog was loaded from: the name in the statement that
     /// last defined it, or the start of that statement when the name is not found in it.
@@ -100,6 +102,8 @@ struct Item {
 struct Cte {
     name: usize,
     columns: Vec<usize>,
+    /// The `(` of its query.
+    body: usize,
 }
 
 impl Names<'_> {
@@ -143,7 +147,7 @@ impl Names<'_> {
         if let Some(item) = self.listing(at) {
             return self.column_of(item, &self.fold(at));
         }
-        self.column(at, &self.fold(at))
+        self.bare(at)
     }
 
     /// The item whose columns the parentheses around `at` list: `INSERT INTO t (a, b)`, or
@@ -215,19 +219,68 @@ impl Names<'_> {
             })
     }
 
-    /// The column `name` of the schema relation `item` names; a CTE's or a subquery's
-    /// columns are its own.
+    /// The column `name` of the relation `item` reads: a select item of a subquery or a
+    /// CTE, or a column of the schema.
     fn column_of(&self, item: &Item, name: &str) -> Option<Definition> {
-        if item.subquery.is_some() {
-            return None;
+        if let Some(open) = item.subquery {
+            return self.output(Some(open), name, false);
         }
         if let [only] = item.name.as_slice() {
-            if self.cte(&self.fold(*only)).is_some() {
-                return None;
+            if let Some(cte) = self.cte(&self.fold(*only)) {
+                if let Some(&tok) = cte.columns.iter().find(|&&tok| self.fold(tok) == name) {
+                    return self.query_at(tok);
+                }
+                return self.output(Some(cte.body), name, false);
             }
         }
         let relation: Vec<String> = item.name.iter().map(|&tok| self.fold(tok)).collect();
         self.in_schema(&relation.join("."), Some(name))
+    }
+
+    /// The select item named `name` of the query that opens after `open`, or the top one;
+    /// with `follow`, see [`Names::item`].
+    fn output(&self, open: Option<usize>, name: &str, follow: bool) -> Option<Definition> {
+        let found = select_list(self.tokens, open)
+            .into_iter()
+            .find(|item| item.name.is_some_and(|tok| self.fold(tok) == name))?;
+        Some(match follow {
+            true => self.item(found),
+            false => Definition::Query(found.span),
+        })
+    }
+
+    /// Where the column an `ORDER BY` or `GROUP BY` names is defined: its select item, or,
+    /// for one that only reads a column, where that column is.
+    fn item(&self, item: SelectItem) -> Definition {
+        let read = match (item.plain, item.name) {
+            (true, Some(name)) => self.at(name),
+            _ => None,
+        };
+        read.unwrap_or(Definition::Query(item.span))
+    }
+
+    /// A word that is no qualifier: a column completion offers for it, then an output
+    /// column an `ORDER BY` or `GROUP BY` names by alias or position.
+    fn bare(&self, at: usize) -> Option<Definition> {
+        let tokens = self.tokens;
+        let word = &tokens[at];
+        let by = grouping(tokens, at);
+        let level = || enclosing(tokens, at);
+        if by.is_some() && word.text.bytes().all(|b| b.is_ascii_digit()) {
+            let position: usize = word.text.parse().ok()?;
+            let items = select_list(tokens, level());
+            let found = items.into_iter().nth(position.checked_sub(1)?)?;
+            return Some(self.item(found));
+        }
+        let name = self.fold(at);
+        let output = || self.output(level(), &name, true);
+        if by == Some(Grouping::Order) {
+            if let Some(found) = output() {
+                return Some(found);
+            }
+        }
+        self.column(at, &name)
+            .or_else(|| by.is_some().then(output).flatten())
     }
 
     /// The column completion offers for exactly the word at `at`, where its relation
@@ -403,6 +456,137 @@ fn items(tokens: &[Tok]) -> Vec<Item> {
     found
 }
 
+/// The clause a word at the top of an `ORDER BY` or `GROUP BY` item is in.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Grouping {
+    Order,
+    Group,
+}
+
+/// Whether the word at `at` is a whole `ORDER BY` or `GROUP BY` item at its level.
+fn grouping(tokens: &[Tok], at: usize) -> Option<Grouping> {
+    let depth = tokens[at].depth;
+    let prev = tokens[..at].iter().rposition(|tok| tok.depth == depth)?;
+    if !(tokens[prev].text == "," || tokens[prev].text.eq_ignore_ascii_case("BY")) {
+        return None;
+    }
+    let clause = tokens[..at]
+        .iter()
+        .rposition(|tok| tok.depth == depth && tok.word && tok.text.eq_ignore_ascii_case("BY"))?;
+    let between = &tokens[clause + 1..at];
+    if between
+        .iter()
+        .any(|tok| tok.depth == depth && tok.word && is_clause(&tok.text))
+    {
+        return None;
+    }
+    let keyword = tokens[..clause]
+        .iter()
+        .rev()
+        .find(|tok| tok.depth == depth)?;
+    if keyword.text.eq_ignore_ascii_case("ORDER") {
+        Some(Grouping::Order)
+    } else if keyword.text.eq_ignore_ascii_case("GROUP") {
+        Some(Grouping::Group)
+    } else {
+        None
+    }
+}
+
+/// The `(` that opens the query level of the token at `at`, `None` at the top.
+fn enclosing(tokens: &[Tok], at: usize) -> Option<usize> {
+    let depth = tokens[at].depth.checked_sub(1)?;
+    tokens[..at]
+        .iter()
+        .rposition(|tok| tok.depth == depth && tok.text == "(")
+}
+
+/// A select item: its bytes, and the token of the name it gives its column.
+struct SelectItem {
+    span: Range<usize>,
+    name: Option<usize>,
+    /// It only reads a column: `name` or `alias.name`.
+    plain: bool,
+}
+
+/// The select items of the first `SELECT` of the query that opens after `open` (the first
+/// branch of a set operation), or of the top level.
+fn select_list(tokens: &[Tok], open: Option<usize>) -> Vec<SelectItem> {
+    let (depth, from) = match open {
+        Some(open) => (tokens[open].depth + 1, open + 1),
+        None => (0, 0),
+    };
+    let is = |tok: &Tok, word: &str| tok.word && tok.text.eq_ignore_ascii_case(word);
+    let Some(select) = tokens[from..]
+        .iter()
+        .take_while(|tok| tok.depth >= depth)
+        .position(|tok| tok.depth == depth && is(tok, "SELECT"))
+    else {
+        return Vec::new();
+    };
+    let mut i = from + select + 1;
+    if tokens
+        .get(i)
+        .is_some_and(|tok| is(tok, "DISTINCT") || is(tok, "ALL"))
+    {
+        i += 1;
+        if tokens.get(i).is_some_and(|tok| is(tok, "ON")) {
+            i += 1;
+            while tokens
+                .get(i)
+                .is_some_and(|tok| tok.depth > depth || tok.text == "(")
+            {
+                i += 1;
+            }
+            i += 1;
+        }
+    }
+    let mut found = Vec::new();
+    let mut start = i;
+    let ends = |tok: &Tok| {
+        tok.depth < depth
+            || (tok.depth == depth && (tok.text == ";" || AFTER_SELECT.iter().any(|w| is(tok, w))))
+    };
+    let push = |found: &mut Vec<SelectItem>, start: usize, end: usize| {
+        if start < end {
+            let item = &tokens[start..end];
+            found.push(SelectItem {
+                span: tokens[start].span.start..tokens[end - 1].span.end,
+                name: item_name(item).map(|at| start + at),
+                plain: item.len() == 1 || (item.len() == 3 && item[1].text == "."),
+            });
+        }
+    };
+    while i < tokens.len() && !ends(&tokens[i]) {
+        if tokens[i].depth == depth && tokens[i].text == "," {
+            push(&mut found, start, i);
+            start = i + 1;
+        }
+        i += 1;
+    }
+    push(&mut found, start, i);
+    found
+}
+
+/// The token that names a select item's column: its alias, or the column it reads.
+fn item_name(item: &[Tok]) -> Option<usize> {
+    let last = item.len() - 1;
+    let tok = &item[last];
+    if !tok.word || is_keyword(&tok.text) || tok.text.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    let named = match last.checked_sub(1).map(|at| &item[at]) {
+        None => true,
+        Some(prev) => {
+            prev.text == "."
+                || prev.text.eq_ignore_ascii_case("AS")
+                || (prev.word && !is_clause(&prev.text))
+                || prev.text == ")"
+        }
+    };
+    named.then_some(last)
+}
+
 /// The CTEs of every `WITH` of `tokens`: `name [(columns)] AS [NOT] [MATERIALIZED] (...)`,
 /// separated by commas.
 fn ctes(tokens: &[Tok]) -> Vec<Cte> {
@@ -432,7 +616,11 @@ fn ctes(tokens: &[Tok]) -> Vec<Cte> {
             if !word(at, "(") {
                 break;
             }
-            found.push(Cte { name, columns });
+            found.push(Cte {
+                name,
+                columns,
+                body: at,
+            });
             at = closing(tokens, at) + 1;
             if !word(at, ",") {
                 break;
