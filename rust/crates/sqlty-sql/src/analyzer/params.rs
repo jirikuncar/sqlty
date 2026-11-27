@@ -838,7 +838,7 @@ impl<'a> Analyzer<'a> {
         let other = operand(other_type);
         let ruled = binary_rules(op)
             .iter()
-            .find_map(|rule| rule.parameter(self.dialect, left, other));
+            .find_map(|rule| rule.parameter(self.dialect, self.schema.extensions(), left, other));
         if let Some(sql_type) = ruled {
             return out.add(index, self.param_typed(sql_type), Nullability::Unknown);
         }

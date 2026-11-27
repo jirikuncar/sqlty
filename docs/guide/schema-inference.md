@@ -456,6 +456,36 @@ MySQL and SQLite follow `ALTER TABLE` (`ADD`, `DROP` and `RENAME COLUMN`,
 too; other dialects read `CREATE` statements only. A MySQL `MODIFY` or `CHANGE`
 replaces the whole column definition, `NOT NULL` and `ENUM` labels included.
 
+### Extensions
+
+`CREATE EXTENSION hstore` makes the functions of `hstore` known: `akeys(tags)` is a
+`list[str]`, strict functions are nullable only when an argument is, and a call
+qualified with the extension's schema (`ext.akeys(tags)`) is the same function. Without
+the statement, `unknown-function` names the extension the call needs. `DROP EXTENSION`
+and `DROP SCHEMA ... CASCADE` remove it again. An `hstore` value is
+`dict[str, str | None]`, as psycopg's `register_hstore` loads it, and its operators
+(`->`, `?`, `@>`, `||`, ...) are typed whatever the schema says; `[tool.sqlty.types]`
+changes the Python type (`HSTORE = "str"` without the adapter). Other extensions keep
+their functions unknown.
+
+```toml
+[tool.sqlty]
+dialect = "postgres"
+schema = "schema.sql"
+```
+
+`schema.sql`:
+
+```sql
+CREATE EXTENSION hstore;
+CREATE TABLE items (id INTEGER PRIMARY KEY, tags hstore NOT NULL);
+```
+
+```python
+keys = "--sql\nSELECT akeys(tags), tags -> 'color' FROM items"
+# rewritten: keys = SQL[tuple[list[str], str | None]]("--sql\nSELECT akeys(tags), tags -> 'color' FROM items")
+```
+
 ## Where the schema comes from
 
 `sqlty rewrite` and `sqlty check` use, in order:

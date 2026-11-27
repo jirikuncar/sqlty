@@ -76,6 +76,7 @@ pub use hover::{hover, Hover};
 #[cfg(test)]
 pub(crate) use inference::tests::allocations;
 pub use inference::RuleRef;
+pub(crate) use inference::{extension_bit, Extensions};
 pub(crate) use input::iso_types;
 pub use nullability::Nullability;
 pub use params::{analyze_params, Param};

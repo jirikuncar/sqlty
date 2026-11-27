@@ -324,6 +324,15 @@ fn read_statement(
                     stmt.name_parts_after("function"),
                 )),
             }
+        } else if postgres && stmt.creates("extension") {
+            if let Some(Statement::CreateExtension(create)) =
+                parse_ddl(&stmt.sql(), dialect).and_then(|stmts| stmts.into_iter().next())
+            {
+                push(OpKind::Extension(
+                    fold(&create.name, dialect),
+                    create.schema.map(|schema| fold(&schema, dialect)),
+                ));
+            }
         } else if postgres && stmt.creates("policy") {
             match parse_ddl(&stmt.sql(), dialect).and_then(|stmts| stmts.into_iter().next()) {
                 Some(Statement::CreatePolicy(create)) => {
@@ -450,7 +459,8 @@ pub(super) fn read_alter_or_drop(
             Some(
                 drop @ (Statement::Drop { .. }
                 | Statement::DropFunction(_)
-                | Statement::DropDomain(_)),
+                | Statement::DropDomain(_)
+                | Statement::DropExtension(_)),
             ) => {
                 push(OpKind::Drop(Box::new(drop)));
             }

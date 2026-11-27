@@ -479,3 +479,60 @@ fn only_a_dialect_without_rules_extends_known_dialects() {
     let message = extended("[generic]\nextends = []\nreasoning = \"R.\"\n", &[]);
     assert!(message.unwrap_err().contains("must not be empty"));
 }
+
+const EXTENSIONS: &str = "rules/postgres/extensions/a.inference.toml";
+
+fn hstore_rule(id: &str) -> String {
+    VALID.replace("test.long-arrow", id).replace(
+        "operator =",
+        "dialects = [\"postgres\"]\nextension = \"hstore\"\noperator =",
+    )
+}
+
+#[test]
+fn an_extension_rule_records_its_extension() {
+    let code = compile_one(EXTENSIONS, &hstore_rule("test.hstore")).unwrap();
+    assert!(code.contains("extension: 0x1,"), "{code}");
+    assert!(code.contains("\"hstore\" => 0x1,"));
+    assert!(code.contains(r#"EXTENSION_NAMES: &[&str] = &["hstore"];"#));
+}
+
+#[test]
+fn an_extension_rule_is_a_known_postgres_extension_in_its_directory() {
+    let unknown = hstore_rule("test.x").replace("\"hstore\"", "\"citext\"");
+    assert!(error(EXTENSIONS, &unknown).ends_with("unknown extension \"citext\""));
+    let elsewhere = error("rules/postgres/a.inference.toml", &hstore_rule("test.x"));
+    assert!(
+        elsewhere.ends_with(
+            "a rule of extension \"hstore\" goes in `rules/postgres/extensions/` with `dialects = [\"postgres\"]`"
+        ),
+        "{elsewhere}"
+    );
+    let mysql = hstore_rule("test.x").replace("[\"postgres\"]", "[\"mysql\"]");
+    assert!(error(EXTENSIONS, &mysql).contains("goes in `rules/postgres/extensions/`"));
+}
+
+#[test]
+fn an_extension_rule_neither_hides_nor_conflicts_with_a_dialect_rule() {
+    let general = VALID
+        .replace("left = [\"@json\"]\n", "")
+        .replace("type = \"TEXT\"", "type = \"JSONB\"")
+        .replace("operator =", "dialects = [\"postgres\"]\noperator =");
+    let files = [
+        (
+            EXTENSIONS.to_string(),
+            hstore_rule("test.hstore").replace("left = [\"@json\"]\n", ""),
+        ),
+        ("rules/postgres/a.inference.toml".to_string(), general),
+    ];
+    let code = compile(&files).unwrap();
+    let first = code.find("id: \"test.hstore\"").unwrap();
+    assert!(first < code.find("id: \"test.long-arrow\"").unwrap());
+}
+
+#[test]
+fn an_operator_may_give_an_array() {
+    let rule = VALID.replace("type = \"TEXT\"", "type = \"ARRAY<ARRAY<TEXT>>\"");
+    let code = compile_one("rules/common/a.inference.toml", &rule).unwrap();
+    assert!(code.contains(r#"result: RuleType::Sql("ARRAY<ARRAY<TEXT>>")"#));
+}

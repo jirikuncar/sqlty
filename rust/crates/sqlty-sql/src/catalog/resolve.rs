@@ -10,7 +10,7 @@ use rustc_hash::FxHashMap;
 
 use sqlparser::ast::{visit_expressions, ArrayElemTypeDef, DataType, EnumMember, Expr, Ident};
 
-use crate::analyzer::{canonical_type, typed, SqlDialect};
+use crate::analyzer::{canonical_type, extension_bit, typed, Extensions, SqlDialect};
 use crate::ddl::RowEvents;
 use crate::values::{self, Value};
 
@@ -112,6 +112,17 @@ impl Loader {
                 .map(|key| (Arc::from(key.as_str()), ()))
                 .collect(),
             search_path: path,
+            extensions: Extensions(
+                self.extensions
+                    .keys()
+                    .fold(0, |mask, name| mask | extension_bit(name)),
+            ),
+            extension_schemas: {
+                let mut schemas: Vec<String> = self.extensions.values().cloned().collect();
+                schemas.sort_unstable();
+                schemas.dedup();
+                schemas
+            },
             user_relations,
             postgres: self.postgres,
             overrides: Arc::clone(&self.overrides),

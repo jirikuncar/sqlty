@@ -1062,7 +1062,7 @@ impl<'a> Analyzer<'a> {
         }
         let mut rules = binary_rules(op)
             .iter()
-            .filter(|rule| rule.in_dialect(self.dialect));
+            .filter(|rule| rule.in_dialect(self.dialect, self.schema.extensions()));
         // Rules that agree on the nullability, the last for any operands, need no types.
         let agreed = rules.next().filter(|first| {
             let mut last = *first;
@@ -1404,7 +1404,7 @@ impl<'a> Analyzer<'a> {
                     _ => Nullability::Nullable,
                 }
             }
-            _ if typed_by_rule(&name, self.dialect) && all_positional => {
+            _ if typed_by_rule(&name, self.dialect, self.schema.extensions()) && all_positional => {
                 any_nullable(args.iter().map(|arg| of(arg)))
             }
             _ => match self

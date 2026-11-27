@@ -18,7 +18,8 @@ use sqlparser::ast::{
 };
 
 use crate::analyzer::{
-    canonical_type, typed, view_columns, Column, Nullability, SkippedObject, SqlDialect,
+    canonical_type, extension_bit, typed, view_columns, Column, Nullability, SkippedObject,
+    SqlDialect,
 };
 use crate::ddl::{RowEvents, RowTrigger};
 use crate::values::{self, Value};
@@ -143,6 +144,8 @@ pub(super) enum OpKind {
     UniqueIndex(Vec<String>, RawUnique),
     /// `DROP TRIGGER name [ON table]`.
     DropTrigger(Vec<String>, Option<Vec<String>>),
+    /// `CREATE EXTENSION name [SCHEMA schema]`.
+    Extension(String, Option<String>),
     /// `CREATE`, `ALTER` or `DROP POLICY` on the table it names.
     Policy(Vec<String>, Box<policies::Change>),
     /// A statement that changes the named relation, type or function in a way this
@@ -186,6 +189,8 @@ pub(super) struct Loader {
     pub(super) functions: FxHashMap<String, Vec<RawFunction>>,
     /// Functions whose latest definition could not be read.
     pub(super) unknown_functions: FxHashSet<String>,
+    /// The extensions rules know that the schema creates, with the schema each is in.
+    pub(super) extensions: FxHashMap<String, String>,
     pub(super) search_path: Vec<String>,
     /// The resolved catalog; a change to one relation marks it stale, any other change
     /// drops it to be built again.
@@ -244,6 +249,7 @@ impl Loader {
             enum_labels: FxHashMap::default(),
             functions: FxHashMap::default(),
             unknown_functions: FxHashSet::default(),
+            extensions: FxHashMap::default(),
             search_path: vec!["public".to_string()],
             cache: None,
             stale_functions: FxHashSet::default(),
@@ -270,6 +276,7 @@ impl Loader {
             enum_labels: FxHashMap::default(),
             functions: self.functions.clone(),
             unknown_functions: self.unknown_functions.clone(),
+            extensions: self.extensions.clone(),
             search_path: self.search_path.clone(),
             cache: None,
             stale_functions: self.stale_functions.clone(),
@@ -455,6 +462,16 @@ impl Loader {
             }
             OpKind::Function(create) => {
                 self.create_function(create, &path);
+                false
+            }
+            OpKind::Extension(name, schema) => {
+                if extension_bit(name) != 0 {
+                    self.cache = None;
+                    let schema = schema
+                        .clone()
+                        .unwrap_or_else(|| self.default_schema(&path).to_string());
+                    self.extensions.insert(name.clone(), schema);
+                }
                 false
             }
             OpKind::Taint(what, name) => !self.taint(*what, name, &path),
@@ -1155,9 +1172,16 @@ impl Loader {
                         self.types.retain(|key, _| !key.starts_with(&prefix));
                         self.enum_labels.retain(|key, _| !key.starts_with(&prefix));
                         self.functions.retain(|key, _| !key.starts_with(&prefix));
+                        self.extensions
+                            .retain(|_, within| within.as_str() != schema);
                     }
                     _ => {}
                 }
+            }
+        }
+        if let Statement::DropExtension(drop) = stmt {
+            for name in &drop.names {
+                self.extensions.remove(&fold(name, self.dialect));
             }
         }
         if let Statement::DropDomain(drop) = stmt {

@@ -55,7 +55,7 @@ use std::sync::{Arc, LazyLock, OnceLock};
 
 use sqlparser::ast::{DataType, Expr};
 
-use crate::analyzer::{Column, SqlDialect};
+use crate::analyzer::{Column, Extensions, SqlDialect};
 use crate::ddl::RowEvents;
 
 use index::NameIndex;
@@ -269,6 +269,10 @@ pub struct CatalogData {
     type_names: FxHashMap<Arc<str>, ()>,
     /// Schemas a bare name is looked up in, in order.
     search_path: Vec<String>,
+    /// The extensions rules know that the schema creates.
+    extensions: Extensions,
+    /// The schemas those extensions are in.
+    extension_schemas: Vec<String>,
     /// Relations the schema itself defines, built-ins not counted.
     user_relations: usize,
     postgres: bool,
@@ -854,6 +858,16 @@ impl Catalog {
         let name = self.norm(name);
         lookup_key(&self.functions, &self.search_path, name).is_some()
             || lookup_key(&self.unknown_functions, &self.search_path, name).is_some()
+    }
+
+    /// The extensions rules know that the schema creates.
+    pub(crate) fn extensions(&self) -> Extensions {
+        self.extensions
+    }
+
+    /// Whether an extension rules know is in `schema`, folded.
+    pub(crate) fn has_extension_schema(&self, schema: &str) -> bool {
+        self.extension_schemas.iter().any(|within| within == schema)
     }
 
     /// Whether the schema defines a domain, enum or composite type `name`.

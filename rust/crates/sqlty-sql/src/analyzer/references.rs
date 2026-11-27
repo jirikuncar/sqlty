@@ -122,7 +122,9 @@ impl Visitor for References<'_, '_> {
         }
         if let (Expr::Function(function), 0) = (expr, self.depth) {
             let analyzer = self.analyzer;
-            let unknown = function_rules(&analyzer.builtin_name(&function.name)).is_empty()
+            let unknown = !function_rules(&analyzer.builtin_name(&function.name))
+                .iter()
+                .any(|rule| rule.available(analyzer.dialect, analyzer.schema.extensions()))
                 && !analyzer.schema.is_empty()
                 && !analyzer
                     .schema

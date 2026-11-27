@@ -539,6 +539,8 @@ static SQL_TO_PYTHON_TYPE: LazyLock<HashMap<&'static str, &'static str>> = LazyL
         ("NAME", "str"),
         ("ENUM", "str"),
         ("CITEXT", "str"),
+        // psycopg's `register_hstore` loads hstore as a dict; a value may be NULL.
+        ("HSTORE", "dict[str, str | None]"),
         ("BPCHAR", "str"),
         ("XML", "str"),
         ("MONEY", "str"),
@@ -882,12 +884,21 @@ mod scalar_python_types {
         "typing.Any",
     ];
 
-    /// Standard library classes, `tuple[T, ...]`, and unions of distinct members.
+    /// Standard library classes, `tuple[T, ...]`, `dict[K, V]`, and unions of distinct
+    /// members, `None` among them.
     fn well_formed(python: &str) -> bool {
         let members = top_level_members(python);
         if members.len() > 1 {
             let distinct: std::collections::BTreeSet<_> = members.iter().collect();
-            return distinct.len() == members.len() && members.iter().all(|m| well_formed(m));
+            return distinct.len() == members.len()
+                && members.iter().all(|m| *m == "None" || well_formed(m));
+        }
+        if let Some((key, value)) = python
+            .strip_prefix("dict[")
+            .and_then(|rest| rest.strip_suffix(']'))
+            .and_then(|pair| pair.split_once(", "))
+        {
+            return well_formed(key) && well_formed(value);
         }
         python
             .strip_prefix("tuple[")

@@ -85,6 +85,22 @@ pub(crate) struct References {
     pub(crate) each: &'static [(SqlDialect, &'static str)],
 }
 
+/// The PostgreSQL extensions a schema creates, as a mask of [`extension_bit`]s.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct Extensions(pub(crate) u32);
+
+impl Extensions {
+    /// Whether a rule requiring the extension `bit` (0 for none) applies.
+    fn admit(self, bit: u32) -> bool {
+        bit == 0 || self.0 & bit != 0
+    }
+}
+
+/// The extension of bit `bit`, for a message.
+pub(crate) fn extension_name(bit: u32) -> Option<&'static str> {
+    EXTENSION_NAMES.get(bit.trailing_zeros() as usize).copied()
+}
+
 /// An inference rule for a binary operator.
 #[derive(Debug)]
 pub(crate) struct BinaryRule {
@@ -105,6 +121,8 @@ pub(crate) struct BinaryRule {
     left_parameter: Option<&'static str>,
     /// The SQL type a placeholder on the right gets when the left operand matches.
     right_parameter: Option<&'static str>,
+    /// The bit of the extension the rule requires; 0 for none.
+    extension: u32,
 }
 
 impl BinaryRule {
@@ -123,6 +141,7 @@ impl BinaryRule {
     pub(crate) fn parameter(
         &self,
         dialect: SqlDialect,
+        extensions: Extensions,
         left: bool,
         other: Option<Operand>,
     ) -> Option<&'static str> {
@@ -131,13 +150,13 @@ impl BinaryRule {
         } else {
             (self.right_parameter, self.left)
         };
-        let applies = self.dialects.is_empty() || self.dialects.contains(&dialect);
-        parameter.filter(|_| applies && admits(other_types, other))
+        parameter.filter(|_| self.in_dialect(dialect, extensions) && admits(other_types, other))
     }
 
-    /// Whether the rule applies in `dialect`, whatever the operands.
-    pub(crate) fn in_dialect(&self, dialect: SqlDialect) -> bool {
-        self.dialects.is_empty() || self.dialects.contains(&dialect)
+    /// Whether the rule applies in `dialect` with `extensions`, whatever the operands.
+    pub(crate) fn in_dialect(&self, dialect: SqlDialect, extensions: Extensions) -> bool {
+        (self.dialects.is_empty() || self.dialects.contains(&dialect))
+            && extensions.admit(self.extension)
     }
 
     /// Whether the rule needs the left operand's type to decide whether it applies.
@@ -150,16 +169,16 @@ impl BinaryRule {
         self.right.is_some()
     }
 
-    /// Whether the rule applies in `dialect` to operands of these SQL types.
+    /// Whether the rule applies in `dialect` with `extensions` to operands of these SQL
+    /// types.
     pub(crate) fn applies(
         &self,
         dialect: SqlDialect,
+        extensions: Extensions,
         left: Option<Operand>,
         right: Option<Operand>,
     ) -> bool {
-        (self.dialects.is_empty() || self.dialects.contains(&dialect))
-            && admits(self.left, left)
-            && admits(self.right, right)
+        self.in_dialect(dialect, extensions) && admits(self.left, left) && admits(self.right, right)
     }
 }
 
@@ -218,6 +237,8 @@ pub(crate) struct FunctionRule {
     any: Option<u128>,
     pub(crate) result: FunctionType,
     pub(crate) nullability: FunctionNullability,
+    /// The bit of the extension the rule requires; 0 for none.
+    pub(crate) extension: u32,
 }
 
 impl FunctionRule {
@@ -258,11 +279,12 @@ impl FunctionRule {
     pub(crate) fn applies(
         &self,
         dialect: SqlDialect,
+        extensions: Extensions,
         argument: Option<Operand>,
         second: Option<Operand>,
         all: &[Option<Operand>],
     ) -> bool {
-        (self.dialects.is_empty() || self.dialects.contains(&dialect))
+        self.available(dialect, extensions)
             && admits(self.argument, argument)
             && admits(self.second, second)
             && self
@@ -271,14 +293,22 @@ impl FunctionRule {
     }
 }
 
-/// Whether a rule types every call of the function `name` (upper case) in `dialect`,
-/// whatever its arguments.
-pub(crate) fn typed_by_rule(name: &str, dialect: SqlDialect) -> bool {
+impl FunctionRule {
+    /// Whether the rule applies in `dialect` with `extensions`, whatever the arguments.
+    pub(crate) fn available(&self, dialect: SqlDialect, extensions: Extensions) -> bool {
+        (self.dialects.is_empty() || self.dialects.contains(&dialect))
+            && extensions.admit(self.extension)
+    }
+}
+
+/// Whether a rule types every call of the function `name` (upper case) in `dialect` with
+/// `extensions`, whatever its arguments.
+pub(crate) fn typed_by_rule(name: &str, dialect: SqlDialect, extensions: Extensions) -> bool {
     function_rules(name).iter().any(|rule| {
         rule.argument.is_none()
             && rule.second.is_none()
             && rule.any.is_none()
-            && (rule.dialects.is_empty() || rule.dialects.contains(&dialect))
+            && rule.available(dialect, extensions)
     })
 }
 
@@ -440,11 +470,12 @@ pub(super) mod tests {
                 for rule in binary_rules(op) {
                     matched += usize::from(rule.applies(
                         dialect,
+                        Extensions(1),
                         operand(Some("INT")),
                         operand(Some("JSONB")),
                     ));
                     matched += usize::from(
-                        rule.parameter(dialect, false, operand(Some("JSONB")))
+                        rule.parameter(dialect, Extensions(1), false, operand(Some("JSONB")))
                             .is_some(),
                     );
                 }
@@ -454,6 +485,7 @@ pub(super) mod tests {
             for rule in function_rules(name) {
                 matched += usize::from(rule.applies(
                     SqlDialect::Postgres,
+                    Extensions(1),
                     operand(Some("SMALLINT")),
                     operand(Some("TEXT")),
                     &[],
@@ -488,7 +520,7 @@ pub(super) mod tests {
         let first = |dialect: SqlDialect| {
             binary_rules(&BinaryOperator::LongArrow)
                 .iter()
-                .find(|rule| rule.applies(dialect, None, None))
+                .find(|rule| rule.applies(dialect, Extensions::default(), None, None))
                 .map(|rule| rule.id)
         };
         assert_eq!(first(SqlDialect::Sqlite), Some("sqlite.json.long-arrow"));

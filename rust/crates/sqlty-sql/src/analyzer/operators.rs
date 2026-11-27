@@ -109,9 +109,14 @@ impl Analyzer<'_> {
         op: &UnaryOperator,
         typed: &Typed,
     ) -> Option<&'static BinaryRule> {
-        prefix_rules(op)
-            .iter()
-            .find(|rule| rule.applies(self.dialect, None, operand(rule_type(typed))))
+        prefix_rules(op).iter().find(|rule| {
+            rule.applies(
+                self.dialect,
+                self.schema.extensions(),
+                None,
+                operand(rule_type(typed)),
+            )
+        })
     }
 
     /// The operand types an inference rule reads. In arithmetic a placeholder or `NULL`
@@ -153,7 +158,9 @@ impl Analyzer<'_> {
         if reads_left && reads_right || (reads_left || reads_right) && is_arithmetic(op) {
             let typed = self.rule_operands(left, op, right, scope)?;
             let (l, r) = (operand(rule_type(&typed.0)), operand(rule_type(&typed.1)));
-            let found = rules.iter().find(|rule| rule.applies(self.dialect, l, r));
+            let found = rules
+                .iter()
+                .find(|rule| rule.applies(self.dialect, self.schema.extensions(), l, r));
             return Ok(found.map(|rule| (rule, Some(typed.clone()))));
         }
         let side = |read: bool, expr: &Expr| -> Inferred<Option<Typed>> {
@@ -164,7 +171,9 @@ impl Analyzer<'_> {
             operand(l.as_ref().and_then(rule_type)),
             operand(r.as_ref().and_then(rule_type)),
         );
-        let found = rules.iter().find(|rule| rule.applies(self.dialect, l, r));
+        let found = rules
+            .iter()
+            .find(|rule| rule.applies(self.dialect, self.schema.extensions(), l, r));
         Ok(found.map(|rule| (rule, None)))
     }
 }
