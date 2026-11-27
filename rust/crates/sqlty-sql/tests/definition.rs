@@ -46,6 +46,8 @@ fn schema_names() {
         pg("SELECT 1 FROM archi|ved"),
         pg("SELECT users.i|d FROM users"),
         pg("UPDATE use|rs SET email = ''"),
+        pg("INSERT INTO users (id, ema|il) VALUES (1, '')"),
+        pg("SELECT 1 FROM app.orders o JOIN users u USING (i|d)"),
     ];
     assert_eq!(
         found.map(Option::unwrap_or_default),
@@ -62,6 +64,8 @@ fn schema_names() {
             "schema 8 archived",
             "schema 1 id",
             "schema 1 users",
+            "schema 4 email",
+            "schema 1 id",
         ]
         .map(str::to_string)
     );
@@ -117,6 +121,25 @@ fn nothing_for_what_neither_defines() {
     assert_eq!(pg("SELECT nope| FROM users"), None);
     assert_eq!(pg("SELECT 1 FROM generate_ser|ies(1, 2) g"), None);
     assert_eq!(pg("SELECT s.tot|al FROM (SELECT 1 AS total) s"), None);
+    assert_eq!(
+        pg("SELECT id, ema|il AS e FROM (SELECT * FROM users) s"),
+        None
+    );
+    assert_eq!(pg("SELECT 1 FROM users TABLESAM|PLE bernoulli (1)"), None);
+    assert_eq!(pg("WITH |a (x) SELECT 1"), None);
+    assert_eq!(pg("WITH |a AS SELECT 1"), None);
+    assert_eq!(
+        pg("(SELECT |id FROM users)"),
+        Some("schema 1 id".to_string())
+    );
+    assert_eq!(
+        pg("WITH a AS (SELECT 1), b (|x) AS (SELECT 2) SELECT 1"),
+        Some("query x".to_string())
+    );
+    assert_eq!(
+        pg("WITH a AS NOT MATERIALIZED (SELECT 1) SELECT 1 FROM |a"),
+        Some("query a".to_string())
+    );
     assert_eq!(
         pg("SELECT u|.id FROM users u, (SELECT 1"),
         Some("query u".to_string())

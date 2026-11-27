@@ -1,6 +1,6 @@
 //! Where a name of a query is defined, for go to definition: the `CREATE TABLE`, `VIEW` or
-//! column definition of the schema that last defined it, or the alias, CTE or select item
-//! of the query itself.
+//! column definition of the schema that last defined it, or the alias or CTE of the query
+//! itself.
 //!
 //! A name is read as hover reads it, through completion at the end of the word, so it costs
 //! what completion does; then a lookup by key finds where the schema defines it, and only
@@ -31,7 +31,7 @@ const SHOWN: usize = 50;
 /// Where a name is defined.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Definition {
-    /// Bytes of the query: an alias, a CTE or a select item.
+    /// Bytes of the query: an alias or a CTE.
     Query(Range<usize>),
     /// Bytes of the schema text the catalog was loaded from: the name in the statement that
     /// last defined it, or the start of that statement when the name is not found in it.
@@ -140,7 +140,31 @@ impl Names<'_> {
             let source = self.source(&self.fold(at - 2), tokens[at].depth)?;
             return self.column_of(source, &self.fold(at));
         }
+        if let Some(item) = self.listing(at) {
+            return self.column_of(item, &self.fold(at));
+        }
         self.column(at, &self.fold(at))
+    }
+
+    /// The item whose columns the parentheses around `at` list: `INSERT INTO t (a, b)`, or
+    /// the item before `USING (a)`.
+    fn listing(&self, at: usize) -> Option<&Item> {
+        let tokens = self.tokens;
+        let depth = tokens[at].depth.checked_sub(1)?;
+        let open = (0..at)
+            .rev()
+            .find(|&tok| tokens[tok].depth == depth && tokens[tok].text == "(")?;
+        let before = open.checked_sub(1)?;
+        if tokens[before].text.eq_ignore_ascii_case("USING") {
+            return self
+                .items
+                .iter()
+                .rev()
+                .find(|item| item.depth == depth && item.name.last().is_some_and(|&n| n < before));
+        }
+        self.items
+            .iter()
+            .find(|item| item.name.last() == Some(&before))
     }
 
     /// The relation an item names: a CTE, or a table or view of the schema.
@@ -375,41 +399,50 @@ fn items(tokens: &[Tok]) -> Vec<Item> {
     found
 }
 
-/// The CTEs of every `WITH` of `tokens`.
+/// The CTEs of every `WITH` of `tokens`: `name [(columns)] AS [NOT] [MATERIALIZED] (...)`,
+/// separated by commas.
 fn ctes(tokens: &[Tok]) -> Vec<Cte> {
+    let word = |at: usize, text: &str| {
+        tokens
+            .get(at)
+            .is_some_and(|tok| tok.text.eq_ignore_ascii_case(text))
+    };
     let mut found = Vec::new();
-    for at in 1..tokens.len() {
-        let opens = tokens[at - 1].text.eq_ignore_ascii_case("WITH")
-            || tokens[at - 1].text.eq_ignore_ascii_case("RECURSIVE")
-            || tokens[at - 1].text == ",";
-        if !opens || !tokens[at].word {
-            continue;
-        }
-        let mut next = at + 1;
-        let mut columns = Vec::new();
-        if tokens.get(next).is_some_and(|tok| tok.text == "(") {
-            let depth = tokens[next].depth;
-            next += 1;
-            while let Some(tok) = tokens
-                .get(next)
-                .filter(|tok| tok.depth > depth || tok.text != ")")
-            {
-                if tok.word {
-                    columns.push(next);
-                }
-                next += 1;
+    for with in (0..tokens.len()).filter(|&at| word(at, "WITH")) {
+        let mut at = with + 1 + usize::from(word(with + 1, "RECURSIVE"));
+        while tokens.get(at).is_some_and(|tok| tok.word) {
+            let name = at;
+            let mut columns = Vec::new();
+            at += 1;
+            if word(at, "(") {
+                let close = closing(tokens, at);
+                columns.extend((at + 1..close).filter(|&column| tokens[column].word));
+                at = close + 1;
             }
-            next += 1;
+            if !word(at, "AS") {
+                break;
+            }
+            at += 1;
+            at += usize::from(word(at, "NOT"));
+            at += usize::from(word(at, "MATERIALIZED"));
+            if !word(at, "(") {
+                break;
+            }
+            found.push(Cte { name, columns });
+            at = closing(tokens, at) + 1;
+            if !word(at, ",") {
+                break;
+            }
+            at += 1;
         }
-        let is_cte = tokens
-            .get(next)
-            .is_some_and(|tok| tok.text.eq_ignore_ascii_case("AS"))
-            // `AS [NOT] [MATERIALIZED] (`.
-            && (next + 1..tokens.len().min(next + 4)).any(|at| tokens[at].text == "(");
-        if !is_cte {
-            continue;
-        }
-        found.push(Cte { name: at, columns });
     }
     found
+}
+
+/// The `)` that closes the `(` at `open`, or the end of `tokens`.
+fn closing(tokens: &[Tok], open: usize) -> usize {
+    let depth = tokens[open].depth;
+    (open + 1..tokens.len())
+        .find(|&at| tokens[at].depth == depth && tokens[at].text == ")")
+        .unwrap_or(tokens.len())
 }
