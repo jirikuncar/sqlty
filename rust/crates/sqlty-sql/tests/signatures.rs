@@ -53,3 +53,55 @@ fn signature_help_at_the_edges() {
     let help = signature_help("upper(lower(", 6, "postgres", None).expect("upper");
     assert_eq!(help.name, 0..5);
 }
+
+/// The label of the active overload at the `|` of `sql`, its active parameter in `**`.
+#[expect(clippy::expect_used, reason = "a case without a cursor fails the test")]
+fn active(sql: &str) -> Option<String> {
+    use sqlty_sql::analyzer::signature_help;
+
+    let cursor = sql.find('|').expect("a cursor");
+    let help = signature_help(&sql.replacen('|', "", 1), cursor, "postgres", None)?;
+    let signature = &help.signatures[help.active_signature];
+    Some(match help.active_parameter {
+        Some(p) => {
+            let (start, end) = signature.parameters[p].label;
+            let label = signature.label;
+            format!(
+                "{}**{}**{}",
+                &label[..start],
+                &label[start..end],
+                &label[end..]
+            )
+        }
+        None => signature.label.to_string(),
+    })
+}
+
+#[test]
+#[rustfmt::skip]
+fn signature_help_cases() {
+    for (sql, expected) in [
+        ("SELECT left(name, |", Some("left(string: text, **n: integer**) -> text")),
+        ("SELECT left(name, 3, |", Some("left(string: text, n: integer) -> text")),
+        ("SELECT date_trunc(|", Some("date_trunc(**text**, timestamp) -> timestamp")),
+        ("SELECT coalesce(a, b, |", Some("coalesce(**value: anyelement**, ...) -> anyelement")),
+        ("SELECT upper(left(name, |", Some("left(string: text, **n: integer**) -> text")),
+        ("SELECT \"upper\"(|", Some("upper(**text**) -> text")),
+        ("SELECT make_interval(days => |", Some("make_interval([years: int[, months: int[, weeks: int[, **days: int**[, hours: int[, mins: int[, secs: double precision]]]]]]]) -> interval")),
+        ("SELECT make_interval(days => 1, |", Some("make_interval([years: int[, months: int[, weeks: int[, days: int[, hours: int[, mins: int[, secs: double precision]]]]]]]) -> interval")),
+        ("SELECT make_interval(nope => |", Some("make_interval([years: int[, months: int[, weeks: int[, days: int[, hours: int[, mins: int[, secs: double precision]]]]]]]) -> interval")),
+        ("SELECT \"UPPER\"(|", None),
+        ("SELECT (a + |", None),
+        ("SELECT upper((|", None),
+        ("SELECT a FROM t WHERE a IN (|", None),
+        ("SELECT upper('a, |", None),
+        ("SELECT name|", None),
+        ("SELECT no_such_function(|", None),
+        ("INSERT INTO point (|", None),
+        ("INSERT INTO public.point (|", None),
+        ("CREATE TABLE IF NOT EXISTS point (|", None),
+        ("SELECT 1 + upper(|", Some("upper(**text**) -> text")),
+    ] {
+        assert_eq!(active(sql).as_deref(), expected, "{sql}");
+    }
+}

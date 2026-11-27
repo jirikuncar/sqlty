@@ -1,6 +1,6 @@
 # Signature help
 
-`sqlty server` shows the overloads of the built-in function whose arguments the cursor is
+Signature help shows the overloads of the built-in function whose arguments the cursor is
 in, from the catalog of the dialect, and highlights the parameter the argument binds to. The
 `<CURSOR>` marks where the cursor is; `# signature:` lists the overloads, the active one
 after `> ` with its parameter in `**`, `None` for none.
@@ -50,6 +50,27 @@ q = "--sql\nSELECT concat_ws(', ', first, last, <CURSOR>) FROM users"
 ```python
 q = "--sql\nSELECT coalesce(nickname, name, <CURSOR>) FROM users"
 # signature: > coalesce(**value: anyelement**, ...) -> anyelement
+```
+
+## Named arguments
+
+An argument passed by name makes its parameter active; after it, positions say nothing.
+
+```python
+q = "--sql\nSELECT make_interval(days => <CURSOR>)"
+# signature: > make_interval([years: int[, months: int[, weeks: int[, **days: int**[, hours: int[, mins: int[, secs: double precision]]]]]]]) -> interval
+```
+
+```python
+q = "--sql\nSELECT make_interval(days => 1, <CURSOR>)"
+# signature: > make_interval([years: int[, months: int[, weeks: int[, days: int[, hours: int[, mins: int[, secs: double precision]]]]]]]) -> interval
+```
+
+## Aggregates
+
+```python
+q = "--sql\nSELECT max(<CURSOR>) FROM orders"
+# signature: > max(**anyelement**) -> anyelement
 ```
 
 ## Too many arguments
@@ -121,6 +142,11 @@ q = "--sql\nSELECT id FROM users WHERE id IN (<CURSOR>)"
 
 ```python
 q = "--sql\nINSERT INTO point (<CURSOR>) VALUES (1)"
+# signature: None
+```
+
+```python
+q = "--sql\nINSERT INTO public.point (<CURSOR>) VALUES (1)"
 # signature: None
 ```
 

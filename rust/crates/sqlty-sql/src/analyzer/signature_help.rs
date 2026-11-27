@@ -13,7 +13,7 @@
 
 use std::ops::Range;
 
-use super::complete::lex;
+use super::complete::{lex, Tok};
 use super::{SchemaData, SqlDialect};
 use crate::signatures::{signatures, Signature};
 
@@ -31,11 +31,31 @@ pub struct SignatureHelp {
 }
 
 /// Words a name before `(` follows when it names a relation or its columns, not a call:
-/// `INSERT INTO t (a)`, `WITH t (a) AS`, `AS t (a)`.
-const NOT_A_CALL: [&str; 5] = ["INTO", "TABLE", "REFERENCES", "AS", "WITH"];
+/// `INSERT INTO t (a)`, `WITH t (a) AS`, `AS t (a)`, `CREATE TABLE IF NOT EXISTS t (a)`.
+const NOT_A_CALL: [&str; 8] = [
+    "INTO",
+    "TABLE",
+    "REFERENCES",
+    "AS",
+    "WITH",
+    "EXISTS",
+    "COPY",
+    "VIEW",
+];
+
+/// An open call: its name's token, the commas read and where the current argument starts.
+struct Call {
+    name: usize,
+    commas: usize,
+    argument: usize,
+    /// Whether an earlier argument was passed by name (`days => 1`).
+    named: bool,
+}
 
 /// The built-in function whose argument list holds byte `cursor` of `query`, in the
-/// dialect `schema` routes it to; the innermost call; `None` outside one, in grouping parentheses, or in a string or comment. O(length
+/// dialect `schema` routes it to; the innermost call; `None` outside one, in grouping
+/// parentheses, or in a `'...'` string or a comment. An argument passed by name
+/// (`days => 1`) makes that parameter active, and no parameter is active after one. O(length
 /// of the query) to read the context, then O(log n) in the size of the catalog.
 pub fn signature_help(
     query: &str,
@@ -45,7 +65,7 @@ pub fn signature_help(
 ) -> Option<SignatureHelp> {
     let dialect = SqlDialect::from_name(super::route(query, dialect, schema).0);
     let tokens = lex(query.get(..cursor)?)?;
-    let mut open: Vec<Option<(usize, usize)>> = Vec::new();
+    let mut open: Vec<Option<Call>> = Vec::new();
     for (at, tok) in tokens.iter().enumerate() {
         match tok.text.as_str() {
             "(" => open.push(called(&tokens, at)),
@@ -53,20 +73,22 @@ pub fn signature_help(
                 open.pop();
             }
             "," => {
-                if let Some(Some((_, commas))) = open.last_mut() {
-                    *commas += 1;
+                if let Some(Some(call)) = open.last_mut() {
+                    call.named |= named(&tokens[call.argument..at]).is_some();
+                    call.commas += 1;
+                    call.argument = at + 1;
                 }
             }
             _ => {}
         }
     }
-    let (name, commas) = (*open.last()?)?;
-    let word = &tokens[name];
+    let call = open.pop()??;
+    let word = &tokens[call.name];
     let found = signatures(dialect, unquoted(&word.text)?);
     if found.is_empty() {
         return None;
     }
-    let count = commas + 1;
+    let count = call.commas + 1;
     let active = found
         .iter()
         .position(|s| s.accepts(count))
@@ -76,22 +98,54 @@ pub fn signature_help(
                 .position(|s| s.variadic || s.parameters.len() >= count)
         })
         .unwrap_or(0);
+    let signature = &found[active];
+    let active_parameter = match named(&tokens[call.argument..]) {
+        Some(name) => signature
+            .parameters
+            .iter()
+            .position(|p| p.name.is_some_and(|n| n.eq_ignore_ascii_case(name))),
+        None if call.named => None,
+        None => signature.parameter(call.commas),
+    };
     Some(SignatureHelp {
         signatures: found,
         active_signature: active,
-        active_parameter: found[active].parameter(commas),
+        active_parameter,
         name: word.span.clone(),
     })
 }
 
-/// The name a `(` at `at` calls, with no comma read yet; `None` for grouping parentheses.
-fn called(tokens: &[super::complete::Tok], at: usize) -> Option<(usize, usize)> {
+/// The call a `(` at `at` opens; `None` for grouping parentheses. A name after one of
+/// [`NOT_A_CALL`], qualified or not, is a relation's.
+fn called(tokens: &[Tok], at: usize) -> Option<Call> {
     let name = at.checked_sub(1)?;
-    let word = &tokens[name];
-    let before = name.checked_sub(1).map(|i| &tokens[i]);
-    let relation =
-        before.is_some_and(|t| t.word && NOT_A_CALL.iter().any(|k| t.text.eq_ignore_ascii_case(k)));
-    (word.word && !relation).then_some((name, 0))
+    if !tokens[name].word {
+        return None;
+    }
+    let mut first = name;
+    while first >= 2 && tokens[first - 1].text == "." && tokens[first - 2].word {
+        first -= 2;
+    }
+    let relation = first.checked_sub(1).is_some_and(|i| {
+        let t = &tokens[i];
+        t.word && NOT_A_CALL.iter().any(|k| t.text.eq_ignore_ascii_case(k))
+    });
+    (!relation).then_some(Call {
+        name,
+        commas: 0,
+        argument: at + 1,
+        named: false,
+    })
+}
+
+/// The parameter name an argument's tokens pass it by: `name => value`.
+fn named(argument: &[Tok]) -> Option<&str> {
+    match argument {
+        [name, eq, gt, ..] if name.word && eq.text == "=" && gt.text == ">" => {
+            Some(name.text.as_str())
+        }
+        _ => None,
+    }
 }
 
 /// The name a word spells: a quoted one only in lower case, as the catalog lists it.

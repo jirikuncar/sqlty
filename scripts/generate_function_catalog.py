@@ -10,7 +10,7 @@ A parameter is `name: type`, or `type` when the documentation names none; `[, ..
 optional parameters and `...` repeats the parameter before it. Overloads keep the order
 of the documentation. After the tab, the page of
 the documentation, relative to the `# docs:` URL of the header. `build.rs` compiles the
-files into `analyzer::functions::signatures`.
+files into `sqlty_sql::signatures`.
 
 PostgreSQL: the function tables of `doc/src/sgml/func.sgml` at the tag of the version the
 rules cite. A signature written with keywords (`substring(s FROM n)`, `trim(BOTH ...)`)
@@ -43,6 +43,12 @@ POSTGRES_SYNOPSES = {
     "nullif(value1: anyelement, value2: anyelement) -> anyelement": "#FUNCTIONS-NULLIF",
     "greatest(value: anyelement, ...) -> anyelement": "#FUNCTIONS-GREATEST-LEAST",
     "least(value: anyelement, ...) -> anyelement": "#FUNCTIONS-GREATEST-LEAST",
+}
+# Aggregates whose result the documentation gives as "same as input type".
+POSTGRES_AGGREGATES = {
+    "any_value(anyelement) -> anyelement",
+    "max(anyelement) -> anyelement",
+    "min(anyelement) -> anyelement",
 }
 DEFAULT = re.compile(r"\s*<literal>DEFAULT</literal>\s*<literal>[^<]*</literal>")
 
@@ -105,6 +111,8 @@ def postgres() -> list[str]:
             lines.setdefault(line, f"{page}{anchor}")
     for line, anchor in POSTGRES_SYNOPSES.items():
         lines[line] = f"functions-conditional.html{anchor}"
+    for line in POSTGRES_AGGREGATES:
+        lines[line] = "functions-aggregate.html#FUNCTIONS-AGGREGATE-TABLE"
     return [f"{line}\t{doc}" for line, doc in lines.items()]
 
 

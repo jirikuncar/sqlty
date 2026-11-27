@@ -12,6 +12,7 @@ acosh(double precision) -> double precision	functions-math.html#FUNCTIONS-MATH-H
 age(timestamp, timestamp) -> interval	functions-datetime.html#FUNCTIONS-DATETIME-TABLE
 age(timestamp) -> interval	functions-datetime.html#FUNCTIONS-DATETIME-TABLE
 age(xid) -> integer	functions-info.html#FUNCTIONS-PG-SNAPSHOT
+any_value(anyelement) -> anyelement	functions-aggregate.html#FUNCTIONS-AGGREGATE-TABLE
 area(geometric_type) -> double precision	functions-geometry.html#FUNCTIONS-GEOMETRY-FUNC-TABLE
 array_agg(anynonarray) -> anyarray	functions-aggregate.html#FUNCTIONS-AGGREGATE-TABLE
 array_agg(anyarray) -> anyarray	functions-aggregate.html#FUNCTIONS-AGGREGATE-TABLE
@@ -306,9 +307,11 @@ make_timestamp(year: int, month: int, mday: int, hour: int, min: int, sec: doubl
 make_timestamptz(year: int, month: int, mday: int, hour: int, min: int, sec: double precision[, timezone: text]) -> timestamp with time zone	functions-datetime.html#FUNCTIONS-DATETIME-TABLE
 makeaclitem(grantee: oid, grantor: oid, privileges: text, is_grantable: boolean) -> aclitem	functions-info.html#FUNCTIONS-ACLITEM-FN-TABLE
 masklen(inet) -> integer	functions-net.html#CIDR-INET-FUNCTIONS-TABLE
+max(anyelement) -> anyelement	functions-aggregate.html#FUNCTIONS-AGGREGATE-TABLE
 md5(text) -> text	functions-string.html#FUNCTIONS-STRING-OTHER
 md5(bytea) -> text	functions-binarystring.html#FUNCTIONS-BINARYSTRING-OTHER
 merge_action() -> text	functions-merge-support.html#FUNCTIONS-MERGE-SUPPORT-TABLE
+min(anyelement) -> anyelement	functions-aggregate.html#FUNCTIONS-AGGREGATE-TABLE
 min_scale(numeric) -> integer	functions-math.html#FUNCTIONS-MATH-FUNC-TABLE
 mod(y: numeric_type, x: numeric_type) -> numeric_type	functions-math.html#FUNCTIONS-MATH-FUNC-TABLE
 multirange(anyrange) -> anymultirange	functions-range.html#MULTIRANGE-FUNCTIONS-TABLE
