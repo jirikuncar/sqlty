@@ -39,6 +39,13 @@ PLACES: list[tuple[str, re.Pattern[str], int]] = [
     # The package and the platform packages it depends on.
     ("npm/sqlty/package.json", re.compile(rf'"(?:version|@sqlty/cli-[\w-]+)": "{VERSION}"'), 7),
     ("npm/wasm/package.json", JSON_VERSION, 1),
+    ("npm/eslint-plugin/package.json", JSON_VERSION, 1),
+    # The plugin and the @sqlty/wasm of npm/wasm it links.
+    (
+        "npm/eslint-plugin/package-lock.json",
+        re.compile(rf'"name": "@sqlty/(?:eslint-plugin|wasm)",\n\s+"version": "{VERSION}"'),
+        3,
+    ),
     # The extension bundles @sqlty/wasm from npm/wasm.
     (
         "editors/vscode/package-lock.json",

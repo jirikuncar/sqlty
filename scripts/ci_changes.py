@@ -123,11 +123,13 @@ PACKAGES: dict[str, tuple[list[str], list[str]]] = {
         ["editors/vscode/**", "src/sqlty/**", "npm/wasm/**", ".github/workflows/vscode.yml"],
         ["sqlty-wasm", "sqlty-ext"],
     ),
-    # The engine on WebAssembly: the docs playground and @sqlty/wasm, checking each example.
+    # The engine on WebAssembly: the docs playground, @sqlty/wasm and @sqlty/eslint-plugin,
+    # checking each example.
     "playground": (
         [
             "docs/assets/playground/**",
             "npm/wasm/**",
+            "npm/eslint-plugin/**",
             "tests/*.test.mjs",
             "examples/**",
             "scripts/generate_playground_examples.py",

@@ -429,6 +429,8 @@ def test_bump_version_writes_every_place(tmp_path: Path) -> None:
         "npm/wasm/package.json": 1,
         "editors/vscode/package-lock.json": 1,
         "npm/wasm/example/package-lock.json": 1,
+        "npm/eslint-plugin/package.json": 1,
+        "npm/eslint-plugin/package-lock.json": 3,
     }
     for place in ["scripts/bump_version.py", *places]:
         (tmp_path / place).parent.mkdir(parents=True, exist_ok=True)
