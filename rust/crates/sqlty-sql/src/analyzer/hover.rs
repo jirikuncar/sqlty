@@ -212,7 +212,7 @@ struct SelectItem {
 }
 
 /// Words that end a select list.
-const AFTER_SELECT: [&str; 14] = [
+pub(super) const AFTER_SELECT: [&str; 14] = [
     "FROM",
     "INTO",
     "WHERE",

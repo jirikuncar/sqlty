@@ -16,10 +16,10 @@ use crate::values::{self, Value};
 
 use super::columns::{narrowed, Checks, RawColumn};
 use super::index::NameIndex;
-use super::loader::{Loader, RawFunction, RawReturn, Rel, TypeDef};
+use super::loader::{u32_range, Loader, RawFunction, RawReturn, Rel, TypeDef};
 use super::names::{lookup_key, type_key};
 use super::{
-    Catalog, CatalogData, Function, FunctionReturn, Relation, SchemaColumn, TableRelation,
+    Catalog, CatalogData, Function, FunctionReturn, Relation, SchemaColumn, Source, TableRelation,
     TypeOverrides, UserType, BUILTIN_SCHEMAS,
 };
 
@@ -35,6 +35,24 @@ thread_local! {
 }
 
 impl Loader {
+    /// Where the schema defines each relation of `catalog` it defines itself.
+    pub(super) fn sources(&self, catalog: &Catalog) -> FxHashMap<Arc<str>, Source> {
+        let mut found = FxHashMap::default();
+        let defined = self.defined.iter().filter_map(|(key, defined)| {
+            let (shared, _) = catalog.relations.get_key_value(key.as_str())?;
+            Some((shared, defined, self.relations.get(key)?))
+        });
+        for (shared, defined, rel) in defined {
+            let columns = match rel {
+                Rel::Table(table) => table.columns.iter().map(|c| c.at.clone()).collect(),
+                Rel::View(_) => Box::default(),
+            };
+            let source = Source::new(u32_range(&defined.at), columns);
+            found.insert(Arc::clone(shared), source);
+        }
+        found
+    }
+
     /// The catalog as it stands now.
     pub(super) fn snapshot(&mut self) -> &Catalog {
         self.resolve_stale_relations();
@@ -117,6 +135,7 @@ impl Loader {
             overrides: Arc::clone(&self.overrides),
             index: NameIndex::default(),
             tenants: OnceLock::new(),
+            sources: FxHashMap::default(),
         };
         Catalog {
             data: Arc::new(data),

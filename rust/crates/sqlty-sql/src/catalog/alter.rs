@@ -434,6 +434,7 @@ pub(super) fn alter_op(
                 table.checks.retain(|check| !reads(check, &old, dialect));
                 policies::rename_column(&mut table.policies, &old, &name, dialect);
                 let column = &mut table.columns[at];
+                column.at = 0..0;
                 column.ident = match new_column_name.quote_style {
                     Some(_) => new_column_name.to_string(),
                     None if dialect == SqlDialect::Postgres => column.name.clone(),
