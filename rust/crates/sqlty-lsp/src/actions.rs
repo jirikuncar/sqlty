@@ -9,14 +9,13 @@ use lsp_types::{
     WorkspaceEdit,
 };
 
+use sqlty_sql::diagnostics::Rule;
+
 use crate::text::LineIndex;
 use crate::{Diagnostic, Document, Severity};
 
 /// The rules reference; each rule is a heading of it.
 const RULES: &str = "https://sqlty.kuncar.dev/reference/rules/";
-
-/// The rule about code that can go, which editors fade.
-const UNNECESSARY: &str = "unused-cte";
 
 pub(crate) fn diagnostic(diagnostic: &Diagnostic, index: &LineIndex<'_>) -> lsp_types::Diagnostic {
     lsp_types::Diagnostic {
@@ -36,7 +35,9 @@ pub(crate) fn diagnostic(diagnostic: &Diagnostic, index: &LineIndex<'_>) -> lsp_
                 .unwrap_or_else(|| "sqlty".to_string()),
         ),
         message: diagnostic.message.clone(),
-        tags: (diagnostic.rule == UNNECESSARY).then(|| vec![DiagnosticTag::UNNECESSARY]),
+        // Code that can go, which editors fade.
+        tags: (Rule::parse(&diagnostic.rule) == Some(Rule::UnusedCte))
+            .then(|| vec![DiagnosticTag::UNNECESSARY]),
         ..lsp_types::Diagnostic::default()
     }
 }

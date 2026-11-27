@@ -11,6 +11,7 @@ import {
   CodeActionKind,
   Diagnostic,
   DiagnosticSeverity,
+  DiagnosticTag,
   document,
   fire,
   languages,
@@ -68,6 +69,17 @@ test("diagnostics follow open, changed, closed files and project edits", async (
   }
   disposable.dispose();
   assert.equal(providers.hover.length, 0);
+});
+
+test("an unused CTE is faded as unnecessary", async () => {
+  const text =
+    'from sqlty import SQL\n\nq = SQL[tuple[int]]("--sql\\nWITH unused AS (SELECT 1) SELECT 2")\n';
+  const unused = document(resolve("fixture", "unused.py"), text);
+  const { disposable, collection } = await started(unused);
+  const [found] = collection.entries.get(unused.uri.toString())!;
+  assert.equal(found.message, "CTE `unused` is never read");
+  assert.deepEqual(found.tags, [DiagnosticTag.Unnecessary]);
+  disposable.dispose();
 });
 
 test("a broken project or engine answer is logged, and checks nothing", async () => {

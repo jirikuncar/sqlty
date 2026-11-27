@@ -41,6 +41,15 @@ from sqlty import SQL
 a = SQL("--sql\nWITH gone AS (DELETE FROM users RETURNING id) SELECT 1")
 ```
 
+A table function of the same name does not read it:
+
+```python
+from sqlty import SQL
+
+# error: [unused-cte] "CTE `generate_series` is never read"
+a = SQL("--sql\nWITH generate_series AS (SELECT 1 AS n) SELECT * FROM generate_series(1, 3)")
+```
+
 A name resolves to the innermost CTE of that name:
 
 ```python
@@ -76,6 +85,16 @@ from sqlty import SQL
 
 # error: [unused-cte] "CTE `unused` is never read"
 a = SQL("--sql\nWITH unused AS (SELECT 1) SELECT 2")
+```
+
+Any CTE of a SQLite `WITH` may read any other, `RECURSIVE` or not:
+
+```python
+from sqlty import SQL
+
+# error:
+a = SQL("--sql\nWITH a AS (SELECT * FROM b), b AS (SELECT 1 AS x) SELECT * FROM a")
+b = SQL("--sql\nWITH r(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM r WHERE n < 3) SELECT 1")
 ```
 
 ## DuckDB

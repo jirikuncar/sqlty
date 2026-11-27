@@ -52,4 +52,4 @@ unused-cte = "error"
 ```
 
 Needs no schema. A name resolves to the innermost CTE of that name, and a recursive
-CTE reading itself counts as read.
+CTE reading itself counts as read. In SQLite any CTE of a `WITH` may read any other.

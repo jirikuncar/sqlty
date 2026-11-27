@@ -3,7 +3,7 @@
 use std::ops::ControlFlow;
 
 use rustc_hash::FxHashMap;
-use sqlparser::ast::{ObjectName, Query, SetExpr, Statement, Visit, Visitor};
+use sqlparser::ast::{ObjectName, Query, SetExpr, Statement, TableFactor, Visit, Visitor};
 use sqlparser::tokenizer::Span;
 
 use super::dialect::SqlDialect;
@@ -16,6 +16,7 @@ pub(super) fn unused_ctes(stmt: &Statement, dialect: SqlDialect) -> Vec<(String,
         dialect,
         frames: Vec::new(),
         scope: FxHashMap::default(),
+        function: false,
         unused: Vec::new(),
     };
     let _ = stmt.visit(&mut walk);
@@ -44,6 +45,8 @@ struct Walk {
     frames: Vec<Frame>,
     /// The visible CTEs of each name, innermost last, as (frame, CTE) indices.
     scope: FxHashMap<String, Vec<(usize, usize)>>,
+    /// The relation visited next names a table function, not a CTE.
+    function: bool,
     unused: Vec<(String, Span)>,
 }
 
@@ -126,7 +129,8 @@ impl Visitor for Walk {
                 visible: 0,
                 next: 0,
             });
-            if with.recursive {
+            // SQLite lets any CTE of a `WITH` read any other, `RECURSIVE` or not.
+            if with.recursive || self.dialect == SqlDialect::Sqlite {
                 self.show(all);
             }
         }
@@ -153,7 +157,15 @@ impl Visitor for Walk {
         ControlFlow::Continue(())
     }
 
+    fn pre_visit_table_factor(&mut self, factor: &TableFactor) -> ControlFlow<()> {
+        self.function = matches!(factor, TableFactor::Table { args: Some(_), .. });
+        ControlFlow::Continue(())
+    }
+
     fn pre_visit_relation(&mut self, relation: &ObjectName) -> ControlFlow<()> {
+        if std::mem::take(&mut self.function) {
+            return ControlFlow::Continue(());
+        }
         if let [part] = relation.0.as_slice() {
             if let Some(ident) = part.as_ident() {
                 let name = fold(ident, self.dialect);

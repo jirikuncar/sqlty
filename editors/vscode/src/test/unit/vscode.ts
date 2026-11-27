@@ -72,8 +72,13 @@ export enum DiagnosticSeverity {
   Warning = 1,
 }
 
+export enum DiagnosticTag {
+  Unnecessary = 1,
+}
+
 export class Diagnostic {
   source?: string;
+  tags?: DiagnosticTag[];
   code?: string | number | { value: string | number; target: Uri };
   constructor(
     readonly range: Range,
