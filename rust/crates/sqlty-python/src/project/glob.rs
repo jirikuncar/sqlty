@@ -67,17 +67,22 @@ impl Segment {
 /// a glob without a slash matches a name at any depth; every glob matches the path
 /// relative to the directory of its configuration.
 #[derive(Default)]
-pub struct Excludes(Mutex<HashMap<Vec<String>, Matchers>>);
+pub struct Excludes(Mutex<HashMap<Vec<String>, Globs>>);
 
-/// `(name, relative path)` matchers of a set of globs.
-type Matchers = Arc<(Regex, Regex)>;
+/// A set of globs compiled: the `(name, relative path)` matchers [`Excludes`] reads them
+/// with.
+#[derive(Clone)]
+pub struct Globs(Arc<(Regex, Regex)>);
 
-impl Excludes {
+impl Globs {
+    pub fn new(globs: &[String]) -> Self {
+        Self(Arc::new(matchers(globs)))
+    }
+
     /// Whether the entry `name` of `directory`, relative to the globs' base (`None` outside
-    /// it, where only globs without a slash match), matches one of `globs`.
-    pub fn entry(&self, name: &str, directory: Option<&str>, globs: &[String]) -> bool {
-        let compiled = self.compiled(globs);
-        let (by_name, by_path) = &*compiled;
+    /// it, where only globs without a slash match), matches.
+    pub fn entry(&self, name: &str, directory: Option<&str>) -> bool {
+        let (by_name, by_path) = &*self.0;
         by_name.is_match(name)
             || directory.is_some_and(|directory| match directory {
                 "." => by_path.is_match(name),
@@ -86,21 +91,41 @@ impl Excludes {
     }
 
     /// Whether the resolved `path`, or a directory holding it under `base`, matches.
-    pub fn path(&self, path: &Path, base: &Path, globs: &[String]) -> bool {
+    pub fn path(&self, path: &Path, base: &Path) -> bool {
         let Ok(relative) = path.strip_prefix(base) else {
             return false;
         };
-        let parts: Vec<String> = relative
-            .components()
-            .map(|part| part.as_os_str().to_string_lossy().into_owned())
-            .collect();
-        (0..parts.len()).any(|end| {
-            let directory = match end {
-                0 => ".".to_string(),
-                _ => parts[..end].join("/"),
-            };
-            self.entry(&parts[end], Some(&directory), globs)
+        let (by_name, by_path) = &*self.0;
+        let mut relative = relative.components().fold(String::new(), |mut all, part| {
+            if !all.is_empty() {
+                all.push('/');
+            }
+            all.push_str(&part.as_os_str().to_string_lossy());
+            all
+        });
+        if relative.is_empty() {
+            return false;
+        }
+        relative.push('/');
+        let mut start = 0;
+        relative.match_indices('/').any(|(end, _)| {
+            let name = &relative[start..end];
+            start = end + 1;
+            by_name.is_match(name) || by_path.is_match(&relative[..end])
         })
+    }
+}
+
+impl Excludes {
+    /// Whether the entry `name` of `directory`, relative to the globs' base (`None` outside
+    /// it, where only globs without a slash match), matches one of `globs`.
+    pub fn entry(&self, name: &str, directory: Option<&str>, globs: &[String]) -> bool {
+        self.compiled(globs).entry(name, directory)
+    }
+
+    /// Whether the resolved `path`, or a directory holding it under `base`, matches.
+    pub fn path(&self, path: &Path, base: &Path, globs: &[String]) -> bool {
+        self.compiled(globs).path(path, base)
     }
 
     #[cfg(test)]
@@ -108,14 +133,14 @@ impl Excludes {
         self.0.lock().unwrap_or_else(PoisonError::into_inner).len()
     }
 
-    fn compiled(&self, globs: &[String]) -> Matchers {
+    fn compiled(&self, globs: &[String]) -> Globs {
         let mut cache = self.0.lock().unwrap_or_else(PoisonError::into_inner);
         if let Some(found) = cache.get(globs) {
-            return Arc::clone(found);
+            return found.clone();
         }
         cache
             .entry(globs.to_vec())
-            .or_insert_with(|| Arc::new(matchers(globs)))
+            .or_insert_with(|| Globs::new(globs))
             .clone()
     }
 }

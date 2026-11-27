@@ -9,7 +9,6 @@ use ignore::gitignore::{Gitignore, GitignoreBuilder};
 use toml::{Table, Value};
 
 use super::glob::{self, Excludes, Segment};
-use super::route::{self, Route};
 use super::{find_in, normalized, Files, FindError, Found, Kind, Listing, Read};
 
 /// The globs `exclude` has when the configuration does not set it.
@@ -237,18 +236,6 @@ impl Discovery {
             .unwrap_or(true))
     }
 
-    /// The route of the file at `path` in the project of `table`, whose paths are relative
-    /// to `base`.
-    pub fn route(&self, table: &Table, base: &Path, path: &Path) -> Route {
-        route::route(
-            table,
-            base,
-            &self.absolute(path),
-            &*self.files,
-            &self.excludes,
-        )
-    }
-
     /// Whether `path`, or a directory holding it up to a glob's base, is excluded.
     pub fn is_excluded(&self, path: &Path) -> Result<bool, FindError> {
         let resolved = self.resolved(path);
@@ -356,7 +343,8 @@ impl Discovery {
     }
 
     /// `path` against `cwd`, its links resolved.
-    fn resolved(&self, path: &Path) -> PathBuf {
+    /// `path`, relative to the current directory, absolute with its links resolved.
+    pub fn resolved(&self, path: &Path) -> PathBuf {
         self.files.canonical(&self.absolute(path))
     }
 
