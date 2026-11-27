@@ -219,7 +219,9 @@ pub(super) fn raw_column(column: &ColumnDef, dialect: SqlDialect) -> RawColumn {
                     generation_expr: Some(expr),
                     ..
                 } => rare.generated = Some(expr.clone()),
-                ColumnOption::Comment(text) => rare.comment = Some(text.as_str().into()),
+                ColumnOption::Comment(text) if !text.is_empty() => {
+                    rare.comment = Some(text.as_str().into());
+                }
                 _ => {}
             }
         }

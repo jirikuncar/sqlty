@@ -58,14 +58,17 @@ pub fn hover(
         match select_item(&tokens, at) {
             Some(item) if word.depth == item.depth => {
                 match result_column(query, &item, dialect, schema) {
-                    Some(text) => Some(match candidate(query, word, dialect, schema) {
-                        Some(Candidate {
-                            kind: CandidateKind::Column,
-                            description: Some(description),
-                            ..
-                        }) => format!("{text}\n\n{description}"),
-                        _ => text,
-                    }),
+                    Some(text) if reads_only(&tokens, at) => {
+                        Some(match candidate(query, word, dialect, schema) {
+                            Some(Candidate {
+                                kind: CandidateKind::Column,
+                                description: Some(description),
+                                ..
+                            }) => format!("{text}\n\n{description}"),
+                            _ => text,
+                        })
+                    }
+                    Some(text) => Some(text),
                     None => named(query, word, dialect, schema),
                 }
             }
@@ -78,6 +81,24 @@ pub fn hover(
         range: word.span.clone(),
         contents,
     })
+}
+
+/// Whether the select item of the word at `at` is that column alone: `name` or `t.name`,
+/// then an alias or nothing.
+fn reads_only(tokens: &[Tok], at: usize) -> bool {
+    let is = |at: usize, words: &[&str]| {
+        tokens
+            .get(at)
+            .is_some_and(|tok| words.iter().any(|w| tok.text.eq_ignore_ascii_case(w)))
+    };
+    let start = match at.checked_sub(2) {
+        Some(qualifier) if is(at - 1, &["."]) => qualifier,
+        _ => at,
+    };
+    let starts = start == 0 || is(start - 1, &[",", "SELECT", "DISTINCT", "ALL"]);
+    let ends =
+        at + 1 == tokens.len() || is(at + 1, &[",", "AS", ")", ";"]) || is(at + 1, &AFTER_SELECT);
+    starts && ends
 }
 
 /// The column, table, view or CTE completion offers for exactly `word`.

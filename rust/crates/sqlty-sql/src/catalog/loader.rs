@@ -560,7 +560,7 @@ impl Loader {
 
     fn give_up_as(&mut self, kind: &'static str, create: &CreateTable, path: &[String]) {
         let key = self.new_key(&create.name, path);
-        self.define(&key, table_comment(create));
+        self.define(&key, table_comment(create), false);
         self.skipped.push((kind, create.name.to_string()));
         self.set_relation(
             key,
@@ -773,18 +773,22 @@ impl Loader {
             table.foreign_keys = declared;
         }
         if create.query.is_none() && !table.columns.is_empty() {
-            self.define(&key, table_comment(create));
+            self.define(&key, table_comment(create), false);
             self.set_relation(key, Some(Rel::Table(table)));
         }
         true
     }
 
-    /// Record that the statement being applied defines the relation `key`, with `comment`;
-    /// one replacing a view keeps the comments of the view it replaces.
-    pub(super) fn define(&mut self, key: &str, comment: Option<Box<str>>) {
+    /// Record that the statement being applied defines the relation `key`, with `comment`.
+    /// With `keep`, as a view that replaces another, it keeps the comments of the one it
+    /// replaces.
+    pub(super) fn define(&mut self, key: &str, comment: Option<Box<str>>, keep: bool) {
         let at = self.at.clone();
         let defined = self.defined.entry(key.to_string()).or_default();
         defined.at = at;
+        if !keep {
+            defined.comments = None;
+        }
         if comment.is_some() {
             defined.comments.get_or_insert_default().relation = comment;
         }
@@ -815,21 +819,17 @@ impl Loader {
                     return false;
                 }
                 self.change_table(key, |table| {
-                    if let Some(found) = table.columns.iter_mut().find(|c| c.name == *column) {
-                        found.set_rare(|rare| rare.comment = text.clone());
-                    }
+                    (table.columns.iter_mut())
+                        .filter(|c| c.name == *column)
+                        .for_each(|found| found.set_rare(|rare| rare.comment = text.clone()));
                 });
             }
-            (Some(column), _) => {
-                let Some(defined) = self.defined.get_mut(&key) else {
-                    return true;
-                };
+            // A view's; a system catalog's are left out.
+            (Some(column), _) => self.defined.get_mut(&key).into_iter().for_each(|defined| {
                 let columns = &mut defined.comments.get_or_insert_default().view_columns;
                 columns.retain(|(name, _)| name != column);
-                if let Some(text) = text {
-                    columns.push((column.clone(), text));
-                }
-            }
+                columns.extend(text.clone().map(|text| (column.clone(), text)));
+            }),
         }
         true
     }
@@ -975,7 +975,7 @@ impl Loader {
         if !force && undefined_calls && columns.iter().any(|c| c.python_type.is_none()) {
             return false;
         }
-        self.define(&key, None);
+        self.define(&key, None, true);
         self.set_relation(key, Some(Rel::View(columns)));
         true
     }
@@ -1421,20 +1421,19 @@ pub(super) fn u32_range(at: &Range<usize>) -> Range<u32> {
 
 /// What `CREATE TABLE ... COMMENT '...'` (MySQL) says of the table.
 fn table_comment(create: &CreateTable) -> Option<Box<str>> {
-    let listed = match &create.table_options {
-        CreateTableOptions::Plain(options) | CreateTableOptions::With(options) => {
-            options.iter().find_map(|option| match option {
-                SqlOption::Comment(CommentDef::WithEq(text) | CommentDef::WithoutEq(text)) => {
-                    Some(text)
-                }
-                _ => None,
-            })
-        }
-        _ => None,
+    let (CreateTableOptions::Plain(options) | CreateTableOptions::With(options)) =
+        &create.table_options
+    else {
+        return None;
     };
-    let hive = match &create.comment {
-        Some(CommentDef::WithEq(text) | CommentDef::WithoutEq(text)) => Some(text),
-        None => None,
-    };
-    listed.or(hive).map(|text| text.as_str().into())
+    options
+        .iter()
+        .find_map(|option| match option {
+            SqlOption::Comment(CommentDef::WithEq(text) | CommentDef::WithoutEq(text)) => {
+                Some(text)
+            }
+            _ => None,
+        })
+        .filter(|text| !text.is_empty())
+        .map(|text| text.as_str().into())
 }

@@ -39,6 +39,10 @@ only the schema and the parsed query: no connection, no execution.
   `initializationOptions.hover.enable = false` turns it off for other clients.
 - Not covered: functions and operators (stage 2 adds their signatures), parameters, and
   names in `INSERT` column lists.
+- [#1370](https://github.com/jirikuncar/sqlty/issues/1370) adds what the schema's
+  `COMMENT` says under the first line, everywhere hover runs. Only `sqlty server` puts it
+  in a completion item's documentation: the bundled engine of VS Code (Restricted Mode,
+  the web) and `sqlty complete` show no completion documentation.
 
 ## Stage 3
 

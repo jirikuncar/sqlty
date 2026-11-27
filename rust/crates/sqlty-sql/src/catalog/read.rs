@@ -363,7 +363,8 @@ fn read_statement(
                     _ => None,
                 };
                 if let Some(target) = target {
-                    push(OpKind::Comment(target, comment.map(String::into_boxed_str)));
+                    let text = comment.filter(|text| !text.is_empty());
+                    push(OpKind::Comment(target, text.map(String::into_boxed_str)));
                 }
             }
         } else if stmt.creates("index") {
@@ -443,6 +444,16 @@ pub(super) fn read_alter_or_drop(
         match (kind.as_str(), parsed()) {
             ("table", Some(Statement::AlterTable(alter))) => {
                 push(OpKind::AlterTable(Box::new(alter)));
+            }
+            ("table", _)
+                if dialect == SqlDialect::MySql
+                    && action.first().is_some_and(|w| w == "comment") =>
+            {
+                // `ALTER TABLE t COMMENT [=] 'text'`, which sqlparser does not read.
+                if let Some(text) = stmt.tokens().last().and_then(|quoted| mysql_string(quoted)) {
+                    let text = (!text.is_empty()).then(|| text.into_boxed_str());
+                    push(OpKind::Comment(Commented::Relation(name), text));
+                }
             }
             ("table", _) if changes_columns(&action, stmt.has_word("type")) => {
                 push(OpKind::Taint(Taint::Relation, name));
@@ -631,4 +642,20 @@ fn virtual_table(name: &str, module: &str, args: &[Vec<String>]) -> Option<Creat
         }
     }
     Some(create)
+}
+
+/// The text of the MySQL string literal `quoted`, or `None` when it is not one.
+fn mysql_string(quoted: &str) -> Option<String> {
+    let quote = quoted.chars().next().filter(|c| matches!(c, '\'' | '"'))?;
+    let inner = quoted.strip_prefix(quote)?.strip_suffix(quote)?;
+    let mut text = String::new();
+    let mut chars = inner.chars();
+    while let Some(c) = chars.next() {
+        match c {
+            '\\' => text.extend(chars.next()),
+            c if c == quote => text.extend(chars.next()),
+            c => text.push(c),
+        }
+    }
+    Some(text)
 }

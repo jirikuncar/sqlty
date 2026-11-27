@@ -397,7 +397,9 @@ fn joins(
                 detail: join.table.schema.map(str::to_string),
                 sql_type: None,
                 nullable: None,
-                description: None,
+                description: (schema.source(join.table.key))
+                    .and_then(|(_, source)| source.comment())
+                    .map(str::to_string),
             });
         }
     }
