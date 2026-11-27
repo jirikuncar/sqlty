@@ -266,7 +266,11 @@ fn a_schema_shared_by_two_configurations_is_judged_with_the_files_and_rules_of_b
     let root = project("siblings", &files);
     save_snapshot(&root);
     // `app` sorts first and is new: only the probe of `jobs` finds a baseline.
-    write(&root, "app/pyproject.toml", "[tool.sqlty]\nschema = \"../migrations/\"\n");
+    write(
+        &root,
+        "app/pyproject.toml",
+        "[tool.sqlty]\nschema = \"../migrations/\"\n",
+    );
     write(&root, "app/q.py", "x = 1\n");
     write(&root, "migrations/0002.sql", INDEX);
     let (code, out, err) = breaking(&root, &["--against", "snapshot.json"]);
