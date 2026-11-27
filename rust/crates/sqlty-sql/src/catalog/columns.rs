@@ -31,8 +31,8 @@ pub(super) struct RawColumn {
     pub(super) has_default: bool,
     /// The `DEFAULT` an INSERT that leaves the column out writes.
     pub(super) default: Option<Box<Expr>>,
-    /// The expression a generated column is computed from.
-    pub(super) generated: Option<Box<Expr>>,
+    /// What few columns have, behind one pointer: the loader holds several copies of each.
+    pub(super) rare: Option<Box<Rare>>,
     /// Part of the primary key, which keeps it `NOT NULL` whatever a MySQL `MODIFY` says.
     pub(super) primary_key: bool,
     /// Where it stands in the primary key, which a `REFERENCES` without columns follows.
@@ -50,7 +50,30 @@ pub(super) struct RawColumn {
     pub(super) at: std::ops::Range<u32>,
 }
 
+#[derive(Clone, Default, PartialEq)]
+pub(super) struct Rare {
+    /// The expression a generated column is computed from.
+    pub(super) generated: Option<Expr>,
+    /// What `COMMENT ON COLUMN` or MySQL's `COMMENT '...'` says of it.
+    pub(super) comment: Option<Box<str>>,
+}
+
 impl RawColumn {
+    pub(super) fn generated(&self) -> Option<&Expr> {
+        self.rare.as_ref()?.generated.as_ref()
+    }
+
+    pub(super) fn comment(&self) -> Option<&str> {
+        self.rare.as_ref()?.comment.as_deref()
+    }
+
+    /// Set what [`Rare`] holds, dropping the box once it holds nothing.
+    pub(super) fn set_rare(&mut self, change: impl FnOnce(&mut Rare)) {
+        let mut rare = self.rare.take().map(|rare| *rare).unwrap_or_default();
+        change(&mut rare);
+        self.rare = (rare != Rare::default()).then(|| Box::new(rare));
+    }
+
     pub(super) fn checks(&self) -> Checks<'_> {
         Checks {
             values: self.values.as_deref(),
@@ -161,7 +184,7 @@ pub(super) fn raw_column(column: &ColumnDef, dialect: SqlDialect) -> RawColumn {
             _ => None,
         })
         .reduce(|a, b| values::intersect(a, &b));
-    RawColumn {
+    let mut raw = RawColumn {
         name,
         ident: match column.name.quote_style {
             Some(_) => column.name.to_string(),
@@ -178,16 +201,6 @@ pub(super) fn raw_column(column: &ColumnDef, dialect: SqlDialect) -> RawColumn {
                 ColumnOption::Default(expr) => Some(Box::new(expr.clone())),
                 _ => None,
             }),
-        generated: column
-            .options
-            .iter()
-            .find_map(|option| match &option.option {
-                ColumnOption::Generated {
-                    generation_expr: Some(expr),
-                    ..
-                } => Some(Box::new(expr.clone())),
-                _ => None,
-            }),
         primary_key,
         key_position: 0,
         values,
@@ -197,7 +210,21 @@ pub(super) fn raw_column(column: &ColumnDef, dialect: SqlDialect) -> RawColumn {
             .iter()
             .any(|option| matches!(option.option, ColumnOption::Invisible)),
         at: 0..0,
-    }
+        rare: None,
+    };
+    raw.set_rare(|rare| {
+        for option in &column.options {
+            match &option.option {
+                ColumnOption::Generated {
+                    generation_expr: Some(expr),
+                    ..
+                } => rare.generated = Some(expr.clone()),
+                ColumnOption::Comment(text) => rare.comment = Some(text.as_str().into()),
+                _ => {}
+            }
+        }
+    });
+    raw
 }
 
 /// Narrow `existing` by the values of another `CHECK`.

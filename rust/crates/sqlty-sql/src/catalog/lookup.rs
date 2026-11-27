@@ -38,6 +38,11 @@ impl<'a> Lookup<'a> {
         found
     }
 
+    /// Where the schema defines the relation `name`, and its comments.
+    pub(crate) fn source(&self, name: &str) -> Option<&'a super::Source> {
+        self.catalog.source(name).map(|(_, source)| source)
+    }
+
     /// Columns of the table `name`, or `None` for a view, an unknown name or a table of
     /// unknown shape.
     pub(crate) fn table(&self, name: &str) -> Option<&'a [SchemaColumn]> {

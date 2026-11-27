@@ -56,8 +56,19 @@ pub fn hover(
         qualifier(query, &tokens[at + 1], dialect, schema)
     } else {
         match select_item(&tokens, at) {
-            Some(item) if word.depth == item.depth => result_column(query, &item, dialect, schema)
-                .or_else(|| named(query, word, dialect, schema)),
+            Some(item) if word.depth == item.depth => {
+                match result_column(query, &item, dialect, schema) {
+                    Some(text) => Some(match candidate(query, word, dialect, schema) {
+                        Some(Candidate {
+                            kind: CandidateKind::Column,
+                            description: Some(description),
+                            ..
+                        }) => format!("{text}\n\n{description}"),
+                        _ => text,
+                    }),
+                    None => named(query, word, dialect, schema),
+                }
+            }
             Some(item) => named(query, word, dialect, schema)
                 .or_else(|| result_column(query, &item, dialect, schema)),
             None => named(query, word, dialect, schema),
@@ -70,14 +81,19 @@ pub fn hover(
 }
 
 /// The column, table, view or CTE completion offers for exactly `word`.
-fn named(query: &str, word: &Tok, dialect: &str, schema: &SchemaData) -> Option<String> {
+fn candidate(query: &str, word: &Tok, dialect: &str, schema: &SchemaData) -> Option<Candidate> {
     let found = complete(query, word.span.end, dialect, Some(schema), SHOWN);
     let typed = schema.fold_typed(&word.text);
-    let candidate = found
+    found
         .candidates
-        .iter()
-        .find(|c| schema.fold_typed(&c.label) == typed)?;
-    Some(match candidate.kind {
+        .into_iter()
+        .find(|c| schema.fold_typed(&c.label) == typed)
+}
+
+/// What [`candidate`] is, in Markdown.
+fn named(query: &str, word: &Tok, dialect: &str, schema: &SchemaData) -> Option<String> {
+    let candidate = &candidate(query, word, dialect, schema)?;
+    let mut text = match candidate.kind {
         CandidateKind::Column => {
             let source = candidate.detail.as_deref().unwrap_or("?");
             match &candidate.sql_type {
@@ -121,9 +137,18 @@ fn named(query: &str, word: &Tok, dialect: &str, schema: &SchemaData) -> Option<
                         })
                         .collect(),
                 };
-            listed(format!("{kind} `{name}`"), &columns, columns.len() > SHOWN)
+            let title = match &candidate.description {
+                Some(text) => format!("{kind} `{name}`\n\n{text}\n"),
+                None => format!("{kind} `{name}`"),
+            };
+            return Some(listed(title, &columns, columns.len() > SHOWN));
         }
-    })
+    };
+    if let Some(description) = &candidate.description {
+        text.push_str("\n\n");
+        text.push_str(description);
+    }
+    Some(text)
 }
 
 /// The columns of the relation a word before `dot` names: an alias, a table or a CTE.

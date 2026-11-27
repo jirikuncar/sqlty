@@ -5,7 +5,8 @@ use std::sync::{Arc, LazyLock};
 
 use rayon::prelude::*;
 use sqlparser::ast::{
-    ColumnOption, ColumnOptionDef, CreateTable, Statement, UserDefinedTypeRepresentation,
+    ColumnOption, ColumnOptionDef, CommentObject, CreateTable, Statement,
+    UserDefinedTypeRepresentation,
 };
 use sqlparser::parser::Parser;
 
@@ -16,7 +17,7 @@ use crate::values::{self};
 use super::alter::changes_columns;
 use super::columns::{add_values, unique_key};
 use super::index::NameIndex;
-use super::loader::{Loader, Op, OpKind, Taint, TypeDef};
+use super::loader::{Commented, Loader, Op, OpKind, Taint, TypeDef};
 use super::names::{fold, parts};
 use super::policies::Change;
 use super::Catalog;
@@ -334,6 +335,35 @@ fn read_statement(
                     skipped.push(("statement", statement_text(stmt)));
                     let table = stmt.name_parts_after("on");
                     push(OpKind::Policy(table, Box::new(Change::Unknown)));
+                }
+            }
+        } else if (postgres || dialect == SqlDialect::Other("duckdb"))
+            && stmt.target("comment").is_some()
+        {
+            // DuckDB writes `COMMENT ON` as PostgreSQL does; its sqlparser dialect does not
+            // read it.
+            if let Some(Statement::Comment {
+                object_type,
+                object_name,
+                comment,
+                ..
+            }) = parse_ddl(&stmt.sql(), SqlDialect::Postgres)
+                .and_then(|stmts| stmts.into_iter().next())
+            {
+                let mut name = parts(&object_name, dialect);
+                let target = match object_type {
+                    CommentObject::Table
+                    | CommentObject::View
+                    | CommentObject::MaterializedView
+                    | CommentObject::ForeignTable => Some(Commented::Relation(name)),
+                    CommentObject::Column => name
+                        .pop()
+                        .filter(|_| !name.is_empty())
+                        .map(|column| Commented::Column(name, column)),
+                    _ => None,
+                };
+                if let Some(target) = target {
+                    push(OpKind::Comment(target, comment.map(String::into_boxed_str)));
                 }
             }
         } else if stmt.creates("index") {

@@ -88,6 +88,10 @@ fn item(candidate: Candidate, rank: usize, range: lsp_types::Range) -> Completio
         }
         _ => format!("`{}`: {detail}", candidate.label),
     };
+    let documentation = match &candidate.description {
+        Some(description) => format!("{documentation}\n\n{description}"),
+        None => documentation,
+    };
     CompletionItem {
         kind: Some(kind),
         label_details: candidate
@@ -158,6 +162,7 @@ mod tests {
                 detail: detail.map(str::to_string),
                 sql_type: None,
                 nullable: None,
+                description: None,
             };
             let item = item(candidate, 0, Range::default());
             (item.kind, item.data.unwrap()["detail"].clone())
