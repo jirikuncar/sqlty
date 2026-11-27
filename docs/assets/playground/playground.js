@@ -88,9 +88,9 @@ const [monaco, ask, shared, examples, linkedDeck] = await Promise.all([
   fetch(new URL("examples.json", import.meta.url)).then((response) => response.json()),
   fetchDeck(new URLSearchParams(location.search).get("steps")).catch((error) => ({ error })),
 ]);
-// queries.ts is checked by @sqlty/eslint-plugin, not by Monaco's TypeScript worker, which the
-// vendored Monaco leaves out.
+// Monaco's TypeScript service starts once queries.ts is shown (speak), not for Python.
 monaco.typescript.typescriptDefaults.setModeConfiguration({});
+let typed = false;
 const SIZES = [11, 12, 13, 14, 16, 18, 20, 22, 24, 28, 32];
 const saved = remembered();
 let size = SIZES.includes(saved.size) ? saved.size : 13;
@@ -417,6 +417,26 @@ function fixed(source, diagnostics) {
 
 // queries.py, or queries.ts that @sqlty/eslint-plugin checks.
 function speak(name) {
+  if (name === "typescript" && !typed) {
+    typed = true;
+    // queries.ts is one module alone: what it imports is unknown, so only syntax is checked.
+    monaco.typescript.typescriptDefaults.setDiagnosticsOptions({ noSemanticValidation: true });
+    monaco.typescript.typescriptDefaults.setModeConfiguration({
+      completionItems: true,
+      hovers: true,
+      documentSymbols: true,
+      definitions: true,
+      references: true,
+      documentHighlights: true,
+      rename: true,
+      diagnostics: true,
+      documentRangeFormattingEdits: true,
+      signatureHelp: true,
+      onTypeFormattingEdits: true,
+      codeActions: true,
+      inlayHints: true,
+    });
+  }
   language = name;
   monaco.editor.setModelLanguage(models.python, name);
   root.querySelector('[data-file="python"]').textContent = name === "typescript" ? "queries.ts" : "queries.py";

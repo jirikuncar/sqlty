@@ -654,6 +654,15 @@ def typescript(page: Page) -> None:
     assert page.inner_text('[data-file="python"]') == "queries.ts"
     assert not page.is_visible('[data-tab="breaking"]')
     assert "Query is missing its row type" in page.inner_text("[data-problems]")
+    # Monaco's TypeScript service starts with queries.ts: its worker answers for the model.
+    diagnostics = page.evaluate(
+        f"""async () => {{
+          const model = {MODEL.format("typescript")};
+          const worker = await (await monaco.typescript.getTypeScriptWorker())(model.uri);
+          return worker.getSyntacticDiagnostics(model.uri.toString());
+        }}"""
+    )
+    assert diagnostics == [], diagnostics
     page.select_option("[data-driver]", "pg")
     page.wait_for_timeout(500)
     shared = page.url
