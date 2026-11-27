@@ -906,6 +906,8 @@ fn hover_says_what_a_word_of_a_query_is() {
     assert_eq!(client.hover("file:///work/q.py", 0, 1), Value::Null);
     assert_eq!(client.hover("file:///nowhere/q.py", 0, 1), Value::Null);
     client.shutdown();
+    signature_help_shows_the_overloads_of_a_call();
+    past_the_last_parameter_none_is_active();
 }
 
 impl Client {
@@ -918,7 +920,7 @@ impl Client {
     }
 }
 
-#[test]
+/// Signature help of `left` and `upper`, checked from `hover_says_what_a_word_of_a_query_is`.
 fn signature_help_shows_the_overloads_of_a_call() {
     let mut client = Client::start(&json!({}));
     let text = "q = \"--sql\\nSELECT left(name, 3), upper(name) FROM users\"\n";
@@ -954,7 +956,7 @@ fn signature_help_shows_the_overloads_of_a_call() {
     client.shutdown();
 }
 
-#[test]
+/// Past the last parameter, the count of parameters: VS Code highlights none.
 fn past_the_last_parameter_none_is_active() {
     let mut client = Client::start(&json!({}));
     client.open(
@@ -967,7 +969,6 @@ fn past_the_last_parameter_none_is_active() {
     client.shutdown();
 }
 
-#[test]
 fn signature_help_can_be_turned_off() {
     let mut client = Client::with(
         &json!({}),
@@ -997,6 +998,7 @@ fn hover_can_be_turned_off() {
     client.notification("textDocument/publishDiagnostics");
     assert_eq!(client.hover("file:///work/q.py", 0, 26), Value::Null);
     client.shutdown();
+    signature_help_can_be_turned_off();
 }
 
 impl Client {

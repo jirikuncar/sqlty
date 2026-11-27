@@ -239,15 +239,15 @@ VS Code shows the hovers of every extension together, so sqlty's sits next to Py
 ## Signature help
 
 Typing `(` or `,` in a call of a built-in function shows its overloads, with a link to the
-database's documentation, and highlights the parameter the argument binds to. The overload
-shown first is the first that takes as many arguments as the call has so far:
+database's documentation, and highlights the parameter the argument binds to. The active
+overload is the first that takes as many arguments as the call has so far:
 
 ```python
 q = "--sql\nSELECT left(name, <CURSOR>) FROM users"
 # signature: > left(string: text, **n: integer**) -> text
 ```
 
-PostgreSQL's catalog comes from its documentation; other dialects show none yet.
+PostgreSQL's catalog comes from its documentation; MySQL, SQLite and DuckDB show none yet.
 
 ## Highlighting
 
@@ -348,7 +348,7 @@ hover in the query strings, with what the web leaves out. When you trust the fol
 On [vscode.dev](https://vscode.dev) and [github.dev](https://github.dev), the browser runs
 no processes, so there is no `sqlty server`. The extension runs the engine itself, compiled
 to WebAssembly, as the [playground](../playground.md) does: diagnostics with their quick
-fixes, completion and hover in the query strings, and SQL highlighting.
+fixes, completion, hover and signature help in the query strings, and SQL highlighting.
 
 [Open the examples on github.dev](https://github.dev/jirikuncar/sqlty/blob/main/examples/07_joins/queries.py)
 to try it: install the recommended **SQLTy** extension when VS Code offers it, then open a

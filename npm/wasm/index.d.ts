@@ -113,7 +113,7 @@ export type Signatures = {
   /** Each `parameters` entry is the `[start, end]` of a parameter in `label`. */
   signatures: { label: string; url: string; parameters: [number, number][] }[];
   active_signature: number;
-  /** Past the last parameter, the count of parameters: none is highlighted. */
+  /** Past the last parameter, the count of parameters, which Monaco and VS Code highlight none for. */
   active_parameter: number;
 };
 
