@@ -431,10 +431,7 @@ fn call_params(
             args.iter()
                 .skip(helper.positional.len())
                 .enumerate()
-                .map(|(i, arg)| Param {
-                    key: Key::Index(i + 1),
-                    kind: types.arg_type(arg, stack),
-                })
+                .map(|(i, arg)| types.param(Key::Index(i + 1), arg, stack))
                 .collect(),
         );
     }
@@ -448,10 +445,8 @@ fn call_params(
                 .iter()
                 .filter_map(|keyword| {
                     let name = keyword.arg.as_ref()?.as_str();
-                    (!helper.keywords.contains(name)).then(|| Param {
-                        key: Key::Name(name.to_string()),
-                        kind: types.arg_type(&keyword.value, stack),
-                    })
+                    (!helper.keywords.contains(name))
+                        .then(|| types.param(Key::Name(name.to_string()), &keyword.value, stack))
                 })
                 .collect(),
         );
