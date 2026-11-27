@@ -362,7 +362,7 @@ sqlty skill [OPTIONS] [NAME]
 ## `sqlty server`
 
 Run the language server on standard input and output, for editors: diagnostics,
-fixes, completion and hover as you type. See [Editors](../recipes/editors.md).
+fixes, completion, hover and go to definition as you type. See [Editors](../recipes/editors.md).
 
 <!-- generated:cli-usage-server -->
 ```text

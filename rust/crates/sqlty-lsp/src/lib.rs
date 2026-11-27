@@ -103,7 +103,7 @@ pub struct Edit {
     pub replacement: String,
 }
 
-/// What completion and highlighting read of a project for a buffer, as its last check left
+/// What completion, hover, go to definition and highlighting read of a project for a buffer, as its last check left
 /// it: the schema, how the file is read, and where its helper calls pass a query.
 #[derive(Clone)]
 pub struct CompletionContext {
@@ -141,8 +141,8 @@ pub trait Workspace {
     fn breaking(&mut self) -> Result<Vec<(PathBuf, Vec<Diagnostic>)>, String> {
         Ok(Vec::new())
     }
-    /// What completion in the buffer of `path` reads, after [`Workspace::check`] read it;
-    /// `None` offers no completion.
+    /// What completion, hover and go to definition in the buffer of `path` read, after
+    /// [`Workspace::check`] read it; `None` offers none of them.
     fn completion(&mut self, _path: &Path) -> Option<CompletionContext> {
         None
     }
