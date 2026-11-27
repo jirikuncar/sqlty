@@ -761,13 +761,7 @@ fn routed(
         return table.clone();
     };
     let missing = |_: &Path| Read::Missing;
-    let found = project::route(
-        &project,
-        Path::new(base),
-        Path::new(file),
-        &missing,
-        &project::Excludes::default(),
-    );
+    let found = project::route(&project, Path::new(base), Path::new(file), &missing);
     json!(project::file_table(&project, &found))
         .as_object()
         .cloned()

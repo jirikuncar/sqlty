@@ -719,7 +719,7 @@ impl Workspace {
     /// The settings of the file at the resolved path `resolved`.
     fn settings_at(&mut self, resolved: &Path) -> Result<Arc<FileSettings>, String> {
         let directory = self.directory_at(parent(resolved))?;
-        Ok(directory.file(resolved, &self.discovery))
+        Ok(directory.file(resolved))
     }
 
     /// The diagnostics of every module, in order, on all cores, without the
@@ -871,8 +871,7 @@ impl Workspace {
                             // `open` and `update` load the directory of every module.
                             let resolved = &this.modules[path].resolved;
                             let directory = this.directories[parent(resolved)].clone();
-                            let settings = directory
-                                .map(|directory| directory.file(resolved, &this.discovery));
+                            let settings = directory.map(|directory| directory.file(resolved));
                             (path.clone(), settings)
                         })
                         .collect::<Vec<_>>()
