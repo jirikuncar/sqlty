@@ -37,6 +37,9 @@ q = SQL("--sql\nSELECT p.name, p.amount FROM products p JOIN payments p ON p.ord
 r = SQL[tuple[int]]("--sql\nSELECT 1 FROM products JOIN products ON true")
 ```
 
+The diagnostic points at the first use of the name too: the editor shows it as
+related information, `sqlty check` as a note under it.
+
 ## Why is this bad?
 
 PostgreSQL rejects the query with `table name "p" specified more than once`,

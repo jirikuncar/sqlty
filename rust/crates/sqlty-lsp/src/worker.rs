@@ -125,7 +125,7 @@ fn publish_breaking<W: Workspace>(workspace: &mut W, shared: &Shared) {
         let index = LineIndex::new(&text, &shared.encoding);
         let published: Vec<_> = diagnostics
             .iter()
-            .map(|d| actions::diagnostic(d, &index))
+            .map(|d| actions::diagnostic(d, &uri, &index))
             .collect();
         shared.background().insert(uri.clone(), published.clone());
         if !shared.documents().contains_key(&uri) {
@@ -168,7 +168,7 @@ where
     let index = LineIndex::new(&text, &shared.encoding);
     let published = diagnostics
         .iter()
-        .map(|d| actions::diagnostic(d, &index))
+        .map(|d| actions::diagnostic(d, &uri, &index))
         .collect();
     document.diagnostics = Some((version, diagnostics));
     let before = highlight::reading(document.completion.as_ref(), &text);

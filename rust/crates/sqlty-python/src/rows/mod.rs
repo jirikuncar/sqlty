@@ -141,6 +141,7 @@ impl Check<'_> {
                 line,
                 span: start..end,
                 fix: Vec::new(),
+                related: Vec::new(),
             },
             redundant: None,
         });

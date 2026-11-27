@@ -123,7 +123,10 @@ impl Analyzer<'_> {
     /// Records `ungrouped-column` for each column `*` or `reference.*` selects that the
     /// keys don't cover.
     fn check_star(&self, grouped: &Grouped, reference: Option<&str>, scope: &Scope) {
-        for Source { reference, table } in Self::star_sources(reference, scope) {
+        for Source {
+            reference, table, ..
+        } in Self::star_sources(reference, scope)
+        {
             let Some(table) = table.named() else {
                 continue;
             };

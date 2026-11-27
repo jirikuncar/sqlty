@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use sqlty_lsp::{CompletionContext, Diagnostic, Edit, Settings, Severity, Workspace};
+use sqlty_lsp::{CompletionContext, Diagnostic, Edit, Related, Settings, Severity, Workspace};
 use sqlty_python::types::stdlib::Version;
 
 use crate::breaking::{self, Direction, Finding, Revision};
@@ -303,6 +303,7 @@ impl Baseline {
                     end: if same { found.span.end } else { 0 },
                     fix: Vec::new(),
                     source: Some("sqlty breaking (backward)".to_string()),
+                    related: Vec::new(),
                 }
             })
             .collect()
@@ -358,5 +359,14 @@ fn diagnostic(found: sqlty_python::checker::Diagnostic) -> Diagnostic {
             })
             .collect(),
         source: None,
+        related: found
+            .related
+            .into_iter()
+            .map(|related| Related {
+                start: related.span.start,
+                end: related.span.end,
+                message: related.message,
+            })
+            .collect(),
     }
 }

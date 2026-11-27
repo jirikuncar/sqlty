@@ -397,7 +397,12 @@ impl Parsed {
         analyzer.source = text_source(&self.input.source, self.dialect);
         let Ok(columns) = analyzer.statement_columns(stmt);
         let found = analyzer.diag.located().into_iter().map(|(mut found, at)| {
-            found.span = self.as_written.then(|| self.bytes(at)).flatten();
+            if self.as_written {
+                found.span = self.bytes(at);
+                for related in &mut found.related {
+                    related.span = self.bytes(related.at);
+                }
+            }
             found
         });
         (columns, found.collect())

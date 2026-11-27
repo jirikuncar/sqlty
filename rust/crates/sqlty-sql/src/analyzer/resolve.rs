@@ -8,12 +8,13 @@
 use std::borrow::Cow;
 use std::rc::Rc;
 
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::FxHashMap;
 
 use sqlparser::ast::{Expr, Ident, TableFactor, TableWithJoins};
+use sqlparser::tokenizer::Span;
 
 use crate::catalog::{fold, folded, lowercase};
-use crate::diagnostics::{NameDiagnostic, Rule};
+use crate::diagnostics::{NameDiagnostic, Related, Rule};
 
 use super::dialect::SqlDialect;
 use super::literals::value_set;
@@ -25,6 +26,10 @@ use super::suggest;
 use super::typed::Typed;
 use super::Candidate;
 use super::SchemaColumn;
+
+/// Where a name of a FROM clause is taken: by an alias or a derived table, its first use,
+/// and each table read by it.
+type Taken<'a> = (Option<Span>, Span, FxHashMap<Cow<'a, str>, Span>);
 
 /// Where a resolved column comes from, for explaining why it is untyped.
 pub(super) enum Origin {
@@ -136,7 +141,7 @@ impl<'a> Analyzer<'a> {
             return;
         }
         // Per name: whether an alias or a derived table took it, and the tables read by it.
-        let mut seen: FxHashMap<String, (bool, FxHashSet<Cow<'_, str>>)> = FxHashMap::default();
+        let mut seen: FxHashMap<String, Taken<'_>> = FxHashMap::default();
         let names = relations(from).filter_map(|factor| match factor {
             TableFactor::Table {
                 alias: None, name, ..
@@ -156,22 +161,31 @@ impl<'a> Analyzer<'a> {
             _ => None,
         });
         for (ident, key) in names {
-            let (aliased, keys) = seen.entry(fold(ident, self.dialect)).or_default();
+            let (aliased, first, keys) = seen
+                .entry(fold(ident, self.dialect))
+                .or_insert_with(|| (None, ident.span, FxHashMap::default()));
             let clash = match &key {
-                None => *aliased || !keys.is_empty(),
-                Some(key) => *aliased || keys.contains(key),
+                None => aliased.or((!keys.is_empty()).then_some(*first)),
+                Some(key) => aliased.or_else(|| keys.get(key).copied()),
             };
-            if clash {
+            if let Some(earlier) = clash {
                 let _at = self.diag.at(ident.span);
-                self.diag.record(
+                self.diag.record_related(
                     Rule::DuplicateAlias,
                     format!("table name `{}` is specified more than once", ident.value),
+                    None,
+                    vec![Related::new(
+                        earlier,
+                        format!("`{}` is first used here", ident.value),
+                    )],
                 );
             }
             match key {
-                None => *aliased = true,
+                None => {
+                    aliased.get_or_insert(ident.span);
+                }
                 Some(key) => {
-                    keys.insert(key);
+                    keys.entry(key).or_insert(ident.span);
                 }
             }
         }
@@ -417,6 +431,7 @@ impl<'a> Analyzer<'a> {
             table: Some(name.to_string()),
             column: Some(column.to_string()),
             shadowed_by: None,
+            related: Vec::new(),
         });
     }
 
@@ -470,7 +485,7 @@ impl<'a> Analyzer<'a> {
         {
             return;
         }
-        let mut references: Vec<&str> = scope
+        let mut having: Vec<&Source> = scope
             .iter()
             .filter(|source| {
                 source
@@ -478,19 +493,23 @@ impl<'a> Analyzer<'a> {
                     .named()
                     .is_some_and(|table| self.find_column(table, &column).is_some())
             })
-            .map(|source| source.reference.as_str())
             .collect();
-        references.dedup();
-        if references.len() > 1 {
-            self.diag.record_about(
+        having.dedup_by(|a, b| a.reference == b.reference);
+        if having.len() > 1 {
+            let references: Vec<&str> = having.iter().map(|s| s.reference.as_str()).collect();
+            let here = format!("column `{}` is here", ident.value);
+            self.diag.record_related(
                 Rule::AmbiguousColumn,
                 format!(
                     "column reference `{}` is ambiguous: {} all have it",
                     ident.value,
                     list(&references)
                 ),
-                None,
                 Some(&ident.value),
+                having
+                    .iter()
+                    .map(|source| Related::new(source.span, here.clone()))
+                    .collect(),
             );
         }
     }
@@ -627,6 +646,7 @@ impl<'a> Analyzer<'a> {
             table: table.map(str::to_string),
             column: Some(column.value.clone()),
             shadowed_by: None,
+            related: Vec::new(),
         });
     }
 

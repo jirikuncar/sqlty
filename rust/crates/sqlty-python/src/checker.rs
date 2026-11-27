@@ -105,6 +105,19 @@ pub struct Diagnostic {
     pub span: Range<usize>,
     /// The edits `sqlty check --fix` makes for it; empty when it has no fix.
     pub fix: Vec<Edit>,
+    /// Other places it is about: the tables an ambiguous column is in.
+    pub related: Vec<Related>,
+}
+
+/// A place of the source a [`Diagnostic`] points at besides its own.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Related {
+    /// What is there, for the user.
+    pub message: String,
+    /// 1-based line of the source it starts on.
+    pub line: usize,
+    /// Its byte range in the source.
+    pub span: Range<usize>,
 }
 
 /// Check Python source code for SQL type issues.
@@ -248,6 +261,17 @@ impl Checker<'_> {
     }
 
     fn report_fix(&mut self, rule: Rule, message: String, at: &At, fix: Vec<Edit>) {
+        self.report_related(rule, message, at, fix, Vec::new());
+    }
+
+    fn report_related(
+        &mut self,
+        rule: Rule,
+        message: String,
+        at: &At,
+        fix: Vec<Edit>,
+        related: Vec<Related>,
+    ) {
         if self.rules.is_enabled(rule) {
             self.diagnostics.push(Diagnostic {
                 rule,
@@ -256,6 +280,7 @@ impl Checker<'_> {
                 line: at.line,
                 span: at.span.clone(),
                 fix,
+                related,
             });
         }
     }
@@ -466,14 +491,27 @@ impl Checker<'_> {
         }
         let source = self.scan.source();
         let analysis = self.analysis(query);
+        let locate = |span: &Range<usize>| {
+            let start = query_offset(source, literals, span.start, false)?;
+            Some(start..query_offset(source, literals, span.end, true)?)
+        };
         for found in &analysis.diagnostics {
             if !self.rules.shows(found) {
                 continue;
             }
-            let name = found.span.as_ref().and_then(|span| {
-                let start = query_offset(source, literals, span.start, false)?;
-                Some(start..query_offset(source, literals, span.end, true)?)
-            });
+            let name = found.span.as_ref().and_then(locate);
+            let related = found
+                .related
+                .iter()
+                .filter_map(|related| {
+                    let span = locate(related.span.as_ref()?)?;
+                    Some(Related {
+                        message: related.message.clone(),
+                        line: self.scan.lines.line_at(span.start),
+                        span,
+                    })
+                })
+                .collect();
             let name = name.map(|span| At::at_line(at.line, span));
             let fix = found
                 .replacement
@@ -495,11 +533,12 @@ impl Checker<'_> {
                         && quote.is_some_and(|quote| !replacement.contains(quote))
                 })
                 .map(|(replacement, (_, name))| Edit::new(name.span.clone(), replacement.clone()));
-            self.report_fix(
+            self.report_related(
                 found.rule,
                 found.message.clone(),
                 name.as_ref().unwrap_or(at),
                 fix.into_iter().collect(),
+                related,
             );
         }
     }

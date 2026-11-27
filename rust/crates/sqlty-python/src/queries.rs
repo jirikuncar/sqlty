@@ -24,7 +24,7 @@ use std::sync::LazyLock;
 use regex::Regex;
 use sqlty_sql::analyzer::{database_name, parse, route_named, statement_ranges, unknown_named};
 
-use crate::checker::{star_finding, unparsed_message, Diagnostic};
+use crate::checker::{star_finding, unparsed_message, Diagnostic, Related};
 use crate::options::Options;
 use crate::rewriter::LineIndex;
 use crate::rules::{Rule, RuleConfig, SQL_RULES};
@@ -266,18 +266,27 @@ pub fn check_queries(
     };
     let mut found = Vec::new();
     let lines = LineIndex::new(source);
-    let mut report = |rule: Rule, message: String, span: Range<usize>| {
-        if rules.is_enabled(rule) {
-            found.push(Diagnostic {
-                rule,
-                message,
-                severity: rules.severity(rule),
-                line: lines.line_at(span.start),
-                span,
-                fix: Vec::new(),
-            });
-        }
-    };
+    let mut report =
+        |rule: Rule, message: String, span: Range<usize>, related: Vec<(Range<usize>, String)>| {
+            if rules.is_enabled(rule) {
+                found.push(Diagnostic {
+                    rule,
+                    message,
+                    severity: rules.severity(rule),
+                    line: lines.line_at(span.start),
+                    span,
+                    fix: Vec::new(),
+                    related: related
+                        .into_iter()
+                        .map(|(span, message)| Related {
+                            message,
+                            line: lines.line_at(span.start),
+                            span,
+                        })
+                        .collect(),
+                });
+            }
+        };
     if let Some(message) = database.and_then(|name| unknown_named(name, options.schema)) {
         let header = source.len() - source.trim_start().len();
         let end = source[header..]
@@ -287,6 +296,7 @@ pub fn check_queries(
             Rule::UnknownDatabase,
             message,
             header..end.min(source.len()),
+            Vec::new(),
         );
     }
     let names = rules.enabled().intersects(SQL_RULES);
@@ -298,7 +308,12 @@ pub fn check_queries(
             statements.push(at.clone());
             let parsed = parse(&body[statement.clone()], dialect);
             if let Some(error) = parsed.error() {
-                report(Rule::UnparsedQuery, unparsed_message(&error), at);
+                report(
+                    Rule::UnparsedQuery,
+                    unparsed_message(&error),
+                    at,
+                    Vec::new(),
+                );
                 continue;
             }
             let embeds: Vec<_> = query
@@ -320,7 +335,7 @@ pub fn check_queries(
             if let Some((rule, message)) =
                 star_finding(stars, &body[statement.clone()], schema.is_some())
             {
-                report(rule, message, at.clone());
+                report(rule, message, at.clone(), Vec::new());
             }
             if !names {
                 continue;
@@ -343,7 +358,15 @@ pub fn check_queries(
                     (None, Some(span)) => at.start + span.start..at.start + span.end,
                     (None, None) => at.clone(),
                 };
-                report(diagnostic.rule, message, span);
+                let related = diagnostic
+                    .related
+                    .into_iter()
+                    .filter_map(|related| {
+                        let span = related.span?;
+                        Some((at.start + span.start..at.start + span.end, related.message))
+                    })
+                    .collect();
+                report(diagnostic.rule, message, span, related);
             }
         }
     }
