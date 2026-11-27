@@ -646,8 +646,12 @@ pub(crate) fn escapes(text: &str, mut piece: impl FnMut(&str, Range<usize>)) {
 /// backslash), by Unicode name as Python reads it; the name table is the one the parser
 /// already links.
 fn named(escape: &str) -> Option<(char, usize)> {
+    // The longest Unicode name or alias has 88 bytes; a bounded search keeps a run of
+    // unclosed `\N{` linear.
+    const LONGEST: usize = 128;
     let name = escape.strip_prefix("N{")?;
-    let close = name.find('}')?;
+    let window = &name.as_bytes()[..name.len().min(LONGEST)];
+    let close = window.iter().position(|&b| b == b'}')?;
     Some((unicode_names2::character(&name[..close])?, close + 3))
 }
 
