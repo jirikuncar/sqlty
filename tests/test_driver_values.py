@@ -20,12 +20,12 @@ import tomllib
 from collections.abc import Callable, Iterator
 from contextlib import closing
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 import asyncpg
 import pytest
 
-from sqlty import _core, core
+from sqlty import SQL, _core, core
 from tests._value_types import matches
 
 CASES: dict[str, dict[str, str]] = tomllib.loads(
@@ -123,6 +123,40 @@ def test_asyncpg(pg: Any, sql_type: str, value_sql: str) -> None:
         lambda schema, value: asyncio.run(read(schema, value)),
         "asyncpg",
     )
+
+
+@pytest.mark.pg
+def test_asyncpg_helpers_build_records(pg: Any) -> None:
+    from sqlty.drivers import asyncpg as helpers
+
+    class Row(NamedTuple):
+        id: int
+        name: str
+
+    info = pg.info
+    query = SQL[Row](
+        "--sql\nSELECT n::INTEGER AS id, 'u' || n AS name FROM generate_series(1, $1::INTEGER) n"
+    )
+
+    async def run() -> tuple[Any, ...]:
+        conn = await asyncpg.connect(
+            host=info.host,
+            port=info.port,
+            user=info.user,
+            database=info.dbname,
+            password=info.password,
+        )
+        try:
+            return (
+                await helpers.fetch(conn, query, 2),
+                await helpers.fetchrow(conn, query.bind((1,))),
+                await helpers.fetchval(conn, SQL[tuple[int]]("--sql\nSELECT $1::INTEGER + 1"), 1),
+                await helpers.execute(conn, SQL("--sql\nSELECT 1")),
+            )
+        finally:
+            await conn.close()
+
+    assert asyncio.run(run()) == ([Row(1, "u1"), Row(2, "u2")], Row(1, "u1"), 2, "SELECT 1")
 
 
 @pytest.fixture(scope="module")
