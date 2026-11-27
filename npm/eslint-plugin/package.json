@@ -22,7 +22,7 @@
     "test": "node --test"
   },
   "dependencies": {
-    "@sqlty/wasm": "file:../wasm"
+    "@sqlty/wasm": "0.9.0"
   },
   "peerDependencies": {
     "eslint": ">=9"

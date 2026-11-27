@@ -299,8 +299,9 @@ jobs:
 
       - name: Run @sqlty/eslint-plugin
         working-directory: npm/eslint-plugin
+        # @sqlty/wasm as built above: the plugin runs the engine of its own commit.
         run: |
-          npm ci
+          npm install --no-save ../wasm
           node --test
 
   # The queries of the mdtests on PostgreSQL and MySQL, each compared with sqlty's columns.
