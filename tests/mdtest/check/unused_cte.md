@@ -19,7 +19,7 @@ a = SQL("--sql\nWITH unused AS (SELECT 1) SELECT 2")
 b = SQL("--sql\nWITH a AS (SELECT 1 AS x), b AS (SELECT x FROM a) SELECT 2")
 ```
 
-Reads by a later CTE, a subquery, `TABLE` and a recursive CTE's own reference count:
+Reads by a later CTE, a subquery, `TABLE` and a recursive CTE read by the statement count:
 
 ```python
 from sqlty import SQL
@@ -28,8 +28,17 @@ from sqlty import SQL
 a = SQL("--sql\nWITH a AS (SELECT 1 AS x), b AS (SELECT x FROM a) SELECT x FROM b")
 b = SQL("--sql\nWITH a AS (SELECT 1 AS x) SELECT 2 WHERE 1 IN (SELECT x FROM a)")
 c = SQL("--sql\nWITH a AS (SELECT 1 AS x) TABLE a")
-d = SQL("--sql\nWITH RECURSIVE r(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM r WHERE n < 3) SELECT 1")
+d = SQL("--sql\nWITH RECURSIVE r(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM r WHERE n < 3) SELECT n FROM r")
 e = SQL("--sql\nWITH \"A\" AS (SELECT 1 AS x) SELECT x FROM \"A\"")
+```
+
+A recursive CTE that only reads itself never runs:
+
+```python
+from sqlty import SQL
+
+# error: [unused-cte] "CTE `r` is never read"
+a = SQL("--sql\nWITH RECURSIVE r(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM r) SELECT 1")
 ```
 
 A data-modifying CTE runs unread:
@@ -94,7 +103,7 @@ from sqlty import SQL
 
 # error:
 a = SQL("--sql\nWITH a AS (SELECT * FROM b), b AS (SELECT 1 AS x) SELECT * FROM a")
-b = SQL("--sql\nWITH r(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM r WHERE n < 3) SELECT 1")
+b = SQL("--sql\nWITH r(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM r WHERE n < 3) SELECT n FROM r")
 ```
 
 ## DuckDB
