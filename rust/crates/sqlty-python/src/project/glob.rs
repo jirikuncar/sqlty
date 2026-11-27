@@ -96,22 +96,14 @@ impl Globs {
             return false;
         };
         let (by_name, by_path) = &*self.0;
-        let mut relative = relative.components().fold(String::new(), |mut all, part| {
-            if !all.is_empty() {
-                all.push('/');
+        let mut prefix = String::new();
+        relative.components().any(|part| {
+            let name = part.as_os_str().to_string_lossy();
+            if !prefix.is_empty() {
+                prefix.push('/');
             }
-            all.push_str(&part.as_os_str().to_string_lossy());
-            all
-        });
-        if relative.is_empty() {
-            return false;
-        }
-        relative.push('/');
-        let mut start = 0;
-        relative.match_indices('/').any(|(end, _)| {
-            let name = &relative[start..end];
-            start = end + 1;
-            by_name.is_match(name) || by_path.is_match(&relative[..end])
+            prefix.push_str(&name);
+            by_name.is_match(&name) || by_path.is_match(&prefix)
         })
     }
 }

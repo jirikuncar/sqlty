@@ -343,7 +343,6 @@ impl Discovery {
     }
 
     /// `path` against `cwd`, its links resolved.
-    /// `path`, relative to the current directory, absolute with its links resolved.
     pub fn resolved(&self, path: &Path) -> PathBuf {
         self.files.canonical(&self.absolute(path))
     }
