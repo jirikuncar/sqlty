@@ -58,6 +58,7 @@ impl Analyzer<'_> {
                     | Rule::EntityMismatch
                     | Rule::DeprecatedColumn
                     | Rule::TenantScope
+                    | Rule::SetColumnCount
             )
         });
     }

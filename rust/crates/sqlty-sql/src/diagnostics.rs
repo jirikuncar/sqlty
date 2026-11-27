@@ -384,6 +384,7 @@ mod tests {
                 "unsupported-syntax",
                 "insert-missing-column",
                 "insert-value-count",
+                "set-column-count",
                 "literal-write",
                 "unmatched-literal",
                 "ungrouped-column",

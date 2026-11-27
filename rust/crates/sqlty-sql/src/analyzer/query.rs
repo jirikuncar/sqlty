@@ -7,8 +7,8 @@ use std::sync::Arc;
 
 use sqlparser::ast::{
     AccessExpr, Expr, GroupByExpr, JoinConstraint, JoinOperator, OrderByKind, Query, Select,
-    SelectItem, SelectItemQualifiedWildcardKind, SetExpr, Statement, TableAlias, TableWithJoins,
-    Value,
+    SelectItem, SelectItemQualifiedWildcardKind, SetExpr, SetOperator, Spanned, Statement,
+    TableAlias, TableWithJoins, Value,
 };
 
 use sqlparser::tokenizer::Location;
@@ -439,6 +439,9 @@ impl<'a> Analyzer<'a> {
                 }
             });
         }
+        if self.diag.enabled() {
+            self.check_set_widths(body, &branches);
+        }
         let shapes: Vec<Option<Vec<Nullability>>> = branches
             .iter()
             .map(|b| {
@@ -483,6 +486,39 @@ impl<'a> Analyzer<'a> {
             column.json = shape;
         }
         Ok(Some(columns))
+    }
+
+    /// `set-column-count`: a branch of a set operation returning another number of columns
+    /// than the first. A branch of unknown width (an unexpanded `*`) is not judged.
+    fn check_set_widths(&self, body: &SetExpr, branches: &[Option<Vec<Column>>]) {
+        let width = |columns: &Option<Vec<Column>>| {
+            columns
+                .as_ref()
+                .filter(|columns| !columns.iter().any(Column::is_unknown_star))
+                .map(Vec::len)
+        };
+        let Some((known, first)) = branches
+            .iter()
+            .enumerate()
+            .find_map(|(i, columns)| Some((i, width(columns)?)))
+        else {
+            return;
+        };
+        let mut operators = Vec::new();
+        set_operators(body, None, &mut operators);
+        for ((branch, operator), columns) in operators.into_iter().zip(branches).skip(known + 1) {
+            let Some(found) = width(columns).filter(|found| *found != first) else {
+                continue;
+            };
+            let _at = self.diag.at(branch.span());
+            self.diag.record(
+                Rule::SetColumnCount,
+                format!(
+                    "each {operator} branch must return {}, this one returns {found}",
+                    plural(first, "column")
+                ),
+            );
+        }
     }
 
     /// Whether the dialect's `VALUES` lists are typed: those whose column names are known.
@@ -854,6 +890,34 @@ pub(super) fn set_branches(body: &SetExpr) -> Vec<&SetExpr> {
         }
         SetExpr::Query(query) if query.with.is_none() => set_branches(&query.body),
         branch => vec![branch],
+    }
+}
+
+/// The branches of [`set_branches`], each with the operator that joins it to the first
+/// branch: that of the operation whose left side holds the first branch. `joined` is that
+/// operator once the walk is right of the first branch.
+fn set_operators<'b>(
+    body: &'b SetExpr,
+    joined: Option<&SetOperator>,
+    into: &mut Vec<(&'b SetExpr, String)>,
+) {
+    match body {
+        SetExpr::SetOperation {
+            left, right, op, ..
+        } => {
+            set_operators(left, joined, into);
+            set_operators(right, joined.or(Some(op)), into);
+        }
+        SetExpr::Query(query) if query.with.is_none() => set_operators(&query.body, joined, into),
+        branch => into.push((branch, joined.map_or_else(String::new, ToString::to_string))),
+    }
+}
+
+/// `count` `noun`s, the noun plural unless the count is one.
+fn plural(count: usize, noun: &str) -> String {
+    match count {
+        1 => format!("1 {noun}"),
+        _ => format!("{count} {noun}s"),
     }
 }
 

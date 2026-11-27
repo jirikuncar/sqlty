@@ -9,6 +9,7 @@ score: decimal.Decimal | DECIMAL(5, 2) | NonNull
 
 SELECT id FROM a UNION TABLE b
 id: int | INT | Unknown
+[set-column-count] each UNION branch must return 1 column, this one returns 3
 
 SELECT 1 UNION VALUES (2)
 ?column?: int | ? | NonNull
