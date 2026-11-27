@@ -19,6 +19,7 @@ use crate::json::JsonShape;
 use crate::values;
 use crate::MAX_COLUMNS;
 
+use super::aliases::Renamed;
 use super::dialect::SqlDialect;
 use super::dml::{
     dml_scope, joined_tables, merge_source, returning, selects_into, unmatched_sources,
@@ -259,6 +260,7 @@ impl<'a> Analyzer<'a> {
                 let key = (!recursive)
                     .then(|| inner.output_key(&cte.query, &columns))
                     .flatten();
+                inner.check_alias_count(&cte.alias, &columns, Renamed::Cte);
                 inner.virtuals.insert(name.clone(), columns);
                 inner.virtuals.set_key(&name, key);
                 inner.virtuals.set_carried(&name, carried);
