@@ -68,7 +68,7 @@ end
 
 
 def npm(version: str, binaries: Path, out: Path) -> list[Path]:
-    """Write the ``sqlty`` package and one package per platform to ``out``."""
+    """Write the ``@sqlty/cli`` and ``sqlty`` packages and one package per platform to ``out``."""
     main = json.loads((ROOT / "npm/sqlty/package.json").read_text())
     written = []
     for target, (platform, arch) in TARGETS.items():
@@ -95,12 +95,15 @@ def npm(version: str, binaries: Path, out: Path) -> list[Path]:
         shutil.copy2(ROOT / "LICENSE", package / "LICENSE")
         main["optionalDependencies"][name] = version
         written.append(package)
-    package = out / "sqlty"
-    shutil.copytree(ROOT / "npm/sqlty", package)
-    shutil.copy2(ROOT / "LICENSE", package / "LICENSE")
     main["version"] = version
-    (package / "package.json").write_text(json.dumps(main, indent=2) + "\n")
-    return [*written, package]
+    # The unscoped name holds a place for when npm grants it.
+    for name in ("@sqlty/cli", "sqlty"):
+        package = out / name
+        shutil.copytree(ROOT / "npm/sqlty", package)
+        shutil.copy2(ROOT / "LICENSE", package / "LICENSE")
+        (package / "package.json").write_text(json.dumps({**main, "name": name}, indent=2) + "\n")
+        written.append(package)
+    return written
 
 
 def homebrew(version: str, tarballs: Path) -> str:
