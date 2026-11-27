@@ -1862,6 +1862,7 @@ name = "sqlty-python"
 version = "0.9.0"
 dependencies = [
  "ignore",
+ "rayon",
  "recursive",
  "regex",
  "ruff_python_ast",
@@ -1887,6 +1888,7 @@ name = "sqlty-sql"
 version = "0.9.0"
 dependencies = [
  "insta",
+ "rayon",
  "recursive",
  "regex",
  "rustc-hash",

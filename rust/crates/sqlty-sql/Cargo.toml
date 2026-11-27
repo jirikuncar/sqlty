@@ -12,6 +12,7 @@ rust-version.workspace = true
 workspace = true
 
 [dependencies]
+rayon = "1.12"
 sqlparser.workspace = true
 recursive.workspace = true
 regex.workspace = true

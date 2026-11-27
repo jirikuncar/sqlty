@@ -163,10 +163,8 @@ fn loaded_schema(
 ) -> Result<(Schema, Vec<analyzer::SkippedObject>), String> {
     let overrides = TypeOverrides::new(types, dialect)
         .map_err(|error| format!("[tool.sqlty.types]: {error}"))?;
-    Ok(match overrides.is_empty() {
-        true => analyzer::load_schema_with_skipped(text, dialect),
-        false => analyzer::load_schema_with_overrides(text, dialect, overrides),
-    })
+    // No lock is held here: see `Workspace::load_directory`.
+    Ok(analyzer::load_schema_on_pool(text, dialect, overrides))
 }
 
 /// The settings of the files of one directory: its project's, and those of each database.

@@ -7,6 +7,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError, Weak};
 
+use rayon::prelude::*;
 use regex::Regex;
 use ruff_python_ast::Expr;
 
@@ -469,13 +470,26 @@ impl Builder {
             let named = alternation(&added);
             let mut renamed = HashSet::new();
             // Only `import ... as ...` binds a helper to another name.
-            let aliasing = self.sources().values().filter(|known| {
+            let aliases = |known: &&Arc<Module>| {
                 named
                     .as_ref()
                     .is_none_or(|named| named.is_match(&known.text))
                     && IMPORT_AS.is_match(&known.text)
-            });
-            for source in aliasing.filter_map(|known| known.source()) {
+            };
+            let aliasing: Vec<&Arc<Source>> = match rayon::current_thread_index() {
+                Some(_) => self
+                    .sources()
+                    .par_iter()
+                    .map(|(_, known)| known)
+                    .filter(aliases)
+                    .filter_map(|known| known.source())
+                    .collect(),
+                None => {
+                    let sources = self.sources().values().filter(aliases);
+                    sources.filter_map(|known| known.source()).collect()
+                }
+            };
+            for source in aliasing {
                 renamed.extend(
                     source
                         .targets()
