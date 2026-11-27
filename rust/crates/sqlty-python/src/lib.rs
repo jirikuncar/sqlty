@@ -57,6 +57,7 @@ pub mod frozen;
 pub mod helpers;
 #[allow(missing_docs)]
 pub mod index;
+pub mod input;
 pub mod json_types;
 pub mod locate;
 pub mod migrations;

@@ -39,8 +39,14 @@ The fields of a `--sql` t-string are checked as well: psycopg sends each
 
 An argument is judged only where the source states its type: a literal, a
 variable bound to a literal, annotated or assigned a class, a constant imported
-from a checked module, a call of a known class (`date(...)`, `UUID(...)`). An argument of unknown type is never reported, and neither is a
-`str`, which the server coerces to any type. `int`, `float` and `Decimal` are
+from a checked module, a call of a known class (`date(...)`, `UUID(...)`). An argument of unknown type is never reported. A `str` is
+text the server reads as the parameter's type, so on PostgreSQL a `str` literal, or a name
+bound once to one, is checked as the server reads it: text an integer, `numeric`, `real`,
+`double precision`, `boolean`, `uuid`, date, time or `interval` parameter rejects, such as
+`"abc"` for an integer, and a value outside an enum or `CHECK (col IN (...))`. Date, time
+and interval text is reported only when it holds no value at all (`"not a date"`) or is an
+ISO date or time out of range (`"2026-02-30"`). Any other `str` is accepted, as are those
+of MySQL and SQLite. `int`, `float` and `Decimal` are
 interchangeable. On PostgreSQL a `bool` is not a number and an `int` is not a
 `boolean`, since the server has no implicit cast between them; MySQL takes
 either. asyncpg encodes each argument as its parameter's type: it takes a
@@ -86,6 +92,8 @@ execute("INSERT INTO users (id, name) VALUES (%s, %s)", (1, None))
 execute("DELETE FROM users WHERE id = %(id)s", {"id": b"1"})
 # error: [param-type-mismatch] "parameter 1 expects int, got bytes"
 execute("SELECT name FROM users LIMIT %s", (b"1",))
+# error: [param-type-mismatch] "parameter 1 is 'abc', which PostgreSQL rejects as integer"
+execute("SELECT name FROM users WHERE id = %s", ("abc",))
 ```
 
 ## Fix

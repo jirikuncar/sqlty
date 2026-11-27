@@ -82,6 +82,7 @@ PACKAGES: dict[str, tuple[list[str], list[str]]] = {
             "tests/test_pg_describe.py",
             "tests/test_pg_common_types.py",
             "tests/test_driver_values.py",
+            "tests/test_param_text.py",
             "tests/_pg_seed.py",
             "tests/_value_types.py",
             "tests/fixtures/pg_common_types.toml",

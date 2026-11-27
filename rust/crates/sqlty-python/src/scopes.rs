@@ -45,6 +45,8 @@ pub struct Param {
     pub key: Key,
     /// Spelled as the engine spells parameter types: `int`, `datetime.date`, `list[int]`, `None`.
     pub kind: Option<String>,
+    /// The text of a `str` literal, or of a name bound once to one.
+    pub text: Option<String>,
 }
 
 /// Scope ids: 0 is the module, then each function and class in pre-order.
@@ -81,6 +83,8 @@ pub struct Scan<'a> {
     /// The type parameters of each generic function and class.
     pub(crate) generics: HashSet<(Scope, &'a str)>,
     pub(crate) attributes: HashMap<(Scope, &'a str), Option<String>>,
+    /// The first `str` literal each scope assigns to a name alone: `name = "..."`.
+    pub(crate) texts: HashMap<(Scope, &'a str), &'a ast::ExprStringLiteral>,
     operands: HashSet<usize>,
     /// Every call, in visit order, with its innermost scope.
     pub calls: Vec<(&'a ExprCall, Scope)>,
@@ -104,6 +108,7 @@ impl<'a> Scan<'a> {
                 parameters: HashSet::new(),
                 generics: HashSet::new(),
                 attributes: HashMap::new(),
+                texts: HashMap::new(),
                 operands: HashSet::new(),
                 calls: Vec::new(),
                 templates: Vec::new(),
@@ -249,6 +254,15 @@ impl<'a> Visitor<'a> for Walker<'a> {
                     Expr::Call(call) => class_name(Some(&call.func)),
                     value => literal_type(value).map(ToString::to_string),
                 };
+                if let ([Expr::Name(name)], Expr::StringLiteral(text)) =
+                    (node.targets.as_slice(), node.value.as_ref())
+                {
+                    let scope = self.scan.stack.last().copied().unwrap_or(0);
+                    self.scan
+                        .texts
+                        .entry((scope, name.id.as_str()))
+                        .or_insert(text);
+                }
                 let targets: Vec<&Expr> = node.targets.iter().collect();
                 self.scan.typed(&targets, &kind);
             }

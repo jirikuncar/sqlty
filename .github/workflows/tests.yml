@@ -351,7 +351,7 @@ jobs:
             env:
               # A disposable database: the test drops every schema between mdtest sections.
               SQLTY_PG_DSN: postgresql://postgres:postgres@localhost:5432/postgres
-            run: uv run pytest tests/test_pg_describe.py tests/test_pg_common_types.py tests/test_driver_values.py -rs -q -n 2
+            run: uv run pytest tests/test_pg_describe.py tests/test_pg_common_types.py tests/test_driver_values.py tests/test_param_text.py -rs -q -n 2
 
           - name: Compare with MySQL's column names and types
             if: needs.changes.outputs.mysql-fidelity == 'true'

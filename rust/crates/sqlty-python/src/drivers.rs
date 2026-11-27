@@ -214,10 +214,7 @@ impl<'a> Finder<'a, '_> {
                 let params = items
                     .iter()
                     .enumerate()
-                    .map(|(i, item)| Param {
-                        key: Key::Index(i + 1),
-                        kind: self.types.arg_type(item, stack),
-                    })
+                    .map(|(i, item)| self.types.param(Key::Index(i + 1), item, stack))
                     .collect();
                 self.push(call, first, query.clone(), Some(params), driver, None);
             }
@@ -683,7 +680,8 @@ mod tests {
             found[0].params,
             Some(vec![Param {
                 key: Key::Index(1),
-                kind: Some("int".into())
+                kind: Some("int".into()),
+                text: None
             }])
         );
     }
@@ -699,7 +697,8 @@ mod tests {
             found[0].params,
             Some(vec![Param {
                 key: Key::Name("a".into()),
-                kind: Some("float".into())
+                kind: Some("float".into()),
+                text: None
             }])
         );
     }

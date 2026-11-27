@@ -16,7 +16,7 @@ use crate::scopes::{
     class_of, dotted, literal_type, qualified, Key, Node, Param, Scan, Scope, IMPORTED,
 };
 use crate::types::pydantic::Known;
-use crate::types::symbols::{Index, ModuleTypes, Source};
+use crate::types::symbols::{bound_names, Index, ModuleTypes, Source};
 use crate::types::ty::Ty;
 
 /// What a module says about the types of its values.
@@ -33,6 +33,21 @@ pub trait ArgTypes {
     /// `psycopg.Connection` for `Connection` after `from psycopg import Connection`.
     fn qualified(&self, expr: &Expr) -> Option<String>;
 
+    /// The text of `expr` when it is a `str` literal, or a name `stack` binds once to one.
+    fn arg_text(&self, expr: &Expr, _stack: &[Scope]) -> Option<String> {
+        expr.as_string_literal_expr()
+            .map(|text| text.value.to_str().to_string())
+    }
+
+    /// `expr` passed for the parameter `key`.
+    fn param(&self, key: Key, expr: &Expr, stack: &[Scope]) -> Param {
+        Param {
+            key,
+            kind: self.arg_type(expr, stack),
+            text: self.arg_text(expr, stack),
+        }
+    }
+
     /// The arguments a tuple or list literal, or a dict literal of string keys, passes.
     fn literal_params(&self, arg: &Expr, stack: &[Scope]) -> Option<Vec<Param>> {
         let items = match arg {
@@ -44,10 +59,11 @@ pub trait ArgTypes {
                     let Some(Expr::StringLiteral(key)) = &item.key else {
                         return None;
                     };
-                    found.push(Param {
-                        key: Key::Name(key.value.to_str().to_string()),
-                        kind: self.arg_type(&item.value, stack),
-                    });
+                    found.push(self.param(
+                        Key::Name(key.value.to_str().to_string()),
+                        &item.value,
+                        stack,
+                    ));
                 }
                 return Some(found);
             }
@@ -60,10 +76,7 @@ pub trait ArgTypes {
             items
                 .iter()
                 .enumerate()
-                .map(|(i, item)| Param {
-                    key: Key::Index(i + 1),
-                    kind: self.arg_type(item, stack),
-                })
+                .map(|(i, item)| self.param(Key::Index(i + 1), item, stack))
                 .collect(),
         )
     }
@@ -89,6 +102,7 @@ pub struct SourceTypes<'a, 's> {
     names: OnceCell<Option<ModuleTypes<&'s Source>>>,
     classes: RefCell<HashMap<String, Option<String>>>,
     constants: RefCell<HashMap<String, Option<String>>>,
+    bound: RefCell<HashMap<Scope, HashMap<&'a str, usize>>>,
 }
 
 impl<'a, 's> SourceTypes<'a, 's> {
@@ -109,6 +123,7 @@ impl<'a, 's> SourceTypes<'a, 's> {
             names: OnceCell::new(),
             classes: RefCell::default(),
             constants: RefCell::default(),
+            bound: RefCell::default(),
         }
     }
 
@@ -160,6 +175,21 @@ impl<'a, 's> SourceTypes<'a, 's> {
             .filter(|&&scope| !self.scan.is_class(scope))
             .chain(std::iter::once(&0))
             .any(|&scope| self.scan.types.contains_key(&(scope, name)))
+    }
+
+    /// Whether `scope` binds `name` once, and not as a parameter.
+    fn bound_once(&self, scope: Scope, name: &str) -> bool {
+        match self.scan.scopes[scope] {
+            Node::Module => self.source.is_some_and(|source| !source.rebound(name)),
+            Node::Function(function) if !function.parameters.includes(name) => {
+                let mut bound = self.bound.borrow_mut();
+                let counts = bound
+                    .entry(scope)
+                    .or_insert_with(|| bound_names(&function.body));
+                counts.get(name) == Some(&1)
+            }
+            _ => false,
+        }
     }
 
     /// The class a variable holds in `stack`.
@@ -236,6 +266,19 @@ impl<'a, 's> SourceTypes<'a, 's> {
 }
 
 impl ArgTypes for SourceTypes<'_, '_> {
+    fn arg_text(&self, expr: &Expr, stack: &[Scope]) -> Option<String> {
+        let name = match expr {
+            Expr::StringLiteral(text) => return Some(text.value.to_str().to_string()),
+            Expr::Name(name) => name.id.as_str(),
+            _ => return None,
+        };
+        let (scopes, _, _) = self.variable(stack, name)?;
+        let scope = scopes.last().copied().unwrap_or(0);
+        let text = self.scan.texts.get(&(scope, name))?;
+        self.bound_once(scope, name)
+            .then(|| text.value.to_str().to_string())
+    }
+
     fn arg_type(&self, expr: &Expr, stack: &[Scope]) -> Option<String> {
         let name = match expr {
             Expr::NoneLiteral(_) => "None",
