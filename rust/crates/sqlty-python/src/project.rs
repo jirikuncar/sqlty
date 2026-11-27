@@ -37,7 +37,7 @@ mod walk;
 
 pub use glob::Excludes;
 pub use modules::{helper_roots, Packages};
-pub use route::{file_table, names_query_file, route, Route};
+pub use route::{file_table, names_query_file, route, Matched, Route, Router};
 pub use walk::{schema_files, Discovery, DEFAULT_EXCLUDE};
 
 /// What the host has of a file.
