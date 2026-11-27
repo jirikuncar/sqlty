@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import codecs
 import encodings
+import logging
 import re
 from collections.abc import Buffer
 from functools import cache
@@ -48,6 +49,9 @@ def _import_style() -> str | None:
 
         found = _core.find_config(Path.cwd().resolve())
         return found[0].get("import-style") if found else None
+    except _core.ConfigSyntaxError as e:
+        logging.getLogger(__name__).warning("Failed to parse %s", e)
+        return None
     except Exception:
         return None
 

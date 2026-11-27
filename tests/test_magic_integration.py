@@ -330,7 +330,10 @@ def test_the_codec_reads_the_import_style_of_the_config(tmp_path):
 def test_the_codec_ignores_a_config_that_does_not_parse(tmp_path):
     (tmp_path / "pyproject.toml").write_text("[tool.sqlty\n")
     source = b'q = "--sql\\nSELECT 1::INTEGER"\n'
-    assert b"SQL[tuple[int]]" in _print_decoded(tmp_path, source).stdout
+    done = _print_decoded(tmp_path, source)
+    assert b"SQL[tuple[int]]" in done.stdout
+    assert b"Failed to parse" in done.stderr
+    assert b"pyproject.toml" in done.stderr
 
 
 def test_the_stream_reader_decodes_the_whole_stream():

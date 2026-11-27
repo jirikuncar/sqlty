@@ -195,7 +195,8 @@ def test_a_source_that_does_not_parse_is_read_by_its_strings(parses, tokenized):
     ],
 )
 def test_wrapper_name_of_each_import_style(style: str | None, wrapper: str | None) -> None:
-    source = f"import typing\nq = {wrapper or 'SQL'}[typing.Any](x)\n"
+    decoy = "Q" if wrapper == "SQL" else "SQL"
+    source = f"import typing\nq = {wrapper or 'SQL'}[typing.Any](x)\nr = {decoy}[typing.Any](y)\n"
 
     assert ParsedSource(source).any_calls(style) == (
         [] if wrapper is None else [len("import typing\n") + 4]
