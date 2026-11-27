@@ -37,8 +37,8 @@ q = SQL[tuple[int]]("--sql\nSELECT id FROM user")
 ```
 
 When one table, view or CTE of the schema is close to the name, the message says which,
-and `sqlty check --fix` (or the editor's quick fix) writes it in place of the name, keeping
-its schema qualifier and quotes:
+and `sqlty check --fix` (or the editor's quick fix) writes it in place of the name of a
+`FROM` or `JOIN` item, keeping its schema qualifier and quotes:
 
 ```python
 from sqlty import SQL

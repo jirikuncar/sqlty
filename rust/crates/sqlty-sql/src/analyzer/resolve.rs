@@ -145,9 +145,11 @@ impl<'a> Analyzer<'a> {
             if let Some(meant) = &meant {
                 message.push_str(&format!("; did you mean `{meant}`?"));
             }
-            let fix = meant
-                .zip(written)
-                .filter(|(meant, ident)| ident.quote_style.is_some() || unquoted(self, meant));
+            let fix = meant.zip(written).filter(|(meant, ident)| {
+                // A name inside another is a hint, not a fix: the table may be missing.
+                suggest::is_typo(table.rsplit('.').next().unwrap_or(table), meant)
+                    && (ident.quote_style.is_some() || unquoted(self, meant))
+            });
             let _at = fix.as_ref().and_then(|(_, ident)| self.diag.at(ident.span));
             self.diag.push(NameDiagnostic {
                 table: Some(table.to_string()),
@@ -665,8 +667,6 @@ impl<'a> Analyzer<'a> {
         });
     }
 
-    /// The column of `candidates` that `column` most likely misspells, and how SQL spells
-    /// it when that is known.
     /// Whether `name` reads as itself unquoted.
     fn plain(&self, name: &str) -> bool {
         name.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_')
@@ -696,6 +696,10 @@ impl<'a> Analyzer<'a> {
             schema.map(|schema| format!("\"{schema}\"")).as_deref(),
             MEANT_CANDIDATES,
         );
+        // A tie may lie past the cap: no guess then.
+        if relations.len() == MEANT_CANDIDATES {
+            return None;
+        }
         let ctes = self.virtuals.names().filter(|_| schema.is_none());
         let names: Vec<&str> = relations
             .iter()
@@ -705,6 +709,8 @@ impl<'a> Analyzer<'a> {
         suggest::closest(name, &names).map(str::to_string)
     }
 
+    /// The column of `candidates` that `column` most likely misspells, and how SQL spells
+    /// it when that is known.
     fn suggestion(
         &self,
         column: &Ident,
