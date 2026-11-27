@@ -252,6 +252,8 @@ impl Workspace {
             return;
         }
         let module = self.module(path, Arc::from(text), true);
+        // Loaded now, as `open` loads it; a failure is reported with the module's settings.
+        let _ = self.directory_at(parent(&module.resolved));
         if self.modules.insert(path.to_path_buf(), module).is_none() {
             self.order.push(path.to_path_buf());
         }
@@ -689,11 +691,7 @@ impl Workspace {
             self.version,
         )
         .map(Arc::new);
-        let mut configs = configs();
-        if let Some((_, first)) = configs.iter().find(|(known, _)| *known == key) {
-            return first.clone();
-        }
-        configs.push((key, made.clone()));
+        configs().push((key, made.clone()));
         made
     }
 
@@ -870,11 +868,11 @@ impl Workspace {
                     this.order
                         .par_iter()
                         .map(|path| {
+                            // `open` and `update` load the directory of every module.
                             let resolved = &this.modules[path].resolved;
-                            let directory = this.directories.get(parent(resolved)).cloned();
-                            let settings = directory.map(|directory| {
-                                directory.map(|directory| directory.file(resolved, &this.discovery))
-                            });
+                            let directory = this.directories[parent(resolved)].clone();
+                            let settings = directory
+                                .map(|directory| directory.file(resolved, &this.discovery));
                             (path.clone(), settings)
                         })
                         .collect::<Vec<_>>()
@@ -886,10 +884,7 @@ impl Workspace {
         found
             .into_iter()
             .map(|(path, settings)| {
-                let settings = match settings {
-                    Some(settings) => settings?,
-                    None => self.settings(&path)?,
-                };
+                let settings = settings?;
                 let helpers = match helpers.get(&Arc::as_ptr(&settings)) {
                     Some(found) => Arc::clone(found),
                     None => {
