@@ -26,7 +26,8 @@ export type HoverRequest = Source & { op: "hover"; offset: number };
 export type BreakingRequest = Source & { op: "breaking"; before: string };
 /**
  * Types one bare SQL query, for a host in any language: `schema` once with a `schema_key`,
- * then the key alone until the answer is `{ need: "schema" }`.
+ * then the key alone until the answer is `{ need: "schema" }`. A cached key keeps its schema,
+ * so a new schema text needs a new key.
  */
 export type QueryRequest = Omit<Source, "source"> & { op: "query"; sql: string; schema_key?: string };
 /** Validates the sqlty table of the file `path` holding `source`. */
