@@ -230,7 +230,10 @@ fn nothing_for_what_neither_defines() {
     assert_eq!(pg("SELECT *, id FROM users ORDER BY |2"), None);
     assert_eq!(pg("SELECT u.* FROM users u ORDER BY |1"), None);
     assert_eq!(pg("SELECT id > 1 OR k FROM users ORDER BY |k"), None);
-    assert_eq!(pg("SELECT CASE WHEN true THEN 1 END FROM users ORDER BY |end"), None);
+    assert_eq!(
+        pg("SELECT CASE WHEN true THEN 1 END FROM users ORDER BY |end"),
+        None
+    );
     assert_eq!(pg("SEL|ECT 1"), None);
     assert_eq!(pg("SELECT 1 FROM nowh|ere"), None);
     assert_eq!(pg("SELECT 1 FROM pg_cl|ass"), None);
