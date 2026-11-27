@@ -1,0 +1,19 @@
+{
+  "targets": ["sqlty.kuncar.dev", "github.com/jirikuncar/sqlty", "pypi.org/project/sqlty", "marketplace.visualstudio.com/items?itemName=jirikuncar.sqlty"],
+  "queries": [
+    "sqlty",
+    "type check raw sql python",
+    "python sql type checker",
+    "mypy raw sql types",
+    "psycopg typed query results",
+    "asyncpg typed rows",
+    "sqlc for python",
+    "sqlx for python",
+    "lint sql strings in python",
+    "unknown column error before runtime python",
+    "check sql migrations breaking changes",
+    "typed sql without database connection",
+    "aiosql types",
+    "t-strings sql python 3.14"
+  ]
+}
