@@ -1277,6 +1277,7 @@ pub fn crashed(cause: &str, rules: &RuleConfig) -> Found {
         line: 1,
         span: 0..0,
         fix: Vec::new(),
+        related: Vec::new(),
     };
     Found {
         diagnostics: rules
@@ -1311,6 +1312,7 @@ pub fn unparsed(text: &str, run: &Run<'_>) -> Found {
             line: lines.line(lint.query_start),
             span: lint.span,
             fix: Vec::new(),
+            related: Vec::new(),
         }));
     }
     found.sort_by_key(|diagnostic| diagnostic.line);
@@ -1497,6 +1499,7 @@ pub fn diagnostics(source: &Arc<Source>, run: &Run<'_>) -> Found {
             line: source.lines.line(lint.query_start),
             span: lint.span,
             fix: Vec::new(),
+            related: Vec::new(),
         }));
     }
     let queries: Vec<RowQuery> = if may_wrap(text, import_line) {

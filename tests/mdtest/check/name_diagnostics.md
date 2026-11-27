@@ -377,6 +377,21 @@ f = SQL[tuple[int]]("--sql\nSELECT 1 FROM users u JOIN users v ON u.id = v.id")
 g = SQL[tuple[int]]("--sql\nSELECT 1 FROM teams users JOIN users ON true")
 ```
 
+#### Related locations
+
+`ambiguous-column` points at each FROM item that has the column, `duplicate-alias` at
+the first use of the name: the editor shows them as related information, `sqlty check`
+as notes under the diagnostic.
+
+```python
+from sqlty import SQL
+
+# error: [ambiguous-column] "column reference `id` is ambiguous: `users`, `orders` all have it | related[44:49]: column `id` is here | related[55:61]: column `id` is here"
+a = SQL[tuple[int]]("--sql\nSELECT id FROM users JOIN orders ON orders.user_id = users.id")
+# error: [duplicate-alias] "table name `p` is specified more than once | related[49:50]: `p` is first used here"
+b = SQL[tuple[int]]("--sql\nSELECT 1 FROM users p JOIN orders p ON true")
+```
+
 ##### Duplicate FROM names in SQLite
 
 SQLite accepts duplicate names and reads a column from whichever item has it.

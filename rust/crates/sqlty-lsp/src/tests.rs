@@ -94,6 +94,7 @@ impl Workspace for Fake {
                     },
                 ],
                 source: None,
+                related: Vec::new(),
             })
             .collect())
     }
@@ -134,6 +135,7 @@ impl Workspace for Fake {
             end: 7,
             fix: Vec::new(),
             source: Some("sqlty breaking (backward)".to_string()),
+            related: Vec::new(),
         };
         Ok(vec![
             (self.root.join("gone.py"), vec![finding.clone()]),

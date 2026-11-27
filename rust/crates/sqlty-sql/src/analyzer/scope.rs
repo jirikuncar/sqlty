@@ -33,6 +33,8 @@ pub(super) struct Source {
     /// cannot be named.
     pub(super) reference: String,
     pub(super) table: Table,
+    /// Where the query names it: its alias, else its table name; empty when unknown.
+    pub(super) span: Span,
 }
 
 /// The relation behind a [`Source`].
@@ -73,6 +75,7 @@ impl Source {
         Source {
             reference,
             table: Table::Named(key),
+            span: Span::empty(),
         }
     }
 }
@@ -104,6 +107,15 @@ impl Scope {
         }
         self.correlated = OnceCell::new();
         self.sources.push(source);
+    }
+
+    /// Set where each source is written, `spans` in the order of the sources.
+    fn locate(&mut self, spans: impl ExactSizeIterator<Item = Span>) {
+        if spans.len() == self.sources.len() {
+            for (source, span) in self.sources.iter_mut().zip(spans) {
+                source.span = span;
+            }
+        }
     }
 
     /// Moves the first source to the end.
@@ -237,6 +249,16 @@ pub(super) fn table_source(factor: &TableFactor, dialect: SqlDialect) -> Source 
     }
 }
 
+/// Where a FROM item is written: its table and alias, or the alias of a subquery.
+fn written_at(factor: &TableFactor) -> Span {
+    match factor {
+        TableFactor::Derived {
+            alias: Some(alias), ..
+        } => alias.span(),
+        other => other.span(),
+    }
+}
+
 /// The virtual table a derived table's columns are kept under: `(alias)`, or one named
 /// after the subquery's place in the statement when it has no alias.
 fn derived_table(factor: &TableFactor) -> String {
@@ -275,6 +297,7 @@ pub(super) fn opaque_source(factor: &TableFactor) -> Source {
     Source {
         reference,
         table: Table::Opaque(description),
+        span: Span::empty(),
     }
 }
 
@@ -798,6 +821,9 @@ impl<'a> Analyzer<'a> {
                 }
             }
         }
+        if self.diag.enabled() {
+            scope.locate(relations(from).map(written_at));
+        }
         Ok((analyzer, scope))
     }
 
@@ -939,6 +965,7 @@ impl<'a> Analyzer<'a> {
             Some(reference) => vec![Source {
                 reference: reference.to_lowercase(),
                 table: resolve(reference, scope),
+                span: Span::empty(),
             }],
             None => scope
                 .iter()
@@ -965,7 +992,10 @@ impl<'a> Analyzer<'a> {
     ) -> Option<Vec<Column>> {
         let sources = Some(Self::star_sources(reference, scope)).filter(|s| !s.is_empty())?;
         let mut star = Vec::new();
-        for Source { reference, table } in &sources {
+        for Source {
+            reference, table, ..
+        } in &sources
+        {
             if star.len() > MAX_COLUMNS {
                 break;
             }
@@ -1151,6 +1181,7 @@ mod tests {
             Source {
                 reference: "g".into(),
                 table: Table::Opaque("table function".into()),
+                span: Span::empty(),
             },
         ]
         .into();

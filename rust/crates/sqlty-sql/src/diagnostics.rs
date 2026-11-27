@@ -32,6 +32,30 @@ pub struct NameDiagnostic {
     pub column: Option<String>,
     /// A rule reporting the same mistake: where it is on, this diagnostic is not shown.
     pub shadowed_by: Option<Rule>,
+    /// Other places of the query it is about, each with what is there: the tables an
+    /// ambiguous column is in.
+    pub related: Vec<Related>,
+}
+
+/// A place of the query a diagnostic points at besides its own.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Related {
+    /// What is there, for the user: "column `id` is here".
+    pub message: String,
+    /// Its bytes in the query, when known.
+    pub span: Option<Range<usize>>,
+    /// Where sqlparser read it, turned into `span` once the query's text is at hand.
+    pub(crate) at: Span,
+}
+
+impl Related {
+    pub(crate) fn new(at: Span, message: impl Into<String>) -> Self {
+        Related {
+            message: message.into(),
+            span: None,
+            at,
+        }
+    }
 }
 
 #[derive(Default)]
@@ -125,6 +149,21 @@ impl Diagnostics {
         self.push(NameDiagnostic {
             table: table.map(str::to_string),
             column: column.map(str::to_string),
+            ..found(rule, message.into())
+        });
+    }
+
+    /// [`Diagnostics::record_about`] pointing at `related` places too.
+    pub(crate) fn record_related(
+        &self,
+        rule: Rule,
+        message: impl Into<String>,
+        column: Option<&str>,
+        related: Vec<Related>,
+    ) {
+        self.push(NameDiagnostic {
+            column: column.map(str::to_string),
+            related,
             ..found(rule, message.into())
         });
     }
@@ -256,6 +295,7 @@ fn found(rule: Rule, message: String) -> NameDiagnostic {
         table: None,
         column: None,
         shadowed_by: None,
+        related: Vec::new(),
     }
 }
 

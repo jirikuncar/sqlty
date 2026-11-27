@@ -132,10 +132,19 @@ impl harness::Runner for Python {
         Ok(found
             .into_iter()
             .map(|d| {
+                let mut message = d.message;
+                for related in &d.related {
+                    message.push_str(&format!(
+                        " | related[{}:{}]: {}",
+                        column(related.span.start, d.line),
+                        column(related.span.end, d.line),
+                        related.message
+                    ));
+                }
                 (
                     md_lines[d.line - 1],
                     d.rule.name().to_string(),
-                    d.message,
+                    message,
                     format!(
                         "[{}:{}]",
                         column(d.span.start, d.line),

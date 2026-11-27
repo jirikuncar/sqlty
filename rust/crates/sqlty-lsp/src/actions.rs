@@ -4,9 +4,9 @@ use std::str::FromStr;
 
 use lsp_types::{
     AnnotatedTextEdit, CodeAction, CodeActionKind, CodeActionOrCommand, CodeActionParams,
-    CodeDescription, DiagnosticSeverity, DocumentChanges, NumberOrString, OneOf,
-    OptionalVersionedTextDocumentIdentifier, PositionEncodingKind, TextDocumentEdit, TextEdit, Uri,
-    WorkspaceEdit,
+    CodeDescription, DiagnosticRelatedInformation, DiagnosticSeverity, DocumentChanges, Location,
+    NumberOrString, OneOf, OptionalVersionedTextDocumentIdentifier, PositionEncodingKind,
+    TextDocumentEdit, TextEdit, Uri, WorkspaceEdit,
 };
 
 use crate::text::LineIndex;
@@ -15,7 +15,11 @@ use crate::{Diagnostic, Document, Severity};
 /// The rules reference; each rule is a heading of it.
 const RULES: &str = "https://sqlty.kuncar.dev/reference/rules/";
 
-pub(crate) fn diagnostic(diagnostic: &Diagnostic, index: &LineIndex<'_>) -> lsp_types::Diagnostic {
+pub(crate) fn diagnostic(
+    diagnostic: &Diagnostic,
+    uri: &Uri,
+    index: &LineIndex<'_>,
+) -> lsp_types::Diagnostic {
     lsp_types::Diagnostic {
         range: index.range(diagnostic.start, diagnostic.end),
         severity: Some(match diagnostic.severity {
@@ -33,6 +37,16 @@ pub(crate) fn diagnostic(diagnostic: &Diagnostic, index: &LineIndex<'_>) -> lsp_
                 .unwrap_or_else(|| "sqlty".to_string()),
         ),
         message: diagnostic.message.clone(),
+        related_information: (!diagnostic.related.is_empty()).then(|| {
+            diagnostic
+                .related
+                .iter()
+                .map(|related| DiagnosticRelatedInformation {
+                    location: Location::new(uri.clone(), index.range(related.start, related.end)),
+                    message: related.message.clone(),
+                })
+                .collect()
+        }),
         ..lsp_types::Diagnostic::default()
     }
 }
@@ -75,7 +89,7 @@ pub(crate) fn quick_fixes(
             CodeActionOrCommand::CodeAction(CodeAction {
                 title: format!("Fix {}", d.rule),
                 kind: Some(CodeActionKind::QUICKFIX),
-                diagnostics: Some(vec![diagnostic(d, &index)]),
+                diagnostics: Some(vec![diagnostic(d, uri, &index)]),
                 edit: Some(versioned(uri, *version, edits)),
                 is_preferred: Some(true),
                 ..CodeAction::default()

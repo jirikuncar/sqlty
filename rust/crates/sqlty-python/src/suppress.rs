@@ -325,6 +325,7 @@ fn apply_marked(
                         line: ignore.line,
                         span: ignore.span.0..ignore.span.1,
                         fix: Vec::new(),
+                        related: Vec::new(),
                     },
                     redundant: None,
                 });
@@ -350,6 +351,7 @@ mod tests {
                 line: 1,
                 span: 0..1,
                 fix: Vec::new(),
+                related: Vec::new(),
             },
             redundant: None,
         };
@@ -368,6 +370,7 @@ mod tests {
                 line: 1,
                 span: 0..0,
                 fix: Vec::new(),
+                related: Vec::new(),
             },
             redundant: None,
         };
@@ -420,6 +423,7 @@ mod tests {
             line,
             span: 0..1,
             fix: Vec::new(),
+            related: Vec::new(),
         };
         let rules = RuleConfig::default().only(&[Rule::SelectStar, Rule::UnusedIgnore]);
         let kept = apply_sql(&found, vec![diagnostic(Rule::SelectStar, 4)], &rules);
@@ -526,6 +530,7 @@ mod tests {
             line: 3,
             span: 22..26,
             fix: Vec::new(),
+            related: Vec::new(),
         };
         let statements = sqlty_sql::analyzer::statement_ranges(text, "postgres");
         let rules = RuleConfig::default().only(&[Rule::UnknownTable, Rule::UnusedIgnore]);
@@ -544,6 +549,7 @@ mod tests {
             line: 2,
             span: 0..1,
             fix: Vec::new(),
+            related: Vec::new(),
         };
         let rules = RuleConfig::default().only(&[Rule::SelectStar, Rule::UnusedIgnore]);
         let kept = apply_sql(&sql_ignores(text, &[]), vec![diagnostic], &rules);

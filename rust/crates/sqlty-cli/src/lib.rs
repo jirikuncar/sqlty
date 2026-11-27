@@ -1018,6 +1018,14 @@ fn check(
                     path.display(),
                     diag.line
                 ));
+                for related in &diag.related {
+                    host.out(&format!(
+                        "  {}:{}: note: {}\n",
+                        path.display(),
+                        related.line,
+                        related.message
+                    ));
+                }
                 if args.explain && EXPLAINED_RULES.contains(&rule) {
                     for line in workspace.explain(path, diag.line)? {
                         host.out(&format!("{line}\n"));
@@ -1181,6 +1189,14 @@ struct JsonEdit {
     replacement: String,
 }
 
+/// Another place a row of `--output-format json` points at.
+#[derive(Serialize)]
+struct JsonRelated {
+    message: String,
+    start: Position,
+    end: Position,
+}
+
 /// A row of `--output-format json`.
 #[derive(Serialize)]
 struct JsonDiagnostic {
@@ -1192,6 +1208,8 @@ struct JsonDiagnostic {
     start: Position,
     end: Position,
     fix: Vec<JsonEdit>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    related: Vec<JsonRelated>,
     #[serde(flatten, skip_serializing_if = "Option::is_none")]
     breaking: Option<Breaking>,
 }
@@ -1219,6 +1237,15 @@ fn json_diagnostic(path: &Path, diag: &Diagnostic, lines: &Lines<'_>) -> JsonDia
                 start: lines.position(edit.range.start),
                 end: lines.position(edit.range.end),
                 replacement: edit.replacement.clone(),
+            })
+            .collect(),
+        related: diag
+            .related
+            .iter()
+            .map(|related| JsonRelated {
+                message: related.message.clone(),
+                start: lines.position(related.span.start),
+                end: lines.position(related.span.end),
             })
             .collect(),
         breaking: None,
@@ -1352,6 +1379,19 @@ fn sarif_result(row: &JsonDiagnostic) -> SarifResult {
             },
         }],
         fixes,
+        related_locations: row
+            .related
+            .iter()
+            .map(|related| RelatedLocation {
+                physical_location: PhysicalLocation {
+                    artifact_location: artifact(),
+                    region: Region::new(related.start, related.end),
+                },
+                message: Text {
+                    text: related.message.clone(),
+                },
+            })
+            .collect(),
         properties: row.breaking.clone(),
     }
 }
@@ -1414,8 +1454,17 @@ struct SarifResult {
     locations: [Location; 1],
     #[serde(skip_serializing_if = "Vec::is_empty")]
     fixes: Vec<SarifFix>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    related_locations: Vec<RelatedLocation>,
     #[serde(skip_serializing_if = "Option::is_none")]
     properties: Option<Breaking>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RelatedLocation {
+    physical_location: PhysicalLocation,
+    message: Text,
 }
 
 #[derive(Serialize)]
@@ -1726,6 +1775,7 @@ mod tests {
             start: at,
             end: at,
             fix: Vec::new(),
+            related: Vec::new(),
             breaking: None,
         };
         let found = pretty(&sarif_result(&row("/a b%.py")));

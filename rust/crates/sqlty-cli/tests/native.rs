@@ -202,6 +202,40 @@ fn serves_the_language_server() {
 }
 
 #[test]
+fn sends_related_locations_as_related_information() {
+    let config = ("pyproject.toml", "[tool.sqlty]\nschema = \"schema.sql\"\n");
+    let schema = (
+        "schema.sql",
+        "CREATE TABLE users (id INT NOT NULL); CREATE TABLE orders (id INT NOT NULL);",
+    );
+    let query = (
+        "app/a.py",
+        "from sqlty import SQL\nq = SQL[tuple[int]](\"--sql\\nSELECT id FROM users, orders\")\n",
+    );
+    let root = project("related", &[config, schema, query]);
+    let root = root.canonicalize().expect("exists");
+    let open = format!(
+        r#"{{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{{"textDocument":{{"uri":"file://{}/app/a.py","languageId":"python","version":1,"text":{:?}}}}}}}"#,
+        root.display(),
+        query.1
+    );
+    let initialized = r#"{"jsonrpc":"2.0","method":"initialized","params":{}}"#.to_string();
+    let (messages, code) = serve(
+        &root,
+        &[initialize(&root, "null"), initialized, open],
+        "ambiguous-column",
+    );
+    assert_eq!(code, 0);
+    let published = messages.last().expect("diagnostics");
+    let related = format!(
+        r#""relatedInformation":[{{"location":{{"range":{{"end":{{"character":48,"line":1}},"start":{{"character":43,"line":1}}}},"uri":"file://{0}/app/a.py"}},"message":"column `id` is here"}},{{"location":{{"range":{{"end":{{"character":56,"line":1}},"start":{{"character":50,"line":1}}}},"uri":"file://{0}/app/a.py"}},"message":"column `id` is here"}}]"#,
+        root.display()
+    );
+    assert!(published.contains(&related), "{published}");
+    std::fs::remove_dir_all(&root).expect("removes");
+}
+
+#[test]
 fn reports_a_server_without_a_client() {
     let root = project("no-client", &[]);
     let (code, out, err) = sqlty(&root, &["server"], &[]);

@@ -80,6 +80,19 @@ pub struct Diagnostic {
     pub fix: Vec<Edit>,
     /// The check it comes from, when that is not `sqlty check`.
     pub source: Option<String>,
+    /// Other places of the buffer it is about, sent as `relatedInformation`.
+    pub related: Vec<Related>,
+}
+
+/// A place of the buffer a [`Diagnostic`] points at besides its own.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Related {
+    /// The first byte.
+    pub start: usize,
+    /// The byte after the last.
+    pub end: usize,
+    /// What is there.
+    pub message: String,
 }
 
 /// How a rule is configured to report.

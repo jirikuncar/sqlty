@@ -124,6 +124,14 @@ A file without headers is one query, named after the file.
 SELECT id FROM users JOIN blogs ON blogs.author_id = users.id
 ```
 
+The tables that have it are related locations:
+
+```sql
+-- error: [ambiguous-column] "| related[+1.6:+1.11]: column `id` is here | related[+1.17:+1.22]: column `id` is here"
+SELECT id
+FROM users JOIN blogs ON blogs.author_id = users.id
+```
+
 ## `SELECT *`
 
 A `*` that shapes the result is `select-star`, as in Python. Each statement is checked.
