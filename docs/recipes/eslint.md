@@ -13,6 +13,26 @@ CI, not in a pre-commit hook, not in the editor.
 npm install --save-dev eslint @typescript-eslint/parser @sqlty/eslint-plugin
 ```
 
+## What it solves
+
+TypeScript sees a query as a string. A misspelled column, a dropped table or a row type
+that no longer matches the schema compiles, passes review, and fails at runtime, or
+returns `undefined` where the code expects a value.
+
+- **Mistakes in SQL** are reported where the template writes them, with the fix, as you
+  type and in CI, before the query runs.
+- **Row types** come from the schema. `eslint --fix` writes them, and a migration that
+  changes a column flags every query whose row type it breaks.
+- **Driver surprises**: `bigint` and `numeric` arrive as strings, an enum array as text
+  in node-postgres. The row type says what the driver hands you, not the SQL type.
+- **No database**: the schema is read from `.sql` files, so the check runs in a
+  pre-commit hook, a fork's CI or an editor with no PostgreSQL to connect to.
+
+For coding agents, the same check is the feedback loop for the SQL they write. An agent's
+sandbox rarely has the database, yet `npx eslint .` names the wrong column, the line and
+the fix, `npx eslint . --fix` writes the row types, and `--format json` reads as data.
+The answer depends only on the schema and the code, so a retry gets the same one.
+
 ## Configure
 
 ```js

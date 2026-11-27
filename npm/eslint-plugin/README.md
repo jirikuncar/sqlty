@@ -11,6 +11,11 @@ const rows = await sql`SELECT id, name, email FROM users WHERE id = ${id}`;
 const rows = await sql<{ id: number; name: string; email: string | null }[]>`SELECT ...`;
 ```
 
+TypeScript sees a query as a string, so a misspelled column or a row type the schema no
+longer matches compiles and fails at runtime. This plugin catches both in the editor, a
+pre-commit hook or CI, and gives coding agents a check that needs no database in their
+sandbox: the wrong column, its line and the fix, with `--format json` for tools.
+
 ```js
 // eslint.config.js
 import parser from "@typescript-eslint/parser";
