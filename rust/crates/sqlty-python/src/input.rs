@@ -132,8 +132,9 @@ fn numeric(text: &str) -> bool {
 fn float(text: &str) -> bool {
     let (_, rest) = signed(trim(text));
     if special(rest, &["infinity", "inf", "nan"])
-        || rest.len() > 4
-            && rest[..4].eq_ignore_ascii_case("nan(")
+        || rest
+            .get(..4)
+            .is_some_and(|nan| nan.eq_ignore_ascii_case("nan("))
             && rest.ends_with(')')
             && rest[4..rest.len() - 1]
                 .bytes()
@@ -260,7 +261,7 @@ fn date(text: &str) -> Option<bool> {
     Some((1..=days).contains(&day))
 }
 
-/// Whether `HH:MM[:SS[.ffffff]]` is a time of day, `24:00:00` included; `None` when
+/// Whether `HH:MM[:SS.ffffff]` is a time of day, `24:00:00` included; `None` when
 /// `text` is not of that form.
 fn time(text: &str) -> Option<bool> {
     let (clock, fraction) = text.split_once('.').unwrap_or((text, "0"));
@@ -271,7 +272,8 @@ fn time(text: &str) -> Option<bool> {
         .split(':')
         .map(|part| number(part).filter(|_| part.len() == 2))
         .collect::<Option<_>>()?;
-    if !(2..=3).contains(&parts.len()) {
+    // `MM:SS.f` reads as minutes and seconds.
+    if !(2..=3).contains(&parts.len()) || parts.len() == 2 && text.contains('.') {
         return None;
     }
     let (hour, minute, second) = (parts[0], parts[1], parts.get(2).copied().unwrap_or(0));

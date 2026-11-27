@@ -92,7 +92,7 @@ execute("INSERT INTO users (id, name) VALUES (%s, %s)", (1, None))
 execute("DELETE FROM users WHERE id = %(id)s", {"id": b"1"})
 # error: [param-type-mismatch] "parameter 1 expects int, got bytes"
 execute("SELECT name FROM users LIMIT %s", (b"1",))
-# error: [param-type-mismatch] "parameter 1 is 'abc', which PostgreSQL rejects as integer"
+# error: [param-type-mismatch] "parameter 1 is 'abc', which is not valid input for integer"
 execute("SELECT name FROM users WHERE id = %s", ("abc",))
 ```
 
