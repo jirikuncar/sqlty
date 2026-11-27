@@ -50,12 +50,12 @@ export function cook(raw) {
 }
 
 /**
- * The SQL of a template, its interpolations as `$1`, `$2`, ..., and `range`, the source range
- * of a range of it. `quasis` are its texts as written, each with the source offset of its
- * start, and `expressions` the source ranges of its interpolations. A range in an
- * interpolation's placeholder is all of the interpolation.
+ * The SQL of a template, its interpolations as `$1`, `$2`, ... (`?` in MySQL), and `range`,
+ * the source range of a range of it. `quasis` are its texts as written, each with the source
+ * offset of its start, and `expressions` the source ranges of its interpolations. A range in
+ * an interpolation's placeholder is all of the interpolation.
  */
-export function compose(quasis, expressions) {
+export function compose(quasis, expressions, dialect = "postgres") {
   let sql = "";
   const segments = [];
   quasis.forEach(({ raw, start }, i) => {
@@ -64,7 +64,7 @@ export function compose(quasis, expressions) {
     sql += text;
     const expression = expressions[i];
     if (expression) {
-      const placeholder = `$${i + 1}`;
+      const placeholder = dialect === "mysql" ? "?" : `$${i + 1}`;
       segments.push({ at: sql.length, length: placeholder.length, start: expression.start, end: expression.end });
       sql += placeholder;
     }
@@ -96,16 +96,20 @@ const normalized = (text) => text.replace(/[\s;,]+/g, "");
  */
 export function check({ quasis, expressions, typeArguments, tag }, settings) {
   const { engine, schema, target = {} } = settings;
-  const { sql, range } = compose(quasis, expressions);
+  const dialect = settings.dialect ?? "postgres";
+  const { sql, range } = compose(quasis, expressions, dialect);
   const request = {
     op: "query",
     sql,
     schema_key: schema?.key,
-    dialect: settings.dialect ?? "postgres",
+    dialect,
     config: settings.config ?? "",
   };
   let answer = engine(request);
-  if (answer.need === "schema") answer = engine({ ...request, schema: schema.text() });
+  if (answer.need === "schema") {
+    const text = schema.text();
+    answer = engine(text.trim() ? { ...request, schema: text } : { ...request, schema_key: undefined });
+  }
   if (answer.error) return { sql, error: answer.error, problems: [] };
   const problems = answer.diagnostics.map((found) => {
     const [start, end] = range(found.start, found.end);
