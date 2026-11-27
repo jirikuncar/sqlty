@@ -49,6 +49,14 @@ SELECT ('{{a,b},{c,d}}'::text[][])[1], ('{{a,b},{c,d}}'::text[][])[1][2]
 -- columns: text: str | None (TEXT)
 ```
 
+A slice in any subscript makes every subscript a slice, so the result stays an array.
+
+```sql
+SELECT ('{{a,b},{c,d}}'::text[][])[1:2][1], ('{{a,b},{c,d}}'::text[][])[1][1:2]
+-- columns: text: list[list[str]] | None (ARRAY<ARRAY<TEXT>>)
+-- columns: text: list[list[str]] | None (ARRAY<ARRAY<TEXT>>)
+```
+
 ## Field access of a composite
 
 The field names the column, and a known composite types it.
