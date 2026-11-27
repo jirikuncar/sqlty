@@ -157,3 +157,49 @@ CREATE TABLE a.users (id INTEGER);
 SELECT id FROM b.users
 -- inferred: None
 ```
+
+## A view reads its tables under the search_path it was created in
+
+### A view written before its table
+
+A view written before the table it reads waits for it, and is read under the
+`search_path` of its own statement, not under a later one.
+
+`schema.sql`:
+
+```sql
+CREATE VIEW waiting AS SELECT * FROM accounts;
+CREATE TABLE accounts (id INTEGER);
+CREATE SCHEMA crm;
+CREATE TABLE crm.accounts (name TEXT);
+SET search_path TO crm;
+```
+
+```sql
+SELECT * FROM public.waiting
+-- inferred: tuple[int | None]
+```
+
+### A view right after SET search_path
+
+A view right after a `SET search_path` reads the tables of the new path.
+
+`schema.sql`:
+
+```sql
+CREATE TABLE accounts (id INTEGER);
+CREATE TABLE crm.accounts (name TEXT);
+CREATE VIEW before AS SELECT * FROM accounts;
+SET search_path TO crm;
+CREATE VIEW after AS SELECT * FROM accounts;
+```
+
+```sql
+SELECT * FROM public.before
+-- inferred: tuple[int | None]
+```
+
+```sql
+SELECT * FROM crm.after
+-- inferred: tuple[str | None]
+```

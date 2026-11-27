@@ -80,7 +80,7 @@ pub(super) fn read_statements<'a>(
         }
         if postgres {
             if let Some(schemas) = stmt.search_path() {
-                loader.search_path = schemas.clone();
+                loader.set_search_path(schemas.clone());
                 path = Rc::new(schemas);
                 continue;
             }
