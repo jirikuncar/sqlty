@@ -61,6 +61,42 @@ e = SQL[tuple[int]]("--sql\nSELECT * FROM missing")
 f = SQL[tuple[int]]("--sql\nINSERT INTO missing (a) VALUES (1) RETURNING a")
 ```
 
+#### A qualifier no FROM item names
+
+PostgreSQL rejects a qualifier that names a schema table missing from `FROM`, and one that
+names a table under its alias ("invalid reference to FROM-clause entry for table",
+[Table and Column Aliases](https://www.postgresql.org/docs/17/queries-table-expressions.html#QUERIES-TABLE-ALIASES)).
+
+```python
+from sqlty import SQL
+
+# error: [unknown-table] "`users` is not a table or alias in the FROM clause; did you mean `u`?"
+a = SQL[tuple[int]]("--sql\nSELECT users.id FROM users AS u")
+# error: [unknown-table] "`users` is not a table or alias in the FROM clause"
+b = SQL[tuple[int]]("--sql\nSELECT users.id FROM teams")
+# error: [unknown-table] "`team` is not a table or alias in the FROM clause; did you mean `teams`?"
+c = SQL[tuple[int]]("--sql\nSELECT id FROM teams WHERE team.id = 1")
+# error: [unknown-table] "`users` is not a table or alias in the FROM clause; did you mean `u`?"
+d = SQL[tuple[int]]("--sql\nSELECT u.id FROM users u JOIN teams t ON t.id = users.team_id")
+# error: [unknown-table] "`users` is not a table or alias in the FROM clause; did you mean `u`?"
+e = SQL[tuple[int]]("--sql\nSELECT u.id FROM users u ORDER BY users.name")
+# error: [unknown-table] "`orders` is not a table or alias in the FROM clause"
+f = SQL[tuple[int]]("--sql\nUPDATE users SET name = 'x' WHERE orders.id = 1 RETURNING id")
+```
+
+The target of `UPDATE`, `DELETE` and `INSERT`, the items of `UPDATE ... FROM` and `DELETE ...
+USING`, and an enclosing query's items are in scope.
+
+```python
+from sqlty import SQL
+
+# error:
+a = SQL[tuple[int]]("--sql\nUPDATE users SET name = 'x' FROM teams WHERE teams.id = users.team_id RETURNING users.id")
+b = SQL[tuple[int]]("--sql\nDELETE FROM users USING teams WHERE teams.id = users.team_id RETURNING users.id")
+c = SQL[tuple[int]]("--sql\nINSERT INTO users (id, name) VALUES (1, 'a') RETURNING users.id")
+d = SQL[tuple[int]]("--sql\nSELECT id FROM users WHERE EXISTS (SELECT 1 FROM teams WHERE teams.id = users.team_id)")
+```
+
 #### Aggregates of unknown columns
 
 An aggregate of a column the table lacks is untyped, `SUM` like the others.
