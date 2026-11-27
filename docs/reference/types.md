@@ -24,7 +24,8 @@ to annotate.
 
 !!! note "Other PostgreSQL drivers"
     asyncpg returns `json`/`jsonb` as `str`, `bit` as `asyncpg.BitString` and
-    `"char"` as `bytes`; psycopg2 returns `bytea` as `memoryview`, and `uuid` and
+    `"char"` as `bytes`: [`driver = "asyncpg"`](configuration.md#driver) types all but
+    `"char"` so. psycopg2 returns `bytea` as `memoryview`, and `uuid` and
     `inet` as `str` unless you register their adapters. Annotate those fields
     with the type your driver returns, and suppress the mismatch with
     `# sqlty: ignore[column-type-mismatch]`.

@@ -56,7 +56,9 @@ pub const TOOL_KEYS: [&str; 21] = [
 
 /// The `types` a `driver` adds in PostgreSQL, under the project's own: psycopg loads ranges
 /// and multiranges as its own classes
-/// (<https://www.psycopg.org/psycopg3/docs/basic/pgtypes.html>).
+/// (<https://www.psycopg.org/psycopg3/docs/basic/pgtypes.html>); asyncpg also loads
+/// `json`/`jsonb` as `str` and bit strings and geometric types as its own classes
+/// (<https://magicstack.github.io/asyncpg/current/usage.html#type-conversion>).
 pub fn driver_types(driver: &str, dialect: &str) -> Vec<(String, String)> {
     const RANGES: [(&str, &str); 6] = [
         ("INT4", "int"),
@@ -66,24 +68,46 @@ pub fn driver_types(driver: &str, dialect: &str) -> Vec<(String, String)> {
         ("TS", "datetime.datetime"),
         ("TSTZ", "datetime.datetime"),
     ];
-    if driver != "psycopg" || dialect != "postgres" {
+    const ASYNCPG: [(&str, &str); 11] = [
+        ("JSON", "str"),
+        ("JSONB", "str"),
+        ("BIT", "asyncpg.BitString"),
+        ("VARBIT", "asyncpg.BitString"),
+        ("POINT", "asyncpg.Point"),
+        ("LINE", "asyncpg.Line"),
+        ("LSEG", "asyncpg.LineSegment"),
+        ("BOX", "asyncpg.Box"),
+        ("PATH", "asyncpg.Path"),
+        ("POLYGON", "asyncpg.Polygon"),
+        ("CIRCLE", "asyncpg.Circle"),
+    ];
+    if dialect != "postgres" {
         return Vec::new();
     }
-    RANGES
+    // asyncpg loads a multirange as a list of ranges.
+    let (range, multirange) = match driver {
+        "psycopg" => (
+            "psycopg.types.range.Range",
+            Some("psycopg.types.multirange.Multirange"),
+        ),
+        "asyncpg" => ("asyncpg.Range", None),
+        _ => return Vec::new(),
+    };
+    let ranges = RANGES.iter().flat_map(|(base, python)| {
+        let multi = match multirange {
+            Some(multirange) => format!("{multirange}[{python}]"),
+            None => format!("list[{range}[{python}]]"),
+        };
+        [
+            (format!("{base}RANGE"), format!("{range}[{python}]")),
+            (format!("{base}MULTIRANGE"), multi),
+        ]
+    });
+    let own = ASYNCPG
         .iter()
-        .flat_map(|(base, python)| {
-            [
-                (
-                    format!("{base}RANGE"),
-                    format!("psycopg.types.range.Range[{python}]"),
-                ),
-                (
-                    format!("{base}MULTIRANGE"),
-                    format!("psycopg.types.multirange.Multirange[{python}]"),
-                ),
-            ]
-        })
-        .collect()
+        .filter(|_| driver == "asyncpg")
+        .map(|(sql, python)| (sql.to_string(), python.to_string()));
+    ranges.chain(own).collect()
 }
 
 /// Keys of `[tool.sqlty]` that pick the files to process.
@@ -217,9 +241,9 @@ pub fn validate(mut table: Table, source: &str) -> Result<Config, InvalidConfig>
     }
     if table
         .get("driver")
-        .is_some_and(|driver| driver.as_str() != Some("psycopg"))
+        .is_some_and(|driver| !matches!(driver.as_str(), Some("psycopg" | "asyncpg")))
     {
-        return fail("[tool.sqlty] driver must be \"psycopg\"".into());
+        return fail("[tool.sqlty] driver must be \"psycopg\" or \"asyncpg\"".into());
     }
     if let Some(dialect) = table.get("dialect").and_then(Value::as_str) {
         if dialect.parse::<Dialect>().is_err() {
@@ -902,7 +926,7 @@ mod tests {
         assert!(invalid("schema = 1").contains("schema must be a path"));
         assert!(invalid("max-query-variants = 0").contains("positive integer"));
         assert!(invalid("coerce-row-types = \"app.User\"").contains("list of row type names"));
-        assert!(invalid("driver = \"asyncpg\"").contains("must be \"psycopg\""));
+        assert!(invalid("driver = \"psycopg2\"").contains("must be \"psycopg\" or \"asyncpg\""));
         assert!(invalid("types = { DATE = 1 }").contains("types must be a table"));
         assert!(invalid("databases = 1").contains("databases must be a table of tables"));
         assert_eq!(
@@ -1006,6 +1030,7 @@ mod tests {
     fn rarer_configs() {
         assert!(invalid("query-format = 1").contains("query-format must be a string"));
         assert!(driver_types("psycopg", "mysql").is_empty());
+        assert!(driver_types("psycopg2", "postgres").is_empty());
         let loaded = load(
             b"[tool]\nsqlty = 1\n",
             "pyproject.toml",

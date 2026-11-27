@@ -10,7 +10,10 @@ import typing
 import uuid
 from typing import Any
 
+import asyncpg
+
 _NAMESPACE = {
+    "asyncpg": asyncpg,
     "datetime": datetime,
     "decimal": decimal,
     "ipaddress": ipaddress,
@@ -60,4 +63,8 @@ def _matches(value: object, tp: Any) -> bool:
         return isinstance(value, (float, int)) and not isinstance(value, bool)
     if tp is int:
         return isinstance(value, int) and not isinstance(value, bool)
+    if isinstance(origin, type):
+        # A range: its bounds are of its argument.
+        bounds = [getattr(value, bound, None) for bound in ("lower", "upper")]
+        return isinstance(value, origin) and all(_matches(b, args[0] | None) for b in bounds)
     return isinstance(value, tp)
