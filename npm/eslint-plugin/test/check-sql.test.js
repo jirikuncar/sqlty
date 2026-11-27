@@ -9,6 +9,7 @@ RuleTester.it = it;
 RuleTester.itOnly = it.only;
 
 const schema = fileURLToPath(new URL("./fixtures/schema.sql", import.meta.url));
+const empty = fileURLToPath(new URL("./fixtures/empty.sql", import.meta.url));
 const tester = new RuleTester({ languageOptions: { parser } });
 const rule = plugin.rules["check-sql"];
 const options = (more = {}) => [{ schema, ...more }];
@@ -25,6 +26,11 @@ tester.run("check-sql", rule, {
       options: options({ targets: [{ tag: "sql", skipTypeAnnotations: true }] }),
       code: "sql`SELECT id FROM users`",
     },
+    {
+      options: options({ dialect: "mysql", targets: [{ tag: "sql", skipTypeAnnotations: true }] }),
+      code: "sql`SELECT id FROM users WHERE id = ${id}`",
+    },
+    { options: [{ schema: empty }], code: "sql<{ n: number }>`SELECT 1 AS n`" },
     {
       options: options({ targets: [{ tag: "/db\\.(one|many)/" }] }),
       code: "db.one<{ id: string }>`SELECT id FROM users WHERE name = ${name}`",
