@@ -106,6 +106,9 @@ fn signature_help_names_the_active_parameter() {
             "active_parameter": 1,
         })
     );
+    let more = "q = \"--sql\\nSELECT left(name, 3, 4)\"";
+    let past = ask(&json!({"op": "signature", "source": more, "offset": more.find('4').unwrap()}));
+    assert_eq!(past["active_parameter"], 2);
     let outside =
         ask(&json!({"op": "signature", "source": source, "dialect": "postgres", "offset": 0}));
     assert_eq!(outside, Value::Null);

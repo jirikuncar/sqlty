@@ -113,8 +113,8 @@ export type Signatures = {
   /** Each `parameters` entry is the `[start, end]` of a parameter in `label`. */
   signatures: { label: string; url: string; parameters: [number, number][] }[];
   active_signature: number;
-  /** `null` past the last parameter. */
-  active_parameter: number | null;
+  /** Past the last parameter, the count of parameters: none is highlighted. */
+  active_parameter: number;
 };
 
 export type ProjectAnswer =

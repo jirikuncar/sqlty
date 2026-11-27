@@ -457,6 +457,18 @@ def editing(page: Page) -> None:
     page.wait_for_selector(".monaco-hover-content code")
     page.keyboard.press("Escape")
 
+    # The widget is laid out hidden headless; the second call disposes the first answer.
+    for call in ("SUM(", "MAX("):
+        at(page, f"{call}o.", len(call))
+        page.evaluate(f"{SOURCE}.trigger('test', 'editor.action.triggerParameterHints', null)")
+        page.wait_for_function(
+            "(name) => document.querySelector('.parameter-hints-widget .signature')"
+            "?.textContent.startsWith(name)",
+            arg=call.lower(),
+        )
+        assert page.query_selector(".parameter-hints-widget .signature .parameter.active")
+    page.keyboard.press("Escape")
+
     at(page, "SELECT nme", len("SELECT "))
     page.evaluate(f"{SOURCE}.trigger('test', 'editor.action.quickFix', null)")
     page.wait_for_selector("text=Fix unknown-column")

@@ -368,12 +368,11 @@ monaco.languages.registerSignatureHelpProvider("python", {
       documentation: { value: `[Documentation](${signature.url})` },
       parameters: signature.parameters.map((label) => ({ label })),
     }));
-    const active = signatures[found.active_signature];
     return {
       value: {
         signatures,
         activeSignature: found.active_signature,
-        activeParameter: found.active_parameter ?? active.parameters.length,
+        activeParameter: found.active_parameter,
       },
       dispose() {},
     };

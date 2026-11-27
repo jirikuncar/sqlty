@@ -130,7 +130,8 @@ fn postgres() -> String {
 /// - `hover`: what the word at `offset` is, in Markdown; `null` when nothing.
 /// - `signature`: the overloads of the built-in function whose arguments hold `offset`, each
 ///   with its documentation `url` and the `[start, end]` of each parameter in its `label`,
-///   and the active overload and parameter (`null` past the last); `null` outside a call.
+///   and the active overload and parameter (the count of parameters past the last, as LSP
+///   has it); `null` outside a call.
 /// - `format`: `formatted`, what `sqlty format` makes of the source. Not part of `analyze`,
 ///   which runs on every keystroke.
 /// - `breaking`: `diagnostics` the source gets against `schema` but not against `before`,
@@ -315,7 +316,7 @@ pub fn run(request: &str) -> String {
                         "parameters": signature.parameters.iter().map(|p| [p.label.0, p.label.1]).collect::<Vec<_>>(),
                     })).collect::<Vec<_>>(),
                     "active_signature": found.active_signature,
-                    "active_parameter": found.active_parameter,
+                    "active_parameter": found.active_parameter.unwrap_or(found.signatures[found.active_signature].parameters.len()),
                 }),
                 None => Value::Null,
             }

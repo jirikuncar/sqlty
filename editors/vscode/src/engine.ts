@@ -214,8 +214,7 @@ export async function startEngine(
             return signature;
           });
           help.activeSignature = answer.active_signature;
-          help.activeParameter =
-            answer.active_parameter ?? answer.signatures[answer.active_signature].parameters.length;
+          help.activeParameter = answer.active_parameter;
           return help;
         },
       },
