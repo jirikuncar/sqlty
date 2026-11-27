@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use sqlty_python::config;
-use sqlty_python::project::{self, Discovery, Files, Route};
+use sqlty_python::project::{self, Discovery, Files, Matched, Route, Router};
 use sqlty_python::queries;
 use sqlty_python::rewriter::ImportStyle;
 use sqlty_python::types::stdlib::Version;
@@ -171,7 +171,8 @@ fn loaded_schema(
 pub struct Directory {
     own: Arc<FileSettings>,
     databases: Vec<(String, Arc<FileSettings>)>,
-    routing: Option<(Table, PathBuf)>,
+    routing: Option<Router>,
+    routed: Mutex<HashMap<Matched, Arc<FileSettings>>>,
     cli_rules: Vec<(String, String)>,
 }
 
@@ -211,10 +212,10 @@ impl Directory {
                 own.schema_files = files;
             }
             return Ok(Self {
-                routing: base
-                    .clone()
+                routing: (base.as_deref())
                     .filter(|_| table.contains_key("overrides"))
-                    .map(|base| (table.clone(), base)),
+                    .map(|base| Router::new(&table, &files.canonical(base))),
+                routed: Mutex::default(),
                 own: Arc::new(own),
                 databases: Vec::new(),
                 cli_rules: flags.rules(),
@@ -285,7 +286,8 @@ impl Directory {
         Ok(Self {
             own,
             databases: routed,
-            routing: base.map(|base| (table, base)),
+            routing: (base.as_deref()).map(|base| Router::new(&table, &files.canonical(base))),
+            routed: Mutex::default(),
             cli_rules: flags.rules(),
         })
     }
@@ -299,18 +301,26 @@ impl Directory {
         )
     }
 
-    /// The settings of the file at `path`.
-    pub fn file(&self, path: &Path, discovery: &Discovery) -> Arc<FileSettings> {
-        let Some((table, base)) = &self.routing else {
+    /// The settings of the file at the resolved `path`: one per database and set of
+    /// overrides its files match.
+    pub fn file(&self, path: &Path) -> Arc<FileSettings> {
+        let Some(router) = &self.routing else {
             return Arc::clone(&self.own);
         };
-        let route = discovery.route(table, base, path);
+        let matched = router.matched(path, path);
+        let mut routed = self.routed.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some(found) = routed.get(&matched) {
+            return Arc::clone(found);
+        }
+        let route = router.route(&matched);
         let settings = route
             .database
             .as_ref()
             .and_then(|name| self.databases.iter().find(|(database, _)| database == name))
             .map_or(&self.own, |(_, settings)| settings);
-        self.overridden(settings, &route)
+        let settings = self.overridden(router, settings, &route);
+        routed.insert(matched, Arc::clone(&settings));
+        settings
     }
 
     /// `settings` with the rules of the overrides that match the schema file at `path`,
@@ -322,20 +332,22 @@ impl Directory {
         discovery: &Discovery,
     ) -> Arc<FileSettings> {
         match &self.routing {
-            Some((table, base)) => self.overridden(settings, &discovery.route(table, base, path)),
+            Some(router) => {
+                let matched = router.matched(path, &discovery.resolved(path));
+                self.overridden(router, settings, &router.route(&matched))
+            }
             None => Arc::clone(settings),
         }
     }
 
     /// `settings` with the rules of the overrides `route` matched, the command line's on top.
-    fn overridden(&self, settings: &Arc<FileSettings>, route: &Route) -> Arc<FileSettings> {
-        let overrides = self.routing.as_ref().is_some_and(|(table, _)| {
-            table
-                .get("overrides")
-                .and_then(Value::as_array)
-                .is_some_and(|all| !all.is_empty())
-        });
-        if !overrides || (route.rules.is_empty() && self.cli_rules.is_empty()) {
+    fn overridden(
+        &self,
+        router: &Router,
+        settings: &Arc<FileSettings>,
+        route: &Route,
+    ) -> Arc<FileSettings> {
+        if !router.overrides() || (route.rules.is_empty() && self.cli_rules.is_empty()) {
             return Arc::clone(settings);
         }
         let mut rules = settings.rules.clone();
