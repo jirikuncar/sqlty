@@ -297,13 +297,12 @@ jobs:
             --test-coverage-lines=100 --test-coverage-functions=100 --test-coverage-branches=92 \
             tests/playground.test.mjs tests/ask.test.mjs tests/wasm.test.mjs tests/release.test.mjs tests/typescript.test.mjs
 
+      # The workspace links @sqlty/wasm as built above: the plugin runs the engine of its commit.
       - name: Run @sqlty/eslint-plugin
-        working-directory: npm/eslint-plugin
-        # @sqlty/wasm as built above: the plugin runs the engine of its own commit. No lockfile:
-        # it would pin @sqlty/wasm to a release, which a version bump outruns.
-        run: | # zizmor: ignore[adhoc-packages]
-          npm install --no-save ../wasm
-          node --test
+        working-directory: npm
+        run: |
+          npm ci --no-audit --no-fund
+          npm test -w @sqlty/eslint-plugin
 
   # The queries of the mdtests on PostgreSQL and MySQL, each compared with sqlty's columns.
   fidelity:

@@ -130,6 +130,7 @@ PACKAGES: dict[str, tuple[list[str], list[str]]] = {
             "docs/assets/playground/**",
             "npm/wasm/**",
             "npm/eslint-plugin/**",
+            "npm/package*.json",
             "tests/*.test.mjs",
             "examples/**",
             "scripts/generate_playground_examples.py",

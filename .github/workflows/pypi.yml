@@ -523,19 +523,19 @@ jobs:
           name: wasm
           path: npm/wasm/
 
-      # Against the @sqlty/wasm of this build, which the release publishes first.
+      # Against the @sqlty/wasm of this build, which the release publishes first; the workspace
+      # links it, and npm ci fails unless the plugin depends on its version.
       - name: Check the package
-        working-directory: npm/eslint-plugin
+        working-directory: npm
         env:
           TAG: ${{ github.event.release.tag_name }}
-        run: | # zizmor: ignore[adhoc-packages]
-          version=$(node -p "require('./package.json').version")
+        run: |
+          version=$(node -p "require('./eslint-plugin/package.json').version")
           [ -z "$TAG" ] || [ "$TAG" = "v$version" ]
-          [ "$(node -p "require('./package.json').dependencies['@sqlty/wasm']")" = "$version" ]
-          npm install --no-save ../wasm
-          node --test
-          cp ../../LICENSE .
-          npm pack --dry-run
+          npm ci --no-audit --no-fund
+          npm test -w @sqlty/eslint-plugin
+          cp ../LICENSE eslint-plugin/
+          (cd eslint-plugin && npm pack --dry-run)
 
       - name: Upload package
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -615,18 +615,23 @@ jobs:
           node-version: 24.22.1
           package-manager-cache: false
 
+      # Outside the repository, so the demo resolves the published plugin, not the checkout.
       - name: Install and lint the demo
-        working-directory: npm/eslint-plugin/demo
         env:
           TAG: ${{ github.event.release.tag_name }}
         run: | # zizmor: ignore[adhoc-packages]
           version=${TAG#v}
-          deps="@sqlty/eslint-plugin@$version $(node -p "Object.entries(require('../package.json').devDependencies).map(([n, v]) => n + '@' + v).join(' ')")"
+          demo="$RUNNER_TEMP/demo"
+          cp -r npm/eslint-plugin/demo "$demo"
+          deps="@sqlty/eslint-plugin@$version $(node -p "Object.entries(require('./npm/eslint-plugin/package.json').devDependencies).map(([n, v]) => n + '@' + v).join(' ')")"
+          cd "$demo"
+          echo '{"private": true, "type": "module"}' > package.json
           for delay in 0 10 20 40 80 160; do
             sleep "$delay"
-            npm install --no-save --no-package-lock $deps && break
+            npm install --no-audit --no-fund --no-package-lock $deps && break
           done
           [ "$(node -p "require('@sqlty/eslint-plugin/package.json').version")" = "$version" ]
+          [ "$(node -p "require.resolve('@sqlty/eslint-plugin')")" = "$demo/node_modules/@sqlty/eslint-plugin/index.js" ]
           status=0
           npx eslint . > lint.txt || status=$?
           cat lint.txt
