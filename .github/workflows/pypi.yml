@@ -503,6 +503,101 @@ jobs:
           fi
           npm publish --access public --provenance
 
+  build-eslint-plugin:
+    name: Build @sqlty/eslint-plugin
+    needs: build-wasm
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24.22.1
+          package-manager-cache: false
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: wasm
+          path: npm/wasm/
+
+      # Against the @sqlty/wasm of this build, which the release publishes first.
+      - name: Check the package
+        working-directory: npm/eslint-plugin
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: | # zizmor: ignore[adhoc-packages]
+          version=$(node -p "require('./package.json').version")
+          [ -z "$TAG" ] || [ "$TAG" = "v$version" ]
+          [ "$(node -p "require('./package.json').dependencies['@sqlty/wasm']")" = "$version" ]
+          npm install --no-save ../wasm
+          node --test
+          cp ../../LICENSE .
+          npm pack --dry-run
+
+      - name: Upload package
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: eslint-plugin
+          path: |
+            npm/eslint-plugin/
+            !npm/eslint-plugin/node_modules/
+
+  # After @sqlty/wasm of the same version, once the registry serves it: the plugin depends
+  # on it, so it would not install before.
+  publish-eslint-plugin-to-npm:
+    name: Publish @sqlty/eslint-plugin to npm
+    if: github.event_name == 'release' && github.event.action == 'published'
+    needs: [build-eslint-plugin, publish-wasm-to-npm]
+    runs-on: ubuntu-latest
+    environment:
+      name: npm
+      url: https://www.npmjs.com/package/@sqlty/eslint-plugin
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24.22.1
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: eslint-plugin
+          path: eslint-plugin/
+
+      - name: Wait for @sqlty/wasm on the registry
+        working-directory: eslint-plugin
+        run: |
+          version=$(node -p "require('./package.json').dependencies['@sqlty/wasm']")
+          for delay in 0 10 20 40 80 160; do
+            sleep "$delay"
+            npm view "@sqlty/wasm@$version" version >/dev/null 2>&1 && exit 0
+          done
+          echo "::error::@sqlty/wasm@$version is not on npm"
+          exit 1
+
+      # A re-run skips what it published; a version someone else published stops it.
+      - name: Publish
+        working-directory: eslint-plugin
+        env:
+          # Only for the package's first release: later ones publish through trusted publishing.
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          version=$(node -p "require('./package.json').version")
+          built=$(npm pack --dry-run --json | node -p "JSON.parse(require('fs').readFileSync(0))[0].integrity")
+          published=$(npm view "@sqlty/eslint-plugin@$version" dist.integrity 2>/dev/null || true)
+          if [ -n "$published" ]; then
+            [ "$published" = "$built" ] || { echo "::error::@sqlty/eslint-plugin@$version on npm is not this build"; exit 1; }
+            exit 0
+          fi
+          npm publish --access public --provenance
+
   # The formula downloads the platform packages from npm. A run by hand prints it without
   # pushing it.
   publish-to-homebrew:
