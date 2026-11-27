@@ -523,19 +523,19 @@ jobs:
           name: wasm
           path: npm/wasm/
 
-      # Against the @sqlty/wasm of this build, which the release publishes first.
+      # Against the @sqlty/wasm of this build, which the release publishes first; the workspace
+      # links it, and npm ci fails unless the plugin depends on its version.
       - name: Check the package
-        working-directory: npm/eslint-plugin
+        working-directory: npm
         env:
           TAG: ${{ github.event.release.tag_name }}
-        run: | # zizmor: ignore[adhoc-packages]
-          version=$(node -p "require('./package.json').version")
+        run: |
+          version=$(node -p "require('./eslint-plugin/package.json').version")
           [ -z "$TAG" ] || [ "$TAG" = "v$version" ]
-          [ "$(node -p "require('./package.json').dependencies['@sqlty/wasm']")" = "$version" ]
-          npm install --no-save ../wasm
-          node --test
-          cp ../../LICENSE .
-          npm pack --dry-run
+          npm ci --no-audit --no-fund
+          npm test -w @sqlty/eslint-plugin
+          cp ../LICENSE eslint-plugin/
+          (cd eslint-plugin && npm pack --dry-run)
 
       - name: Upload package
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
