@@ -3,7 +3,7 @@ r"""The ``sqlty`` codec's decoder, without registering the codec.
 ``decode`` turns source bytes into text with ``--sql`` strings wrapped as
 ``SQL[T](...)``, as ``sqlty rewrite`` does, and adds the imports they need:
 
-    >>> from sqlty._decode import decode
+    >>> from sqlty.magic import decode
     >>> decode(b'q = "--sql\\nSELECT 1::INTEGER"')[0]
     'from sqlty import SQL; q = SQL[tuple[int]]("--sql\\nSELECT 1::INTEGER")'
 
@@ -42,10 +42,12 @@ _CODING = re.compile(r"\A((?:[^\n]*\n)?[ \t\f]*#[^\n]*?coding[:=][ \t]*)sqlty\b"
 @cache
 def _import_style() -> str | None:
     try:
-        from sqlty._config import load_config
+        from pathlib import Path
 
-        config, _ = load_config()
-        return config.get("import_style")
+        from sqlty import _core
+
+        found = _core.find_config(Path.cwd().resolve())
+        return found[0].get("import-style") if found else None
     except Exception:
         return None
 
