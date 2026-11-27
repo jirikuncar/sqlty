@@ -139,3 +139,24 @@ def test_check_migrations() -> None:
     assert [diag["rule"] for diag in found[0]] == ["missing-lock-timeout"]
     with pytest.raises(ValueError, match="unknown rule"):
         _core.check_migrations("", [], rules={"nope": "warn"})
+
+
+def test_nullability_of_each_column() -> None:
+    schema = "CREATE TABLE t (a INT NOT NULL, b INT)"
+    columns = _core.analyze_columns("SELECT a, b, foo(a) FROM t", schema_sql=schema)
+    assert columns is not None
+    assert [nullable for _, _, _, nullable, _ in columns] == [False, True, None]
+
+
+def test_a_query_without_a_schema_names_no_table() -> None:
+    sql = "SELECT x FROM sqlty_ext_present"
+    assert _core.analyze_select(sql) == [("x", None, None)]
+    schema = "CREATE TABLE sqlty_ext_present (x INT)"
+    assert _core.analyze_select(sql, schema_sql=schema) == [("x", "int | None", "INT")]
+
+
+def test_skipped_objects_are_what_the_schema_could_not_parse() -> None:
+    sql = "CREATE TABLE sqlty_ext_ok (x INT); CREATE TABLE sqlty_ext_bad (x INT,;"
+    skipped = _core.schema_skipped_objects(sql)
+    assert all(name != "sqlty_ext_ok" for _, name in skipped), skipped
+    assert all(kind == "table" for kind, _ in skipped), skipped
