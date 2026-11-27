@@ -268,11 +268,12 @@ def test_npm_runs_the_binary_of_the_platform(tmp_path: Path) -> None:
         executable.write_text('#!/bin/sh\necho "$@"\nexit 3\n')
     modules = tmp_path / "node_modules"
     packages = package_binaries.npm("1.2.3", tmp_path / "bin", modules)
-    main = json.loads((modules / "sqlty" / "package.json").read_text())
+    main = json.loads((modules / "@sqlty" / "cli" / "package.json").read_text())
     linux = json.loads((modules / "@sqlty" / "cli-linux-x64" / "package.json").read_text())
 
-    assert len(packages) == len(package_binaries.TARGETS) + 1
+    assert len(packages) == len(package_binaries.TARGETS) + 2
     assert main["version"] == "1.2.3"
+    assert json.loads((modules / "sqlty" / "package.json").read_text()) == {**main, "name": "sqlty"}
     assert set(main["optionalDependencies"].values()) == {"1.2.3"}
     assert (linux["os"], linux["cpu"], linux["files"]) == (["linux"], ["x64"], ["bin/sqlty"])
     readme = (modules / "@sqlty" / "cli-linux-x64" / "README.md").read_text()
@@ -287,17 +288,17 @@ def test_npm_runs_the_binary_of_the_platform(tmp_path: Path) -> None:
         .split()
     )
     for package in (modules / "@sqlty").iterdir():
-        if package.name != f"cli-{platform}-{arch}":
+        if package.name not in ("cli", f"cli-{platform}-{arch}"):
             shutil.rmtree(package)
     found = subprocess.run(
-        [node, modules / "sqlty" / "bin" / "sqlty.js", "check", "--fix"],
+        [node, modules / "@sqlty" / "cli" / "bin" / "sqlty.js", "check", "--fix"],
         capture_output=True,
         text=True,
     )
     assert (found.returncode, found.stdout) == (3, "check --fix\n")
     shutil.rmtree(modules / "@sqlty" / f"cli-{platform}-{arch}")
     found = subprocess.run(
-        [node, modules / "sqlty" / "bin" / "sqlty.js"], capture_output=True, text=True
+        [node, modules / "@sqlty" / "cli" / "bin" / "sqlty.js"], capture_output=True, text=True
     )
     assert found.returncode == 1
     assert f"no prebuilt binary for {platform}-{arch}" in found.stderr
