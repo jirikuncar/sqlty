@@ -10,6 +10,7 @@ use std::sync::Arc;
 
 mod api;
 mod complete;
+mod ctes;
 mod databases;
 mod dialect;
 mod dml;

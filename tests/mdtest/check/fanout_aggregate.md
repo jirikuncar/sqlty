@@ -286,6 +286,7 @@ k = SQL[tuple[float]]("--sql\nSELECT SUM(o.total) FROM orders o JOIN codes c ON 
 # error: [fanout-aggregate] "SUM(o.total + (SELECT max(amount) FROM payments)) aggregates orders, whose rows repeat once per order_items row"
 l = SQL[tuple[float]]("--sql\nSELECT SUM(o.total + (SELECT max(amount) FROM payments)) FROM orders o JOIN order_items i ON i.order_id = o.id")
 m = SQL[tuple[float]]("--sql\nSELECT SUM(p.amount) FROM orders o JOIN (SELECT order_id, 1 AS amount FROM payments) p ON p.order_id = o.id")
+# error: [unused-cte] "CTE `x` is never read"
 n = SQL[tuple[float]]("--sql\nSELECT SUM(o.total) FROM orders o JOIN (WITH x AS (SELECT 1) SELECT order_id FROM payments GROUP BY order_id) p ON p.order_id = o.id")
 r = SQL[tuple[float]]("--sql\nSELECT SUM(o.total) FROM orders o JOIN (SELECT * FROM payments) p ON p.order_id = o.id")
 s = SQL[tuple[float]]("--sql\nSELECT SUM(o.total) FROM orders o JOIN (SELECT order_id FROM (SELECT order_id FROM payments) z) p ON p.order_id = o.id")
