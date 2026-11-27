@@ -236,6 +236,14 @@ q = "--sql\nSELECT user_id, SUM(total) AS spe<CURSOR>nt FROM orders GROUP BY use
 
 VS Code shows the hovers of every extension together, so sqlty's sits next to Pylance's.
 
+## Go to definition
+
+Go to Definition (F12) on a table, view or column of a query string opens the schema file
+at the statement that last defined it: the `CREATE TABLE`, or the `ALTER TABLE` that added
+or renamed the column. On an alias or a CTE it goes to where the query names it. It works
+in the `.sql` files `queries` names too, and needs `sqlty server`: Restricted Mode and VS
+Code for the web have no go to definition.
+
 ## Highlighting
 
 A string marked `--sql` or `-- sql` is highlighted as SQL: keywords, strings, numbers,

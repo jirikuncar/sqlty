@@ -1,13 +1,13 @@
 ---
-description: How to set up the sqlty language server in Neovim, Vim, Helix and Emacs for SQL diagnostics, quick fixes, completion and hover in Python strings.
+description: How to set up the sqlty language server in Neovim, Vim, Helix and Emacs for SQL diagnostics, fixes, completion, hover and go to definition in Python strings.
 ---
 
 # Neovim, Vim, Helix and Emacs
 
 `sqlty server` is a language server on standard input and output. Any LSP client runs it
 for Python files and gets what `sqlty check` reports as you type, the fix of
-`sqlty check --fix` as a quick fix, completion of table and column names, hover, and SQL
-highlighting in the strings `sqlty check` checks.
+`sqlty check --fix` as a quick fix, completion of table and column names, hover, go to
+definition, and SQL highlighting in the strings `sqlty check` checks.
 
 Add sqlty to the project's environment (`uv add --dev sqlty`) and start the editor from
 it, or point the client at `.venv/bin/sqlty`, so the editor runs the version CI runs.
@@ -137,6 +137,7 @@ init_options = {
   breaking = { against = "main", direction = "both" },
   completion = { enable = true },
   hover = { enable = true },
+  definition = { enable = true },
   highlighting = { enable = true },
 }
 ```
@@ -147,6 +148,7 @@ init_options = {
 | `breaking.direction` | `both` | `both`, `forward` or `backward` |
 | `completion.enable` | `true` | Complete table and column names in query strings |
 | `hover.enable` | `true` | Say what a word of a query string is: a column's type, a table's columns, a result column's inference rule |
+| `definition.enable` | `true` | Go from a table, column or alias of a query to the schema statement or query text that defines it |
 | `highlighting.enable` | `true` | Send the SQL of checked strings as semantic tokens |
 
 ## Vim

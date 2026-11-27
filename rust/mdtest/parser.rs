@@ -15,7 +15,7 @@ pub const CURSOR: &str = "<CURSOR>";
 
 const SQL_KINDS: &str = "inferred|expanded|columns|json|params|rules|error";
 const PY_KINDS: &str =
-    "rewritten|rewritten-file|stripped|fixed|formatted|error|decoded|completions|hover|highlighted";
+    "rewritten|rewritten-file|stripped|fixed|formatted|error|decoded|completions|hover|definition|highlighted";
 
 static PY_ASSERTION: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(&format!(r"^(\s*)#\s+({PY_KINDS})(\[[^\]]*\])?:(?: (.*))?$")).unwrap()
@@ -126,6 +126,17 @@ impl Section {
 
     /// The files `schema` names, joined in order; `None` when it names none.
     pub fn joined(&self, schema: Option<&toml::Value>) -> Option<String> {
+        let files = self.named(schema);
+        (!files.is_empty()).then(|| {
+            files
+                .iter()
+                .map(|(_, text)| *text)
+                .collect::<Vec<_>>()
+                .join("\n")
+        })
+    }
+
+    fn named<'s>(&'s self, schema: Option<&'s toml::Value>) -> Vec<(&'s str, &'s str)> {
         let names: Vec<&str> = match schema {
             Some(toml::Value::String(name)) => vec![name.as_str()],
             Some(toml::Value::Array(names)) => {
@@ -133,18 +144,20 @@ impl Section {
             }
             _ => Vec::new(),
         };
-        (!names.is_empty()).then(|| {
-            names
-                .iter()
-                .map(|name| self.files[*name].as_str())
-                .collect::<Vec<_>>()
-                .join("\n")
-        })
+        names
+            .into_iter()
+            .map(|name| (name, self.files[name].as_str()))
+            .collect()
     }
 
     /// The `schema` files, joined in order.
     pub fn schema_sql(&self) -> Option<String> {
         self.joined(self.setting("schema"))
+    }
+
+    /// The `schema` files in order, as `(name, text)`.
+    pub fn schema_files(&self) -> Vec<(&str, &str)> {
+        self.named(self.setting("schema"))
     }
 
     fn child(&self, title: &str, level: usize, line: usize) -> Section {

@@ -160,6 +160,9 @@ impl Workspace for Fake {
                 .match_indices("run(")
                 .map(|(at, _)| at + 4)
                 .collect(),
+            schema_sql: None,
+            schema_files: Vec::new(),
+            query_format: None,
         })
     }
 }
@@ -517,11 +520,11 @@ fn other_languages_and_requests_are_left_alone() {
     let mut client = Client::start(&json!({}));
     let document = json!({"uri": "file:///work/q.txt", "languageId": "plaintext", "version": 1, "text": "bad"});
     client.notify("textDocument/didOpen", json!({"textDocument": document}));
-    let definition = client.request(
-        "textDocument/definition",
-        json!({"textDocument": {"uri": "file:///work/q.py"}, "position": {"line": 0, "character": 0}}),
+    let references = client.request(
+        "textDocument/references",
+        json!({"textDocument": {"uri": "file:///work/q.py"}, "position": {"line": 0, "character": 0}, "context": {"includeDeclaration": true}}),
     );
-    assert_eq!(definition, json!({"error": -32601}));
+    assert_eq!(references, json!({"error": -32601}));
     let rest = client.shutdown();
     assert!(
         !rest
@@ -1032,6 +1035,7 @@ fn malformed_and_unknown_messages_change_nothing() {
     for method in [
         "textDocument/completion",
         "textDocument/hover",
+        "textDocument/definition",
         "textDocument/semanticTokens/full",
         "completionItem/resolve",
         "textDocument/codeAction",

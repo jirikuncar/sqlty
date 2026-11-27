@@ -25,21 +25,22 @@ use lsp_types::notification::{
     DidSaveTextDocument, LogMessage, Notification as _, PublishDiagnostics, ShowMessage,
 };
 use lsp_types::request::{
-    CodeActionRequest, Completion, HoverRequest, Request as _, ResolveCompletionItem,
-    SemanticTokensFullRequest, SemanticTokensRefresh,
+    CodeActionRequest, Completion, GotoDefinition, HoverRequest, Request as _,
+    ResolveCompletionItem, SemanticTokensFullRequest, SemanticTokensRefresh,
 };
 use lsp_types::{
     CodeActionKind, CodeActionOptions, CodeActionParams, CodeActionProviderCapability,
-    CompletionItem, CompletionOptions, CompletionParams, HoverParams, HoverProviderCapability,
-    InitializeParams, LogMessageParams, MessageType, PositionEncodingKind,
-    PublishDiagnosticsParams, SemanticTokensFullOptions, SemanticTokensOptions,
-    SemanticTokensParams, SemanticTokensServerCapabilities, ServerCapabilities, ServerInfo,
-    ShowMessageParams, TextDocumentSyncCapability, TextDocumentSyncKind, TextDocumentSyncOptions,
-    TextDocumentSyncSaveOptions, Uri,
+    CompletionItem, CompletionOptions, CompletionParams, GotoDefinitionParams, HoverParams,
+    HoverProviderCapability, InitializeParams, LogMessageParams, MessageType, OneOf,
+    PositionEncodingKind, PublishDiagnosticsParams, SemanticTokensFullOptions,
+    SemanticTokensOptions, SemanticTokensParams, SemanticTokensServerCapabilities,
+    ServerCapabilities, ServerInfo, ShowMessageParams, TextDocumentSyncCapability,
+    TextDocumentSyncKind, TextDocumentSyncOptions, TextDocumentSyncSaveOptions, Uri,
 };
 
 mod actions;
 mod completion;
+mod definition;
 mod highlight;
 mod hover;
 mod text;
@@ -102,7 +103,7 @@ pub struct Edit {
     pub replacement: String,
 }
 
-/// What completion and highlighting read of a project for a buffer, as its last check left
+/// What completion, hover, go to definition and highlighting read of a project for a buffer, as its last check left
 /// it: the schema, how the file is read, and where its helper calls pass a query.
 #[derive(Clone)]
 pub struct CompletionContext {
@@ -115,6 +116,12 @@ pub struct CompletionContext {
     /// Byte offsets, in the text last checked, of the string literals helper calls pass
     /// as their query.
     pub helper_starts: Vec<usize>,
+    /// The SQL `schema` was loaded from, which go to definition reads names in.
+    pub schema_sql: Option<Arc<str>>,
+    /// Each file of `schema_sql`, and where it starts in it.
+    pub schema_files: Vec<(PathBuf, usize)>,
+    /// How the buffer names its queries, when it is a `.sql` query file; `None` for Python.
+    pub query_format: Option<sqlty_python::queries::Format>,
 }
 
 /// The checks of one project, as `sqlty check ROOT` would run them on its buffers.
@@ -134,8 +141,8 @@ pub trait Workspace {
     fn breaking(&mut self) -> Result<Vec<(PathBuf, Vec<Diagnostic>)>, String> {
         Ok(Vec::new())
     }
-    /// What completion in the buffer of `path` reads, after [`Workspace::check`] read it;
-    /// `None` offers no completion.
+    /// What completion, hover and go to definition in the buffer of `path` read, after
+    /// [`Workspace::check`] read it; `None` offers none of them.
     fn completion(&mut self, _path: &Path) -> Option<CompletionContext> {
         None
     }
@@ -143,7 +150,7 @@ pub trait Workspace {
 
 /// What the client configures, from the `initializationOptions` of `initialize`:
 /// `{"breaking": {"against": "main", "direction": "both"}, "completion": {"enable": true},
-/// "hover": {"enable": true}, "highlighting": {"enable": true}}`.
+/// "hover": {"enable": true}, "definition": {"enable": true}, "highlighting": {"enable": true}}`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Settings {
     /// `sqlty.breaking.against`: the baseline of `sqlty breaking`; `None` checks no baseline.
@@ -154,6 +161,9 @@ pub struct Settings {
     pub completion: bool,
     /// `hover.enable`: whether to say what a word of a query is; on unless `false`.
     pub hover: bool,
+    /// `definition.enable`: whether to go to where the schema or the query defines a name;
+    /// on unless `false`.
+    pub definition: bool,
     /// `highlighting.enable`: whether to send the SQL of checked strings as semantic
     /// tokens; on unless `false`.
     pub highlighting: bool,
@@ -179,6 +189,7 @@ impl Settings {
             direction: text("/breaking/direction"),
             completion: enabled("/completion/enable"),
             hover: enabled("/hover/enable"),
+            definition: enabled("/definition/enable"),
             highlighting: enabled("/highlighting/enable"),
         }
     }
@@ -232,6 +243,7 @@ where
         requests: Arc::default(),
         completion: settings.completion,
         hover: settings.hover,
+        definition: settings.definition,
         highlighting: settings.highlighting,
     };
     let (jobs, queue) = mpsc::channel();
@@ -298,6 +310,7 @@ struct Shared {
     requests: Arc<AtomicI32>,
     completion: bool,
     hover: bool,
+    definition: bool,
     highlighting: bool,
 }
 
@@ -461,6 +474,18 @@ impl Shared {
                     .and_then(|document| completion::complete(document, &params, &self.encoding));
                 self.send(Response::new_ok(request.id, found));
             }
+            GotoDefinition::METHOD => {
+                let Ok(params) = serde_json::from_value::<GotoDefinitionParams>(request.params)
+                else {
+                    return self.invalid(request.id, "definition");
+                };
+                let found = self
+                    .documents()
+                    .get(&params.text_document_position_params.text_document.uri)
+                    .filter(|_| self.definition)
+                    .and_then(|document| definition::definition(document, &params, &self.encoding));
+                self.send(Response::new_ok(request.id, found));
+            }
             HoverRequest::METHOD => {
                 let Ok(params) = serde_json::from_value::<HoverParams>(request.params) else {
                     return self.invalid(request.id, "hover");
@@ -591,6 +616,7 @@ fn capabilities(encoding: PositionEncodingKind, settings: &Settings) -> ServerCa
         hover_provider: settings
             .hover
             .then_some(HoverProviderCapability::Simple(true)),
+        definition_provider: settings.definition.then_some(OneOf::Left(true)),
         ..ServerCapabilities::default()
     }
 }

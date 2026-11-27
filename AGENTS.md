@@ -179,6 +179,7 @@ its row to the table of `docs/reference/rules.md`.
 | `.sql` query files | `tests/mdtest/queries/` | `named_queries.md` |
 | Completion | `tests/mdtest/completion/` | `completion.md` |
 | Hover | `tests/mdtest/hover/` | `hover.md` |
+| Go to definition | `tests/mdtest/definition/` | `definition.md` |
 | Highlighting | `tests/mdtest/highlighting/` | `highlighting.md` |
 
 ### Structure
@@ -247,6 +248,7 @@ q = SQL[User]("--sql\nSELECT id, name FROM users")
 | `# decoded:` | `python`, whole code | magic codec `decode()` without imports or the `# coding:` line |
 | `# completions:` | `python`, at its `<CURSOR>` | `locate::complete`: `label kind detail` per item, the first ten then `...`; `None` for none |
 | `# hover:` | `python`, at its `<CURSOR>` | `locate::hover`: the Markdown contents; `None` for none |
+| `# definition:` | `python`, at its `<CURSOR>` | `locate::definition`: `file:line text` in the schema, `query text` in the query; `None` for none |
 | `# highlighted:` | `python`, whole code | `Queries::highlights`: `kind text` per colored token, a line each; `None` for none |
 | `# error: [rule] "message"` | end of its line, or on the line above | `sqlty check`; `sqlty breaking` with an `against.sql` |
 
