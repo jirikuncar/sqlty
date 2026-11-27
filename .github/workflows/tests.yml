@@ -299,8 +299,9 @@ jobs:
 
       - name: Run @sqlty/eslint-plugin
         working-directory: npm/eslint-plugin
-        # @sqlty/wasm as built above: the plugin runs the engine of its own commit.
-        run: |
+        # @sqlty/wasm as built above: the plugin runs the engine of its own commit. No lockfile:
+        # it would pin @sqlty/wasm to a release, which a version bump outruns.
+        run: | # zizmor: ignore[adhoc-packages]
           npm install --no-save ../wasm
           node --test
 
