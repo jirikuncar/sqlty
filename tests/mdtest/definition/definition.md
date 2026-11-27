@@ -101,7 +101,8 @@ q = "SELECT 1 FROM ord<CURSOR>ers"
 ## Output columns
 
 A column of a CTE or a subquery goes to the select item that gives it, at any depth. An `ORDER BY` or `GROUP BY` alias or position goes to its select item, or on to the
-column a plain item reads; a set operation's are those of its first branch.
+column a plain item reads; a set operation's are those of its first branch. Column aliases
+rename the first columns of what they alias.
 
 ### CTE column
 
@@ -142,5 +143,26 @@ q = "--sql\nSELECT id FROM users UNION SELECT id FROM orders ORDER BY <CURSOR>1"
 
 ```python
 q = "--sql\nSELECT id FROM users ORDER BY <CURSOR>3"
+# definition: None
+```
+
+### Column alias
+
+```python
+q = "--sql\nSELECT s.<CURSOR>n FROM (SELECT user_id, total FROM orders) s (n)"
+# definition: query n
+```
+
+### Renamed column
+
+```python
+q = "--sql\nSELECT s.<CURSOR>user_id FROM (SELECT user_id, total FROM orders) s (n)"
+# definition: None
+```
+
+### After a star
+
+```python
+q = "--sql\nSELECT *, id FROM users ORDER BY <CURSOR>2"
 # definition: None
 ```

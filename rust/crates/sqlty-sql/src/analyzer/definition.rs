@@ -93,6 +93,8 @@ struct Item {
     /// The parts of its name, none for a subquery.
     name: Vec<usize>,
     alias: Option<usize>,
+    /// The column aliases after its alias: they rename its first columns.
+    columns: Vec<usize>,
     /// The `(` of a subquery.
     subquery: Option<usize>,
     depth: usize,
@@ -122,7 +124,10 @@ impl Names<'_> {
         if let Some(cte) = self.ctes.iter().find(|cte| cte.name == at) {
             return self.query_at(cte.name);
         }
-        if self.ctes.iter().any(|cte| cte.columns.contains(&at)) {
+        let listed = |columns: &[usize]| columns.contains(&at);
+        if self.ctes.iter().any(|cte| listed(&cte.columns))
+            || self.items.iter().any(|item| listed(&item.columns))
+        {
             return self.query_at(at);
         }
         for item in &self.items {
@@ -221,32 +226,45 @@ impl Names<'_> {
 
     /// The column `name` of the relation `item` reads: a select item of a subquery or a
     /// CTE, or a column of the schema.
+    /// The column `name` of the relation `item` reads: a column alias, a select item of a
+    /// subquery or a CTE, or a column of the schema.
     fn column_of(&self, item: &Item, name: &str) -> Option<Definition> {
+        let renamed = |columns: &[usize]| {
+            let found = columns.iter().find(|&&tok| self.fold(tok) == name);
+            found.map(|&tok| self.query_at(tok))
+        };
+        if let Some(found) = renamed(&item.columns) {
+            return found;
+        }
+        let skip = item.columns.len();
         if let Some(open) = item.subquery {
-            return self.output(Some(open), name, false);
+            return self.output(inside(self.tokens, open), name, skip);
         }
         if let [only] = item.name.as_slice() {
             if let Some(cte) = self.cte(&self.fold(*only)) {
-                if let Some(&tok) = cte.columns.iter().find(|&&tok| self.fold(tok) == name) {
-                    return self.query_at(tok);
+                if let Some(found) = renamed(&cte.columns) {
+                    return found;
                 }
-                return self.output(Some(cte.body), name, false);
+                let skip = skip.max(cte.columns.len());
+                return self.output(inside(self.tokens, cte.body), name, skip);
             }
         }
         let relation: Vec<String> = item.name.iter().map(|&tok| self.fold(tok)).collect();
-        self.in_schema(&relation.join("."), Some(name))
+        self.in_schema(&relation.join("."), Some((name, skip)))
     }
 
-    /// The select item named `name` of the query that opens after `open`, or the top one;
-    /// with `follow`, see [`Names::item`].
-    fn output(&self, open: Option<usize>, name: &str, follow: bool) -> Option<Definition> {
-        let found = select_list(self.tokens, open)
+    /// The bytes of the select item named `name` of the query at `level`, past the first
+    /// `skip` that column aliases rename.
+    fn output(&self, level: (usize, usize), name: &str, skip: usize) -> Option<Definition> {
+        let found = self.named(level, name, skip)?;
+        Some(Definition::Query(found.span))
+    }
+
+    fn named(&self, level: (usize, usize), name: &str, skip: usize) -> Option<SelectItem> {
+        select_list(self.query, self.tokens, level)
             .into_iter()
-            .find(|item| item.name.is_some_and(|tok| self.fold(tok) == name))?;
-        Some(match follow {
-            true => self.item(found),
-            false => Definition::Query(found.span),
-        })
+            .skip(skip)
+            .find(|item| item.name.is_some_and(|tok| self.fold(tok) == name))
     }
 
     /// Where the column an `ORDER BY` or `GROUP BY` names is defined: its select item, or,
@@ -265,15 +283,20 @@ impl Names<'_> {
         let tokens = self.tokens;
         let word = &tokens[at];
         let by = grouping(tokens, at);
-        let level = || enclosing(tokens, at);
+        let level = || level(tokens, at);
         if by.is_some() && word.text.bytes().all(|b| b.is_ascii_digit()) {
             let position: usize = word.text.parse().ok()?;
-            let items = select_list(tokens, level());
-            let found = items.into_iter().nth(position.checked_sub(1)?)?;
-            return Some(self.item(found));
+            let items = select_list(self.query, tokens, level());
+            let before = items.get(..position.checked_sub(1)?)?;
+            // The columns a `*` gives, and so the item a later position names, are unknown.
+            let found = items.get(position - 1).filter(|item| !item.star);
+            if before.iter().any(|item| item.star) {
+                return None;
+            }
+            return found.map(|found| self.item(found.clone()));
         }
         let name = self.fold(at);
-        let output = || self.output(level(), &name, true);
+        let output = || self.named(level(), &name, 0).map(|found| self.item(found));
         if by == Some(Grouping::Order) {
             if let Some(found) = output() {
                 return Some(found);
@@ -302,13 +325,16 @@ impl Names<'_> {
     }
 
     /// Where the schema defines the relation `relation` or its column `column`, both
-    /// folded.
-    fn in_schema(&self, relation: &str, column: Option<&str>) -> Option<Definition> {
+    /// folded; a column of the first `skip` is one column aliases rename.
+    fn in_schema(&self, relation: &str, column: Option<(&str, usize)>) -> Option<Definition> {
         let schema = self.own?;
         let (key, source) = schema.source(relation)?;
         let (at, name) = match column {
-            Some(column) => {
+            Some((column, skip)) => {
                 let position = schema.column_position(key, column)?;
+                if position < skip {
+                    return None;
+                }
                 (source.column_at(position), column)
             }
             None => (
@@ -389,6 +415,7 @@ fn items(tokens: &[Tok]) -> Vec<Item> {
         let mut item = Item {
             name: Vec::new(),
             alias: None,
+            columns: Vec::new(),
             subquery: None,
             depth,
         };
@@ -449,6 +476,15 @@ fn items(tokens: &[Tok]) -> Vec<Item> {
         {
             item.alias = Some(i);
             i += 1;
+            if !tok.text.eq_ignore_ascii_case("INTO")
+                && tokens.get(i).is_some_and(|t| t.text == "(")
+            {
+                let close = closing(tokens, i);
+                item.columns.extend((i + 1..close).filter(|&at| {
+                    tokens[at].word && [",", "("].contains(&tokens[at - 1].text.as_str())
+                }));
+                i = close + 1;
+            }
         }
         found.push(item);
         i = resume.unwrap_or(i);
@@ -493,33 +529,47 @@ fn grouping(tokens: &[Tok], at: usize) -> Option<Grouping> {
     }
 }
 
-/// The `(` that opens the query level of the token at `at`, `None` at the top.
-fn enclosing(tokens: &[Tok], at: usize) -> Option<usize> {
-    let depth = tokens[at].depth.checked_sub(1)?;
-    tokens[..at]
+/// The query level of the token at `at`, as `(depth, first token)`: inside the parentheses
+/// around it, or the statement it is in.
+fn level(tokens: &[Tok], at: usize) -> (usize, usize) {
+    let depth = tokens[at].depth;
+    let Some(outer) = depth.checked_sub(1) else {
+        let start = tokens[..at].iter().rposition(|tok| tok.text == ";");
+        return (0, start.map_or(0, |end| end + 1));
+    };
+    let open = tokens[..at]
         .iter()
-        .rposition(|tok| tok.depth == depth && tok.text == "(")
+        .rposition(|tok| tok.depth == outer && tok.text == "(");
+    open.map_or((depth, 0), |open| inside(tokens, open))
+}
+
+/// The query level that opens after the `(` at `open`.
+fn inside(tokens: &[Tok], open: usize) -> (usize, usize) {
+    (tokens[open].depth + 1, open + 1)
 }
 
 /// A select item: its bytes, and the token of the name it gives its column.
+#[derive(Clone)]
 struct SelectItem {
     span: Range<usize>,
     name: Option<usize>,
     /// It only reads a column: `name` or `alias.name`.
     plain: bool,
+    /// `*` or `alias.*`.
+    star: bool,
 }
 
-/// The select items of the first `SELECT` of the query that opens after `open` (the first
-/// branch of a set operation), or of the top level.
-fn select_list(tokens: &[Tok], open: Option<usize>) -> Vec<SelectItem> {
-    let (depth, from) = match open {
-        Some(open) => (tokens[open].depth + 1, open + 1),
-        None => (0, 0),
-    };
+/// The select items of the first `SELECT` of the query at `level` (the first branch of a set
+/// operation), each from the `SELECT` or `,` before it, as the lexer drops string literals.
+fn select_list(query: &str, tokens: &[Tok], (depth, from): (usize, usize)) -> Vec<SelectItem> {
     let is = |tok: &Tok, word: &str| tok.word && tok.text.eq_ignore_ascii_case(word);
+    let first = tokens.get(from).filter(|tok| tok.depth == depth);
+    if first.is_some_and(|tok| tok.text == "(") {
+        return select_list(query, tokens, inside(tokens, from));
+    }
     let Some(select) = tokens[from..]
         .iter()
-        .take_while(|tok| tok.depth >= depth)
+        .take_while(|tok| tok.depth >= depth && !(tok.depth == depth && tok.text == ";"))
         .position(|tok| tok.depth == depth && is(tok, "SELECT"))
     else {
         return Vec::new();
@@ -541,38 +591,69 @@ fn select_list(tokens: &[Tok], open: Option<usize>) -> Vec<SelectItem> {
             i += 1;
         }
     }
-    let mut found = Vec::new();
-    let mut start = i;
     let ends = |tok: &Tok| {
         tok.depth < depth
             || (tok.depth == depth && (tok.text == ";" || AFTER_SELECT.iter().any(|w| is(tok, w))))
     };
-    let push = |found: &mut Vec<SelectItem>, start: usize, end: usize| {
-        if start < end {
-            let item = &tokens[start..end];
-            found.push(SelectItem {
-                span: tokens[start].span.start..tokens[end - 1].span.end,
+    let end = (i..tokens.len())
+        .find(|&at| ends(&tokens[at]))
+        .unwrap_or(tokens.len());
+    let mut bounds = vec![i - 1];
+    bounds.extend((i..end).filter(|&at| tokens[at].depth == depth && tokens[at].text == ","));
+    bounds.push(end);
+    bounds
+        .windows(2)
+        .filter_map(|pair| {
+            let (start, stop) = (pair[0] + 1, pair[1]);
+            let after = tokens[pair[0]].span.end;
+            let before = tokens.get(stop).map_or(query.len(), |tok| tok.span.start);
+            let span = trimmed(query, after..before)?;
+            let item = &tokens[start..stop];
+            Some(SelectItem {
+                span,
                 name: item_name(item).map(|at| start + at),
                 plain: item.len() == 1 || (item.len() == 3 && item[1].text == "."),
-            });
-        }
-    };
-    while i < tokens.len() && !ends(&tokens[i]) {
-        if tokens[i].depth == depth && tokens[i].text == "," {
-            push(&mut found, start, i);
-            start = i + 1;
-        }
-        i += 1;
-    }
-    push(&mut found, start, i);
-    found
+                star: item.last().is_some_and(|tok| tok.text == "*"),
+            })
+        })
+        .collect()
 }
+
+/// `range` of `query` without the whitespace and comments around it; `None` when that
+/// leaves nothing.
+fn trimmed(query: &str, range: Range<usize>) -> Option<Range<usize>> {
+    let text = &query[range.clone()];
+    let mut start = 0;
+    loop {
+        let rest = text[start..].trim_start();
+        start = text.len() - rest.len();
+        let comment = match rest {
+            _ if rest.starts_with("--") => rest.find('\n').map_or(rest.len(), |n| n + 1),
+            _ if rest.starts_with("/*") => rest.find("*/").map_or(rest.len(), |n| n + 2),
+            _ => break,
+        };
+        start += comment;
+    }
+    let end = text.trim_end().len();
+    (start < end).then(|| range.start + start..range.start + end)
+}
+
+/// Words that join or end an expression: no alias follows them, nor are they one.
+const OPERATORS: [&str; 18] = [
+    "AND", "OR", "NOT", "IS", "IN", "LIKE", "ILIKE", "BETWEEN", "SIMILAR", "ESCAPE", "CASE",
+    "WHEN", "THEN", "ELSE", "END", "NULL", "TRUE", "FALSE",
+];
 
 /// The token that names a select item's column: its alias, or the column it reads.
 fn item_name(item: &[Tok]) -> Option<usize> {
-    let last = item.len() - 1;
+    let last = item.len().checked_sub(1)?;
     let tok = &item[last];
-    if !tok.word || is_keyword(&tok.text) || tok.text.bytes().all(|b| b.is_ascii_digit()) {
+    let operator = |tok: &Tok| OPERATORS.iter().any(|w| tok.text.eq_ignore_ascii_case(w));
+    if !tok.word
+        || is_keyword(&tok.text)
+        || operator(tok)
+        || tok.text.bytes().all(|b| b.is_ascii_digit())
+    {
         return None;
     }
     let named = match last.checked_sub(1).map(|at| &item[at]) {
@@ -580,7 +661,9 @@ fn item_name(item: &[Tok]) -> Option<usize> {
         Some(prev) => {
             prev.text == "."
                 || prev.text.eq_ignore_ascii_case("AS")
-                || (prev.word && !is_clause(&prev.text))
+                || (prev.word
+                    && !is_clause(&prev.text)
+                    && (!operator(prev) || prev.text.eq_ignore_ascii_case("END")))
                 || prev.text == ")"
         }
     };

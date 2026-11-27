@@ -132,6 +132,23 @@ fn output_columns() {
         pg("SELECT id FROM users UNION SELECT id FROM app.orders ORDER BY |1"),
         pg("SELECT COUNT(*) AS n FROM users GROUP BY |n"),
         pg("SELECT DISTINCT ON (id) id AS k FROM users ORDER BY |k"),
+        pg("SELECT DISTINCT ON (lower(full_name)) id AS k FROM users ORDER BY |k"),
+        pg("SELECT id FROM users ORDER BY full_n|ame"),
+        pg("SELECT * FROM (SELECT id AS k FROM users ORDER BY |k) s"),
+        pg("SELECT id k FROM users ORDER BY |k"),
+        pg("SELECT (id)k FROM users ORDER BY |k"),
+        pg("SELECT ROW_NUMBER() OVER (PARTITION BY |id) FROM users"),
+        pg("SELECT id FROM users GROUP BY id HAVING true, |id"),
+        pg("SELECT DISTINCT id AS k FROM users ORDER BY |k"),
+        pg("SELECT 'a', id AS k FROM users ORDER BY |2"),
+        pg("SELECT /* x */ 'a' AS k FROM users ORDER BY |k"),
+        pg("SELECT 'x', id FROM users ORDER BY |1"),
+        pg("(SELECT id AS k FROM users) UNION SELECT 1 ORDER BY |1"),
+        pg("SELECT 1; SELECT id AS k FROM users ORDER BY |k"),
+        pg("WITH c (x) AS (SELECT 1 AS y, 2 AS z) SELECT c.|z FROM c"),
+        pg("SELECT s.|x FROM (SELECT 1 AS y) AS s (x)"),
+        pg("SELECT u.|k FROM users u(k)"),
+        pg("SELECT u.|full_name FROM users u(k)"),
     ];
     assert_eq!(
         found.map(Option::unwrap_or_default),
@@ -150,6 +167,23 @@ fn output_columns() {
             "schema 1 id",
             "query COUNT(*) AS n",
             "query id AS k",
+            "query id AS k",
+            "schema 5 full_name",
+            "query id AS k",
+            "query id k",
+            "query (id)k",
+            "schema 1 id",
+            "schema 1 id",
+            "query id AS k",
+            "query id AS k",
+            "query 'a' AS k",
+            "query 'x'",
+            "query id AS k",
+            "query id AS k",
+            "query 2 AS z",
+            "query x",
+            "query k",
+            "schema 5 full_name",
         ]
         .map(str::to_string)
     );
@@ -188,6 +222,15 @@ SELECT user_id, spent FROM big ORDER BY 2";
 fn nothing_for_what_neither_defines() {
     assert_eq!(pg("SELECT 1 FROM users ORDER BY |9"), None);
     assert_eq!(pg("SELECT 1 FROM users ORDER BY |0"), None);
+    assert_eq!(pg("SELECT id, FROM users ORDER BY |2"), None);
+    assert_eq!(pg("SELECT s.|a FROM (VALUES (1)) s"), None);
+    assert_eq!(pg("WITH c (x) AS (SELECT 1 AS y) SELECT c.|y FROM c"), None);
+    assert_eq!(pg("SELECT s.|y FROM (SELECT 1 AS y) s(x)"), None);
+    assert_eq!(pg("SELECT u.|id FROM users u(k)"), None);
+    assert_eq!(pg("SELECT *, id FROM users ORDER BY |2"), None);
+    assert_eq!(pg("SELECT u.* FROM users u ORDER BY |1"), None);
+    assert_eq!(pg("SELECT id > 1 OR k FROM users ORDER BY |k"), None);
+    assert_eq!(pg("SELECT CASE WHEN true THEN 1 END FROM users ORDER BY |end"), None);
     assert_eq!(pg("SEL|ECT 1"), None);
     assert_eq!(pg("SELECT 1 FROM nowh|ere"), None);
     assert_eq!(pg("SELECT 1 FROM pg_cl|ass"), None);
