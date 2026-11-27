@@ -454,7 +454,7 @@ fn rejected_text(param: &analyzer::Param, text: &str) -> Option<String> {
         return Some(format!("is {spelled}, not one of {}", values.join(", ")));
     }
     let name = crate::input::rejected(param.sql_type.as_deref()?, text)?;
-    Some(format!("is {spelled}, which PostgreSQL rejects as {name}"))
+    Some(format!("is {spelled}, which is not valid input for {name}"))
 }
 
 fn key_text(key: &Key) -> String {

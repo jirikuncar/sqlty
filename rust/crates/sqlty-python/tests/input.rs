@@ -65,6 +65,7 @@ fn accepted() {
                 "12:30.",
                 "12:30.x",
                 "12:30:00:00",
+                "30:00.5",
             ],
         ),
         ("TIMETZ", &["now"]),
@@ -110,7 +111,7 @@ fn rejected_texts() {
         (
             "FLOAT",
             "real",
-            &["1_0.5", "high", "0x", "0x1p", "nan(", "0b1"],
+            &["1_0.5", "high", "0x", "0x1p", "nan(", "0b1", "abcé"],
         ),
         ("DOUBLE", "double precision", &["1,5"]),
         ("BOOLEAN", "boolean", &["o", "", "nope", "2"]),

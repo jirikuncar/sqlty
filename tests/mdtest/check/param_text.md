@@ -41,31 +41,31 @@ CREATE TABLE users (
 import psycopg
 
 conn = psycopg.connect("")
-# error: [param-type-mismatch] "parameter 1 is 'abc', which PostgreSQL rejects as integer"
+# error: [param-type-mismatch] "parameter 1 is 'abc', which is not valid input for integer"
 conn.execute("SELECT id FROM users WHERE id = %s", ("abc",))
-# error: [param-type-mismatch] "parameter 1 is '70000', which PostgreSQL rejects as smallint"
+# error: [param-type-mismatch] "parameter 1 is '70000', which is not valid input for smallint"
 conn.execute("SELECT id FROM users WHERE small = %s", ("70000",))
-# error: [param-type-mismatch] "parameter 1 is '1.5', which PostgreSQL rejects as bigint"
+# error: [param-type-mismatch] "parameter 1 is '1.5', which is not valid input for bigint"
 conn.execute("SELECT id FROM users WHERE big = %s", ("1.5",))
-# error: [param-type-mismatch] "parameter 1 is '1,50', which PostgreSQL rejects as numeric"
+# error: [param-type-mismatch] "parameter 1 is '1,50', which is not valid input for numeric"
 conn.execute("SELECT id FROM users WHERE price = %s", ("1,50",))
-# error: [param-type-mismatch] "parameter 1 is 'high', which PostgreSQL rejects as real"
+# error: [param-type-mismatch] "parameter 1 is 'high', which is not valid input for real"
 conn.execute("SELECT id FROM users WHERE score = %s", ("high",))
-# error: [param-type-mismatch] "parameter 1 is '1_0.5', which PostgreSQL rejects as double precision"
+# error: [param-type-mismatch] "parameter 1 is '1_0.5', which is not valid input for double precision"
 conn.execute("SELECT id FROM users WHERE ratio = %s", ("1_0.5",))
-# error: [param-type-mismatch] "parameter 1 is 'o', which PostgreSQL rejects as boolean"
+# error: [param-type-mismatch] "parameter 1 is 'o', which is not valid input for boolean"
 conn.execute("SELECT id FROM users WHERE admin = %s", ("o",))
-# error: [param-type-mismatch] "parameter 1 is 'a0eebc99', which PostgreSQL rejects as uuid"
+# error: [param-type-mismatch] "parameter 1 is 'a0eebc99', which is not valid input for uuid"
 conn.execute("SELECT id FROM users WHERE ref = %s", ("a0eebc99",))
-# error: [param-type-mismatch] "parameter 1 is '2026-02-30', which PostgreSQL rejects as date"
+# error: [param-type-mismatch] "parameter 1 is '2026-02-30', which is not valid input for date"
 conn.execute("SELECT id FROM users WHERE born = %s", ("2026-02-30",))
-# error: [param-type-mismatch] "parameter 1 is '25:00', which PostgreSQL rejects as time"
+# error: [param-type-mismatch] "parameter 1 is '25:00', which is not valid input for time"
 conn.execute("SELECT id FROM users WHERE alarm = %s", ("25:00",))
-# error: [param-type-mismatch] "parameter 1 is '2026-11-26 25:00', which PostgreSQL rejects as timestamp"
+# error: [param-type-mismatch] "parameter 1 is '2026-11-26 25:00', which is not valid input for timestamp"
 conn.execute("SELECT id FROM users WHERE seen = %s", ("2026-11-26 25:00",))
-# error: [param-type-mismatch] "parameter 1 is 'not a date', which PostgreSQL rejects as timestamp with time zone"
+# error: [param-type-mismatch] "parameter 1 is 'not a date', which is not valid input for timestamp with time zone"
 conn.execute("SELECT id FROM users WHERE created_at > %s", ("not a date",))
-# error: [param-type-mismatch] "parameter 1 is 'forever', which PostgreSQL rejects as interval"
+# error: [param-type-mismatch] "parameter 1 is 'forever', which is not valid input for interval"
 conn.execute("SELECT id FROM users WHERE timeout = %s", ("forever",))
 ```
 
@@ -95,9 +95,9 @@ OTHER = "x"
 
 def find(conn: psycopg.Connection, given: str = "abc") -> None:
     local = "2026-13-01"
-    # error: [param-type-mismatch] "parameter 1 is 'abc', which PostgreSQL rejects as integer"
+    # error: [param-type-mismatch] "parameter 1 is 'abc', which is not valid input for integer"
     conn.execute("SELECT id FROM users WHERE id = %s", (ID,))
-    # error: [param-type-mismatch] "parameter 1 is '2026-13-01', which PostgreSQL rejects as date"
+    # error: [param-type-mismatch] "parameter 1 is '2026-13-01', which is not valid input for date"
     conn.execute("SELECT id FROM users WHERE born = %s", (local,))
     conn.execute("SELECT id FROM users WHERE id = %s", (OTHER,))
     conn.execute("SELECT id FROM users WHERE id = %s", (given,))
@@ -137,7 +137,7 @@ import psycopg
 conn = psycopg.connect("")
 conn.execute("SELECT id FROM users WHERE id::text = %s::text", ("abc",))
 conn.execute("SELECT id FROM users WHERE rank = %s", ("-1",))
-# error: [param-type-mismatch] "parameter 1 is 'one', which PostgreSQL rejects as integer"
+# error: [param-type-mismatch] "parameter 1 is 'one', which is not valid input for integer"
 conn.execute("SELECT id FROM users WHERE rank = %s", ("one",))
 ```
 
