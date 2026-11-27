@@ -345,7 +345,15 @@ impl Loader {
 
     /// Apply every op, retrying the ones whose dependencies are missing until a pass
     /// changes nothing; then give up on them, views last.
-    pub(super) fn run(&mut self, mut pending: Vec<Op>) {
+    pub(super) fn run(&mut self, pending: Vec<Op>) {
+        let last = self.search_path.clone();
+        self.run_pending(pending);
+        if self.search_path != last {
+            self.set_search_path(last);
+        }
+    }
+
+    fn run_pending(&mut self, mut pending: Vec<Op>) {
         let mut retried = 0;
         loop {
             if self.exhausted() {
@@ -412,14 +420,10 @@ impl Loader {
     /// Apply `op`; `false` when what it needs is not defined yet. `force` applies a view
     /// whatever it reads.
     pub(super) fn apply(&mut self, op: &Op, force: bool) -> bool {
-        // A statement waiting on a later one reads names under its own `search_path`.
+        // A statement waiting on a later one reads names under its own `search_path`;
+        // [`Loader::run`] restores the last one.
         if *op.path != self.search_path {
-            let current = std::mem::replace(&mut self.search_path, op.path.to_vec());
-            self.cache = None;
-            let applied = self.apply(op, force);
-            self.search_path = current;
-            self.cache = None;
-            return applied;
+            self.set_search_path(op.path.to_vec());
         }
         let path = op.path.clone();
         self.at = op.at.clone();

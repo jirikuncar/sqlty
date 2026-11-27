@@ -1972,5 +1972,19 @@ mod tests {
             DROP FUNCTION f();");
         // One build for the first view, one at the end of the load.
         assert_eq!(resolve::BUILDS.with(std::cell::Cell::get), 2);
+        // Views waiting under another `search_path` than the last switch it once.
+        let builds = |n: usize| {
+            let mut sql = String::from("CREATE SCHEMA app; SET search_path TO app, public;\n");
+            for i in 0..n {
+                sql += &format!("CREATE VIEW v{i} AS SELECT * FROM t{i};\n");
+            }
+            for i in 0..n {
+                sql += &format!("CREATE TABLE t{i} (id int);\n");
+            }
+            resolve::BUILDS.with(|count| count.set(0));
+            let _ = pg(&(sql + "SET search_path TO public;"));
+            resolve::BUILDS.with(std::cell::Cell::get)
+        };
+        assert_eq!(builds(4), builds(64));
     }
 }
