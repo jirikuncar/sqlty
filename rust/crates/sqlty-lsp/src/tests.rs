@@ -9,7 +9,7 @@ use serde_json::{json, Value};
 
 use sqlty_sql::analyzer::{load_schema_with_skipped, Schema};
 
-use crate::{run, CompletionContext, Diagnostic, Edit, Settings, Severity, Workspace};
+use crate::{run, CompletionContext, Diagnostic, Edit, Related, Settings, Severity, Workspace};
 
 /// Users and orders, and 540 tables `t0`..`t539`.
 static SCHEMA: LazyLock<Schema> = LazyLock::new(|| {
@@ -94,7 +94,15 @@ impl Workspace for Fake {
                     },
                 ],
                 source: None,
-                related: Vec::new(),
+                related: text
+                    .find("good")
+                    .map(|at| Related {
+                        start: at,
+                        end: at + 4,
+                        message: "good is here".to_string(),
+                    })
+                    .into_iter()
+                    .collect(),
             })
             .collect())
     }
@@ -297,10 +305,20 @@ fn utf8() -> Value {
 #[test]
 fn diagnostics_are_published_in_utf16_units() {
     let mut client = Client::start(&json!({}));
-    client.open("file:///work/q.py", "é = bad\n");
+    client.open("file:///work/q.py", "é = bad\né = good\n");
     let published = client.notification("textDocument/publishDiagnostics");
     assert_eq!(published["version"], 1);
     let diagnostic = &published["diagnostics"][0];
+    assert_eq!(
+        diagnostic["relatedInformation"],
+        json!([{
+            "location": {
+                "uri": "file:///work/q.py",
+                "range": {"start": {"line": 1, "character": 4}, "end": {"line": 1, "character": 8}},
+            },
+            "message": "good is here",
+        }])
+    );
     assert_eq!(
         diagnostic["range"]["start"],
         json!({"line": 0, "character": 4})
