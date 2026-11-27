@@ -7,7 +7,8 @@ description: Type-check the SQL of TypeScript and JavaScript tagged templates ag
 [`@sqlty/eslint-plugin`](https://www.npmjs.com/package/@sqlty/eslint-plugin) runs the
 sqlty engine on the `sql` tagged templates of TypeScript and JavaScript, as ESLint
 lints them. It reads your schema from `.sql` files, so it needs no database: not in
-CI, not in a pre-commit hook, not in the editor.
+CI, not in a pre-commit hook, not in the editor. Try it in the
+[playground](../playground.md), under the "TypeScript (ESLint plugin)" example.
 
 ```console
 npm install --save-dev eslint @typescript-eslint/parser @sqlty/eslint-plugin
