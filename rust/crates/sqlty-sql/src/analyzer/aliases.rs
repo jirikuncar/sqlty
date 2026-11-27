@@ -5,7 +5,7 @@ use sqlparser::tokenizer::Span;
 
 use super::dialect::SqlDialect;
 use super::query::{Analyzer, Column};
-use super::scope::Source;
+use super::scope::Table;
 use crate::diagnostics::Rule;
 
 /// What a column alias list renames.
@@ -26,7 +26,10 @@ impl Analyzer<'_> {
         columns: &[Column],
         renamed: Renamed,
     ) {
-        if alias.columns.is_empty() || columns.iter().any(Column::is_unknown_star) {
+        // A function of one composite or untyped column returns its fields.
+        let composite = renamed == Renamed::Function
+            && matches!(columns, [column] if column.python_type.is_none());
+        if alias.columns.is_empty() || composite || columns.iter().any(Column::is_unknown_star) {
             return;
         }
         self.check_alias_width(alias, columns.len(), renamed);
@@ -65,23 +68,11 @@ impl Analyzer<'_> {
         );
     }
 
-    /// [`Self::check_alias_width`] of a schema table, view or CTE read under `alias`.
-    pub(super) fn check_table_aliases(&self, alias: &TableAlias, entries: &[Source]) {
-        let [source] = entries else {
-            return;
-        };
-        let Some(table) = source.table.named() else {
-            return;
-        };
-        let width = match self.virtual_columns(table) {
-            Some(columns) if columns.iter().any(Column::is_unknown_star) => return,
-            Some(columns) => columns.len(),
-            None => match self.schema.table(table) {
-                Some(columns) => columns.len(),
-                None => return,
-            },
-        };
-        self.check_alias_width(alias, width, Renamed::Table);
+    /// [`Self::check_alias_width`] of a schema table read under `alias`.
+    pub(super) fn check_table_aliases(&self, alias: &TableAlias, table: &Table) {
+        if let Some(columns) = table.named().and_then(|table| self.schema.table(table)) {
+            self.check_alias_width(alias, columns.len(), Renamed::Table);
+        }
     }
 }
 

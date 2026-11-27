@@ -3,7 +3,7 @@ order: 264
 group: "names"
 severity: "error"
 fixable: false
-summary: "Column alias list longer than the relation it renames"
+summary: "Column alias list that does not fit the relation it renames"
 origin: "SQL"
 ---
 
@@ -13,9 +13,8 @@ Default severity: **error**
 
 ## What it does
 
-Reports a column alias list, such as `AS x(a, b, c)` or `WITH t(a, b)`, that names
-more columns than the subquery, table, table function or CTE it renames has, on the
-list.
+Reports a column alias list, such as `AS x(a, b, c)` or `WITH t(a, b)`, with more
+names than the subquery, table, view, table function or CTE it renames has columns.
 
 ```python
 from sqlty import SQL
@@ -47,4 +46,7 @@ column-alias-count = "warn"
 
 A shorter list is reported only in the `mysql` and `sqlite` dialects; PostgreSQL and
 DuckDB keep the names of the remaining columns. A DuckDB CTE or table function is not
-judged, as DuckDB accepts a longer list there. A relation of unknown width is skipped.
+judged, as DuckDB accepts a longer list there. A relation of unknown width is skipped,
+and so is a function returning one composite value, whose fields the list names. SQLite
+rejects a CTE only once the query reads it; sqlty reports any, and
+[`unused-cte`](unused-cte.md) the one that is not read.

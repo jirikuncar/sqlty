@@ -751,6 +751,10 @@ impl<'a> Analyzer<'a> {
             match factor {
                 TableFactor::Table { name, alias, .. } if analyzer.is_virtual(name) => {
                     let table = table_key(name, self.dialect);
+                    if let (Some(alias), Some(columns)) = (alias, analyzer.virtual_columns(&table))
+                    {
+                        analyzer.check_alias_count(alias, columns, Renamed::Table);
+                    }
                     let reference = alias.as_ref().map_or_else(
                         || object_name(name),
                         |alias| alias.name.value.to_lowercase(),
@@ -807,7 +811,9 @@ impl<'a> Analyzer<'a> {
                         ..
                     } = other
                     {
-                        analyzer.check_table_aliases(alias, &entries);
+                        for source in &entries {
+                            analyzer.check_table_aliases(alias, &source.table);
+                        }
                     }
                     scope.extend(entries);
                 }

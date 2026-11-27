@@ -18,6 +18,9 @@ unused-cte = "ignore"
 ```sql
 CREATE TABLE users (id INTEGER NOT NULL, name TEXT NOT NULL);
 CREATE FUNCTION pair() RETURNS TABLE (a INTEGER, b INTEGER) LANGUAGE sql AS $$ SELECT 1, 2 $$;
+CREATE VIEW ids AS SELECT id FROM users;
+CREATE TYPE point2 AS (x INTEGER, y INTEGER);
+CREATE FUNCTION origin() RETURNS point2 LANGUAGE sql AS $$ SELECT (0, 0)::point2 $$;
 ```
 
 ## PostgreSQL
@@ -35,6 +38,27 @@ c = SQL("--sql\nSELECT 1 FROM users AS u(a, b, c)")
 d = SQL("--sql\nSELECT g.a FROM generate_series(1, 3) AS g(a, b)")
 # error: [column-alias-count] "`p` has 2 columns but 3 aliases"
 e = SQL("--sql\nSELECT p.x FROM pair() AS p(x, y, z)")
+```
+
+Views and CTEs read under an alias list count too:
+
+```python
+from sqlty import SQL
+
+# error: [column-alias-count] "`x` has 1 column but 2 aliases"
+a = SQL("--sql\nSELECT 1 FROM ids AS x(a, b)")
+# error: [column-alias-count] "`x` has 1 column but 2 aliases"
+b = SQL("--sql\nWITH t AS (SELECT 1) SELECT 1 FROM t AS x(a, b)")
+```
+
+A function returning one composite value expands into its fields:
+
+```python
+from sqlty import SQL
+
+# error:
+a = SQL("--sql\nSELECT 1 FROM origin() AS o(x, y)")
+b = SQL("--sql\nSELECT 1 FROM pg_get_keywords() AS k(word, catcode, barelabel, catdesc, baredesc)")
 ```
 
 A shorter list keeps the names of the remaining columns, and a relation of unknown
