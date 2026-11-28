@@ -272,3 +272,33 @@ q = "--sql\nSELECT * FROM US<CURSOR>"
 # completions: user_names view -
 # completions: users table -
 ```
+
+## Quoted schema qualifier
+
+PostgreSQL keeps the case of a quoted name and folds an unquoted one: `"Other".` lists
+the tables of the schema `Other`, `other.` and `OTHER.` those of `other`.
+
+```toml
+[tool.sqlty]
+dialect = "postgres"
+schema = "quoted.sql"
+```
+
+`quoted.sql`:
+
+```sql
+CREATE SCHEMA other;
+CREATE SCHEMA "Other";
+CREATE TABLE other.lower_table (id INTEGER);
+CREATE TABLE "Other".upper_table (id INTEGER);
+```
+
+```python
+q = "--sql\nSELECT * FROM \"Other\".<CURSOR>"
+# completions: upper_table table Other
+```
+
+```python
+q = "--sql\nSELECT * FROM OTHER.<CURSOR>"
+# completions: lower_table table other
+```
