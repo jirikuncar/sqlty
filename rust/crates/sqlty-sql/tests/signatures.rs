@@ -13,6 +13,7 @@ fn arity() {
     let left = &signatures(Dialect::Postgres, "left")[0];
     assert_eq!(left.parameter(1), Some(1));
     assert_eq!(left.parameter(2), None);
+    assert_eq!(left.parameter_label(1), Some("n: integer"));
 
     let coalesce = &signatures(Dialect::Postgres, "Coalesce")[0];
     assert!(coalesce.accepts(1) && coalesce.accepts(9) && !coalesce.accepts(0));
@@ -101,6 +102,8 @@ fn signature_help_cases() {
         ("INSERT INTO public.point (|", None),
         ("CREATE TABLE IF NOT EXISTS point (|", None),
         ("SELECT 1 + upper(|", Some("upper(**text**) -> text")),
+        ("SELECT left(lower(name), |", Some("left(string: text, **n: integer**) -> text")),
+        ("SELECT a, upper(|", Some("upper(**text**) -> text")),
     ] {
         assert_eq!(active(sql).as_deref(), expected, "{sql}");
     }
