@@ -49,8 +49,8 @@ The server sends the SQL of each checked string as semantic tokens: keywords, fu
 names, strings, numbers, comments, operators, placeholders and cast types, and each name by
 what it resolves to in the schema: `class` for a table, `interface` for a view, `namespace`
 for a schema, `variable` for an alias or CTE (`declaration` where the query defines it),
-`property` for a column (`deprecated` when the project deprecates it). A built-in function
-or type is `defaultLibrary`. Neovim colors them with its default `@lsp.type.keyword`,
+`property` for a column (`deprecated` when the project deprecates it). A function or type
+the schema does not define is `defaultLibrary`. Neovim colors them with its default `@lsp.type.keyword`,
 `@lsp.type.property`, ... highlight groups, so a theme needs no change.
 
 ```python
