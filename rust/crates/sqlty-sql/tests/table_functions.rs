@@ -44,6 +44,26 @@ fn a_misspelled_table_function_names_the_one_it_meant() {
 }
 
 #[test]
+fn only_a_name_within_two_typos_is_suggested() {
+    for sql in [
+        "SELECT e.key FROM users u, each(u.name::hstore) AS e",
+        "SELECT n FROM my_generate_series_helper(1) AS n",
+    ] {
+        let found = reported(sql, "postgres");
+        assert_eq!(found[0].0, Rule::UnknownFunction, "{sql}");
+        assert_eq!(found[0].3, None, "{sql}");
+    }
+    assert_eq!(
+        reported(
+            "SELECT n FROM pg_catalog.generate_seriez(1, 3) AS n",
+            "postgres"
+        )[0]
+        .3,
+        Some("pg_catalog.generate_series".to_string())
+    );
+}
+
+#[test]
 fn a_function_without_a_close_name_is_also_unread() {
     let found: Vec<_> = reported("SELECT * FROM st_dump(NULL)", "postgres")
         .into_iter()

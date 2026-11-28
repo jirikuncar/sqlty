@@ -25,7 +25,7 @@ from sqlty import SQL
 # error: [unknown-function] "table function `generate_seriez` is not known to sqlty; did you mean `generate_series`?"
 q = SQL("--sql\nSELECT * FROM generate_seriez(1, 3)")
 # error: [stale-rewrite] "Source has --sql strings that aren't wrapped in SQL[T]"
-# error: [unknown-function] "table function `jsonb_each_txt` is not known to sqlty; did you mean `jsonb_each_text`?"
+# error: [unknown-function] "table function `jsonb_each_txt` is not known to sqlty"
 r = SQL("--sql\nSELECT u.id FROM users u CROSS JOIN LATERAL jsonb_each_txt(u.name::jsonb) AS e")
 # error: [unknown-function] "table function `no_such_rows` is not known to sqlty"
 # error: [unsupported-syntax] "`*` reads table function no_such_rows, which sqlty does not read the columns of"
@@ -39,6 +39,39 @@ q = SQL("--sql\nSELECT * FROM generate_seriez(1, 3)")
 # fixed: from sqlty import SQL
 # fixed:
 # fixed: q = SQL[tuple[int]]("--sql\nSELECT * FROM generate_series(1, 3)")
+```
+
+A misspelling is at most two typos: a longer name that holds a built-in's, such as
+an extension's `each` or a helper the schema does not declare, gets no suggestion and no fix.
+
+```python
+from sqlty import SQL
+
+# error: [unknown-function] "table function `each` is not known to sqlty"
+# error: [unsupported-syntax] "column `key` may come from table function each, which sqlty does not read the columns of"
+q = SQL[tuple[str]]("--sql\nSELECT e.key FROM users u, each(u.name::hstore) AS e")
+# error: [unknown-function] "table function `my_generate_series_helper` is not known to sqlty"
+r = SQL[tuple[int]]("--sql\nSELECT n FROM my_generate_series_helper(1) AS n")
+```
+
+A function with a column definition list, and one qualified with `pg_catalog`, are checked too.
+
+```python
+from sqlty import SQL
+
+# error: [unknown-function] "table function `json_to_recordsett` is not known to sqlty"
+q = SQL[tuple[int | None]]("--sql\nSELECT t.a FROM users u, json_to_recordsett(u.name::json) AS t(a int)")
+# error: [unknown-function] "table function `pg_catalog.generate_seriez` is not known to sqlty; did you mean `generate_series`?"
+r = SQL[tuple[int]]("--sql\nSELECT n FROM pg_catalog.generate_seriez(1, 3) AS n")
+```
+
+```python
+from sqlty import SQL
+
+q = SQL[tuple[int]]("--sql\nSELECT n FROM pg_catalog.generate_seriez(1, 3) AS n")
+# fixed: from sqlty import SQL
+# fixed:
+# fixed: q = SQL[tuple[int]]("--sql\nSELECT n FROM pg_catalog.generate_series(1, 3) AS n")
 ```
 
 A built-in, a function the schema defines and a qualified name are not reported.

@@ -658,6 +658,7 @@ impl<'a> Analyzer<'a> {
         analyzer.merged = merged_columns(from, analyzer.dialect).into();
         let mut scope = Scope::new();
         for factor in relations(from) {
+            let misspelled = analyzer.check_table_function(factor);
             if let Some((reference, columns)) = analyzer.defined_columns(factor) {
                 let table = format!("({reference})");
                 analyzer.virtuals.insert(table.clone(), columns);
@@ -781,7 +782,7 @@ impl<'a> Analyzer<'a> {
                 }
                 // A misspelled function reads as a relation sqlty does not know, which nothing
                 // else reports.
-                other if analyzer.check_table_function(other) => {
+                other if misspelled => {
                     let reference = relation_name(other).unwrap_or_default();
                     let table = format!("({reference})");
                     scope.push(Source::named(reference, table));

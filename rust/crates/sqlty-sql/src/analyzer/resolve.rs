@@ -155,9 +155,12 @@ impl<'a> Analyzer<'a> {
         };
         let written = self.display_name(name);
         let mut message = format!("table function `{written}` is not known to sqlty");
-        let replacement = suggest::closest(&written, &known).map(|closest| {
+        let replacement = suggest::misspelled(&builtin, &known).map(|closest| {
             message.push_str(&format!("; did you mean `{closest}`?"));
-            closest.to_string()
+            match name.0.as_slice() {
+                [schema, _] => format!("{schema}.{closest}"),
+                _ => closest.to_string(),
+            }
         });
         let misspelled = replacement.is_some();
         let _at = self.diag.at(name.span());

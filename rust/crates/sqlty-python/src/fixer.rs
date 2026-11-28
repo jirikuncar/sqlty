@@ -65,8 +65,8 @@ pub fn fix_module(
 }
 
 /// `check_source` plus the edits of its diagnostics: fix `inline-sql-comment`,
-/// `mysql-sql-marker`, `stale-rewrite`, `select-star`, `stale-type`, `optional-row`, `untyped-query` and
-/// `unknown-column`,
+/// `mysql-sql-marker`, `stale-rewrite`, `select-star`, `stale-type`, `optional-row`, `untyped-query`,
+/// `unknown-column` and `unknown-function`,
 /// except where a `# sqlty: ignore` comment on the line the rule reports (`suppressed`, by
 /// line of `source`) suppresses that rule. The imports the fixes need are added last, so
 /// the lines of `suppressed` hold for every pass.
