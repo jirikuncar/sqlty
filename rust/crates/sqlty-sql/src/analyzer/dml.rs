@@ -374,7 +374,7 @@ impl Analyzer<'_> {
         }
         let scope = dml_scope(stmt, self.dialect);
         for source in &scope {
-            self.check_table(&source.table);
+            self.check_table(&source.table, None);
         }
         self.check_tenant_dml(stmt);
         // Conditions and values may also read the tables of UPDATE's FROM and DELETE's USING,

@@ -76,6 +76,17 @@ b = SQL[tuple[int]]("--sql\nSELECT AVG(totl) FROM orders")
 c = SQL[tuple[int]]("--sql\nSELECT SUM(o.totl) FROM orders o")
 ```
 
+#### An unaliased subquery
+
+It has no name to show.
+
+```python
+from sqlty import SQL
+
+# error: [unknown-column] "column `x` does not exist in the subquery"
+q = SQL[tuple[int]]("--sql\nSELECT x FROM (SELECT 1)")
+```
+
 #### The closest column
 
 A name close to one column of the tables it can come from gets a hint, and
@@ -121,6 +132,72 @@ a = SQL[tuple[int, str]]("--sql\nSELECT id, phone FROM users")
 b = SQL[tuple[int]]("--sql\nSELECT xxxx_id FROM orders o JOIN users u ON u.id = o.user_id")
 # error: [unknown-column] "column `idd` does not exist in `t`, `u`"
 c = SQL[tuple[int]]("--sql\nSELECT idd FROM teams t JOIN users u ON u.team_id = t.id")
+```
+
+#### The closest table
+
+A table name close to one table, view or CTE gets a hint, and `sqlty check --fix`
+writes that name instead in a FROM or JOIN item, keeping its schema qualifier and
+quotes. Only names sharing the first two characters are compared. A name inside a
+longer one gets the hint but no fix: the table may be missing from the schema.
+
+```python
+from sqlty import SQL
+
+# error: [unknown-table] "table `userz` is not defined in the schema; did you mean `users`?"
+a = SQL[tuple[int]]("--sql\nSELECT id FROM userz")
+# error: [unknown-table] "table `public.ordrs` is not defined in the schema; did you mean `orders`?"
+b = SQL[tuple[int]]("--sql\nSELECT id FROM public.ordrs")
+# error: [unknown-table] "table `teamz` is not defined in the schema; did you mean `teams`?"
+c = SQL[tuple[int]]('--sql\nSELECT id FROM "teamz"')
+# error: [unknown-table] "table `recnt` is not defined in the schema; did you mean `recent`?"
+d = SQL[tuple[int]]("--sql\nWITH recent AS (SELECT id FROM users) SELECT id FROM recnt")
+# error: [unknown-table] "table `teams_archive` is not defined in the schema; did you mean `teams`?"
+e = SQL[tuple[int]]("--sql\nSELECT id FROM teams_archive")
+```
+
+```python
+from sqlty import SQL
+
+a = SQL[tuple[int]]("--sql\nSELECT id FROM userz")
+b = SQL[tuple[int]]("--sql\nSELECT id FROM public.ordrs")
+c = SQL[tuple[int]]('--sql\nSELECT id FROM "teamz"')
+e = SQL[tuple[int]]("--sql\nSELECT id FROM teams_archive")
+# fixed: from sqlty import SQL
+# fixed:
+# fixed: a = SQL[tuple[int]]("--sql\nSELECT id FROM users")
+# fixed: b = SQL[tuple[int | None]]("--sql\nSELECT id FROM public.orders")
+# fixed: c = SQL[tuple[int]]('--sql\nSELECT id FROM "teams"')
+# fixed: e = SQL[tuple[int]]("--sql\nSELECT id FROM teams_archive")
+```
+
+No table is suggested when none is close, or when two are equally close.
+
+```python
+from sqlty import SQL
+
+# error: [unknown-table] "table `customers` is not defined in the schema"
+a = SQL[tuple[int]]("--sql\nSELECT id FROM customers")
+# error: [unknown-table] "table `usera` is not defined in the schema"
+b = SQL[tuple[int]]("--sql\nWITH userx AS (SELECT id FROM users) SELECT id FROM usera")
+# error: [unknown-table] "table `u` is not defined in the schema"
+c = SQL[tuple[int]]("--sql\nSELECT id FROM u")
+```
+
+SQLite keeps the brackets of a quoted name:
+
+```toml
+[tool.sqlty]
+dialect = "sqlite"
+```
+
+```python
+from sqlty import SQL
+
+a = SQL[tuple[int]]("--sql\nSELECT id FROM [userz]")
+# fixed: from sqlty import SQL
+# fixed:
+# fixed: a = SQL[tuple[int]]("--sql\nSELECT id FROM [users]")
 ```
 
 #### Names a result column's type does not need

@@ -19,7 +19,7 @@ import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
-from sqlty._source import ParsedSource
+from sqlty.core import ParsedSource
 
 EXAMPLES = int(os.environ.get("SQLTY_FUZZ_EXAMPLES", "300"))
 ROOT = Path(__file__).parent.parent

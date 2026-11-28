@@ -1,30 +1,30 @@
 """The name rules the engine reports are registered, on by default."""
 
-from sqlty._lint import NAME_RULES, RULES, Severity
+from tests._core_views import NAME_RULES, RULES
 
 # SQL the database rejects is an error; SQL sqlty can't type is a warning. unproven-join
 # is off, as a schema without keys would report every join, and entity-mismatch is opt-in.
 DEFAULTS = {
-    "unknown-table": Severity.ERROR,
-    "unknown-column": Severity.ERROR,
-    "deprecated-column": Severity.WARN,
-    "tenant-scope": Severity.ERROR,
-    "ambiguous-column": Severity.ERROR,
-    "duplicate-alias": Severity.ERROR,
-    "insert-missing-column": Severity.ERROR,
-    "insert-value-count": Severity.ERROR,
-    "literal-write": Severity.ERROR,
-    "unmatched-literal": Severity.WARN,
-    "ungrouped-column": Severity.ERROR,
-    "unknown-function": Severity.WARN,
-    "unknown-type": Severity.WARN,
-    "unsupported-syntax": Severity.WARN,
-    "fanout-aggregate": Severity.WARN,
-    "chasm-join": Severity.WARN,
-    "unproven-join": Severity.IGNORE,
-    "entity-mismatch": Severity.IGNORE,
-    "foreign-key-mismatch": Severity.WARN,
-    "rejected-query": Severity.ERROR,
+    "unknown-table": "error",
+    "unknown-column": "error",
+    "deprecated-column": "warn",
+    "tenant-scope": "error",
+    "ambiguous-column": "error",
+    "duplicate-alias": "error",
+    "insert-missing-column": "error",
+    "insert-value-count": "error",
+    "literal-write": "error",
+    "unmatched-literal": "warn",
+    "ungrouped-column": "error",
+    "unknown-function": "warn",
+    "unknown-type": "warn",
+    "unsupported-syntax": "warn",
+    "fanout-aggregate": "warn",
+    "chasm-join": "warn",
+    "unproven-join": "ignore",
+    "entity-mismatch": "ignore",
+    "foreign-key-mismatch": "warn",
+    "rejected-query": "error",
 }
 
 

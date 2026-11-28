@@ -26,9 +26,9 @@ import pytest
 from pygments.lexers import get_lexer_by_name
 
 import sqlty
-from sqlty._config import load_config
-from sqlty._lint import RULES
+from sqlty import _core
 from sqlty.core import Settings, check_source, rewrite_source
+from tests._core_views import RULES
 
 ROOT = Path(__file__).resolve().parent.parent
 RULE_DOCS = ROOT / "docs" / "reference" / "rules"
@@ -44,7 +44,7 @@ ORACLE = sorted(
     m.name
     for m in pkgutil.walk_packages([str(ROOT / "tests" / "type_oracle")], "tests.type_oracle.")
 )
-WITH_EXAMPLES = {"sqlty", "sqlty.core", "sqlty._decode"}
+WITH_EXAMPLES = {"sqlty", "sqlty.core"}
 
 
 def test_rules_table() -> None:
@@ -54,8 +54,7 @@ def test_rules_table() -> None:
         r"^\| \[`([\w-]+)`\]\(rules/\1\.md\) \| ([\w ]+) \| (\w+) \| (\w+) \|", text, re.M
     )
     assert sorted(rows) == sorted(
-        (r.name, r.group, r.default_severity.value, "yes" if r.fixable else "no")
-        for r in RULES.values()
+        (r.name, r.group, r.default_severity, "yes" if r.fixable else "no") for r in RULES.values()
     )
 
 
@@ -96,6 +95,28 @@ def test_structured_data_dates_are_utc(monkeypatch: pytest.MonkeyPatch) -> None:
     log = "\0" + "2026-11-23T09:42:28+01:00\n\ndocs/faq.md\n"
     monkeypatch.setattr(script, "git", lambda *args: "false" if "rev-parse" in args else log)
     assert script.modified() == {"docs/faq.md": "2026-11-23T08:42:28Z"}
+
+
+def test_structured_data_lists_the_problems_a_page_solves() -> None:
+    script = _script("structured_data")
+    page = script.parse(
+        '<link rel="canonical" href="https://example.com/recipes/eslint/"><article>'
+        '<h2 id="what-it-solves">What it solves</h2><p>Intro.</p>'
+        '<h3 id="drift">Row types drift<a class="headerlink" href="#drift">#</a></h3>'
+        "<p>The schema <code>--fix</code> writes them.</p>"
+        '<h2 id="configure">Configure</h2><h3 id="options">Options</h3></article>'
+    )
+    assert script.faq(page, script.subsections(page, "what-it-solves"))["mainEntity"] == [
+        {
+            "@type": "Question",
+            "name": "Row types drift",
+            "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "The schema --fix writes them.",
+                "url": "https://example.com/recipes/eslint/#drift",
+            },
+        }
+    ]
 
 
 def test_structured_data_groups_rules_in_llms_txt() -> None:
@@ -165,11 +186,9 @@ def test_readme_playground_links_are_current() -> None:
 
 
 def test_config_key_docs_cover_every_key() -> None:
-    from sqlty._config import DISCOVERY_KEYS, FUNCTION_KEYS, TOOL_KEYS
-
     docs = _script("generate_docs")
-    assert list(docs.KEY_DOCS) == [*TOOL_KEYS, *DISCOVERY_KEYS]
-    assert list(docs.FUNCTION_KEY_DOCS) == list(FUNCTION_KEYS)
+    assert list(docs.KEY_DOCS) == [*_core.TOOL_KEYS, *_core.DISCOVERY_KEYS]
+    assert list(docs.FUNCTION_KEY_DOCS) == list(_core.FUNCTION_KEYS)
 
 
 def test_python_api_doctest() -> None:
@@ -248,7 +267,7 @@ def test_rule_docs() -> None:
         text = (RULE_DOCS / f"{rule.name}.md").read_text()
         _, front, page = text.split("---\n", 2)
         meta = yaml.safe_load(front)
-        assert meta["severity"] == rule.default_severity.value
+        assert meta["severity"] == rule.default_severity
         assert (meta["fixable"], meta["group"], meta["summary"]) == (
             rule.fixable,
             rule.group.lower().replace(" ", "-"),
@@ -259,7 +278,7 @@ def test_rule_docs() -> None:
             "",
             f"# {rule.name}",
             "",
-            f"Default severity: **{rule.default_severity.value}**",
+            f"Default severity: **{rule.default_severity}**",
         ]
     assert orders == sorted(set(orders))
 
@@ -267,12 +286,13 @@ def test_rule_docs() -> None:
 @pytest.mark.parametrize("example", EXAMPLES, ids=[p.name for p in EXAMPLES])
 def test_examples_are_rewritten(example: Path) -> None:
     """Each example is current under its own ``[tool.sqlty]``."""
-    config, config_dir = load_config(example)
+    config, _, config_file = _core.find_config(example.resolve()) or ({}, [], None)
+    config_dir = config_file.parent if config_file else None
     schema = config.get("schema")
     settings = Settings(
         dialect=config.get("dialect", "postgres"),
         schema_sql=(config_dir / schema).read_text() if config_dir and schema else None,
-        import_style=config.get("import_style"),
+        import_style=config.get("import-style"),
     )
     for path in sorted(example.glob("*.py")):
         source = path.read_text()
@@ -429,6 +449,8 @@ def test_bump_version_writes_every_place(tmp_path: Path) -> None:
         "npm/wasm/package.json": 1,
         "editors/vscode/package-lock.json": 1,
         "npm/wasm/example/package-lock.json": 1,
+        "npm/eslint-plugin/package.json": 2,
+        "npm/package-lock.json": 3,
     }
     for place in ["scripts/bump_version.py", *places]:
         (tmp_path / place).parent.mkdir(parents=True, exist_ok=True)
@@ -461,12 +483,16 @@ def test_bump_version_writes_every_place(tmp_path: Path) -> None:
 def test_rule_docs_link_to_the_site(capsys: pytest.CaptureFixture[str]) -> None:
     """`sqlty rule` prints the rule pages with links a terminal user can open."""
     from sqlty._core import cli
-    from sqlty._lint import DOCS_URL
+
+    docs_url = tomllib.loads((ROOT / "zensical.toml").read_text())["project"]["site_url"]
+    checked = 0
 
     for name in RULES:
         assert cli(["sqlty", "rule", name]) == 0
         for target in re.findall(r"\]\(([^)\s]+)\)", capsys.readouterr().out):
             assert not target.endswith(".md") and ".md#" not in target, (name, target)
-            if target.startswith(DOCS_URL):
-                page = target.removeprefix(DOCS_URL).partition("#")[0].rstrip("/")
+            if target.startswith(docs_url):
+                page = target.removeprefix(docs_url).partition("#")[0].rstrip("/")
                 assert (ROOT / "docs" / f"{page}.md").exists(), (name, target)
+                checked += 1
+    assert checked
