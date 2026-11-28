@@ -6,9 +6,7 @@ import time
 
 import pytest
 
-from sqlty._helpers import HelperIndex
-from sqlty._source import ParsedSource
-from sqlty.core import Settings, check_source
+from sqlty.core import HelperIndex, ParsedSource, Settings, check_source
 
 SCHEMA = "CREATE TABLE t (id INTEGER NOT NULL, note TEXT);"
 RULES = {"dynamic-query": "warn", "unchecked-query": "warn"}
