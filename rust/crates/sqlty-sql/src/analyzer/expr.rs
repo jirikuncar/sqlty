@@ -614,6 +614,9 @@ impl<'a> Analyzer<'a> {
 
     /// A function call: a built-in by its [`Returns`] rule, else one the schema defines.
     fn call_typed(&self, func: &Function, scope: &Scope) -> Inferred<Typed> {
+        if self.diag.enabled() {
+            self.check_arguments(func);
+        }
         let name = self.builtin_name(&func.name);
         if let (FunctionArguments::Subquery(query), "ARRAY", SqlDialect::Postgres) =
             (&func.args, name.as_str(), self.dialect)

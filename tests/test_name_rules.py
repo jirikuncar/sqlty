@@ -17,6 +17,7 @@ DEFAULTS = {
     "unmatched-literal": Severity.WARN,
     "ungrouped-column": Severity.ERROR,
     "unknown-function": Severity.WARN,
+    "argument-count-mismatch": Severity.ERROR,
     "unknown-type": Severity.WARN,
     "unsupported-syntax": Severity.WARN,
     "fanout-aggregate": Severity.WARN,

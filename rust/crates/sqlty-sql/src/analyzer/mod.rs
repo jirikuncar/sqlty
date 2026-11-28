@@ -9,6 +9,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 mod api;
+mod arguments;
 mod complete;
 mod databases;
 mod dialect;
