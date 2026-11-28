@@ -37,7 +37,7 @@ stale-type = "error"
 | [`unparsed-query`](rules/unparsed-query.md) | Query | warn | no | Query that does not parse, so sqlty cannot check it |
 | [`sqruff`](rules/sqruff.md) | Query | ignore | no | Finding of sqruff's core lint rules in a query |
 | [`unknown-database`](rules/unknown-database.md) | Query | error | no | Query marker names a database the project does not configure |
-| [`unknown-table`](rules/unknown-table.md) | Names | error | no | Table the schema does not define |
+| [`unknown-table`](rules/unknown-table.md) | Names | error | yes | Table the schema does not define |
 | [`unknown-column`](rules/unknown-column.md) | Names | error | yes | Column the table does not have |
 | [`deprecated-column`](rules/deprecated-column.md) | Names | warn | no | Query reads a column scheduled for removal |
 | [`ambiguous-column`](rules/ambiguous-column.md) | Names | error | no | Unqualified column that more than one table of the query has |
