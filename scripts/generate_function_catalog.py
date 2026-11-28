@@ -69,11 +69,37 @@ POSTGRES_AGGREGATES = {
     "max(anyelement) -> anyelement",
     "min(anyelement) -> anyelement",
 }
+# Overloads pg_proc has that the documentation does not list: those without arguments
+# (`json_build_array_noargs`), a parameter with a default (`use_json_as_text`) and a
+# VARIADIC one that defaults to an empty array.
+POSTGRES_PG_PROC = {
+    "json_build_array() -> json": "functions-json.html#FUNCTIONS-JSON-CREATION-TABLE",
+    "json_build_object() -> json": "functions-json.html#FUNCTIONS-JSON-CREATION-TABLE",
+    "jsonb_build_array() -> jsonb": "functions-json.html#FUNCTIONS-JSON-CREATION-TABLE",
+    "jsonb_build_object() -> jsonb": "functions-json.html#FUNCTIONS-JSON-CREATION-TABLE",
+    "json_populate_record(base: anyelement, from_json: json, use_json_as_text: boolean) -> anyelement": "functions-json.html#FUNCTIONS-JSON-PROCESSING-TABLE",
+    "json_populate_recordset(base: anyelement, from_json: json, use_json_as_text: boolean) -> setof anyelement": "functions-json.html#FUNCTIONS-JSON-PROCESSING-TABLE",
+    "pg_logical_slot_get_changes(slot_name: name, upto_lsn: pg_lsn, upto_nchanges: integer) -> setof record(lsn pg_lsn, xid xid, data text)": "functions-admin.html#FUNCTIONS-REPLICATION-TABLE",
+    "pg_logical_slot_get_binary_changes(slot_name: name, upto_lsn: pg_lsn, upto_nchanges: integer) -> setof record(lsn pg_lsn, xid xid, data bytea)": "functions-admin.html#FUNCTIONS-REPLICATION-TABLE",
+    "pg_logical_slot_peek_changes(slot_name: name, upto_lsn: pg_lsn, upto_nchanges: integer) -> setof record(lsn pg_lsn, xid xid, data text)": "functions-admin.html#FUNCTIONS-REPLICATION-TABLE",
+    "pg_logical_slot_peek_binary_changes(slot_name: name, upto_lsn: pg_lsn, upto_nchanges: integer) -> setof record(lsn pg_lsn, xid xid, data bytea)": "functions-admin.html#FUNCTIONS-REPLICATION-TABLE",
+}
 DEFAULT = re.compile(r"\s*<literal>DEFAULT</literal>\s*<literal>[^<]*</literal>")
 
 
 def text(markup: str) -> str:
     return html.unescape(re.sub(r"<[^>]+>", "", markup)).strip()
+
+
+def optional_defaults(params: str) -> str:
+    """`params` with those that have a default, which come last, optional."""
+    parts = params.split(",")
+    defaults = [i for i, part in enumerate(parts) if DEFAULT.search(part)]
+    if not defaults or "[" in params or "<optional>" in params:
+        return DEFAULT.sub("", params)
+    first = defaults[0]
+    rest = "".join(f"<optional>{',' if i else ''}{DEFAULT.sub('', parts[i])}" for i in defaults)
+    return ",".join(parts[:first]) + rest + "</optional>" * len(defaults)
 
 
 def postgres_signature(markup: str) -> str | None:
@@ -84,7 +110,7 @@ def postgres_signature(markup: str) -> str | None:
     if not found:
         return None
     name, params, result = found.groups()
-    params = DEFAULT.sub("", ORDER_BY.sub("", params))
+    params = optional_defaults(ORDER_BY.sub("", params))
     params = params.replace("<optional>", "[").replace("</optional>", "]")
     for literal in re.findall(r"<literal>([^<]*)</literal>", params):
         if literal not in ("VARIADIC", "*"):
@@ -132,6 +158,7 @@ def postgres() -> list[str]:
         lines[line] = f"functions-conditional.html{anchor}"
     for line in POSTGRES_AGGREGATES:
         lines[line] = "functions-aggregate.html#FUNCTIONS-AGGREGATE-TABLE"
+    lines.update(POSTGRES_PG_PROC)
     return [f"{line}\t{doc}" for line, doc in lines.items()]
 
 
@@ -177,6 +204,34 @@ def duckdb_positional(con: Any, name: str, types: list[str]) -> int:
     return max((count for count in range(len(types) + 1) if binds(count)), default=len(types))
 
 
+def duckdb_required(con: Any, call: str, count: int, taken: set[int]) -> int:
+    """How many of `count` parameters a call must pass, probing with fewer down to an arity
+    another overload `taken`; `call` is a format string for the arguments."""
+    import duckdb  # noqa: PLC0415
+
+    required = count
+    for fewer in range(count - 1, -1, -1):
+        if fewer in taken:
+            break
+        try:
+            con.execute(f"PREPARE probe AS SELECT {call.format(', '.join(['NULL'] * fewer))}")
+        except duckdb.Error as error:
+            if isinstance(error, duckdb.ParserException) or any(
+                message in str(error) for message in DUCKDB_NO_MATCH
+            ):
+                break
+        required = fewer
+    return required
+
+
+def duckdb_optional(params: list[str], required: int) -> str:
+    """`a, b[, c[, d]]` of `params`, those after the first `required` optional."""
+    text = ", ".join(params[:required])
+    for i, param in enumerate(params[required:]):
+        text += f"[{', ' if required or i else ''}{param}"
+    return text + "]" * (len(params) - required)
+
+
 def duckdb_catalog() -> list[str]:
     import duckdb  # noqa: PLC0415  # only this dialect needs it
 
@@ -205,10 +260,17 @@ def duckdb_catalog() -> list[str]:
         result = result.replace('"NULL"', "ANY")
         page = next((DUCKDB_PAGES[c] for c in categories if c in DUCKDB_PAGES), None)
         page = page or DUCKDB_PAGES.get(kind, "overview")
-        key = (name, kind in ("table", "table_macro"), tuple(names), varargs)
+        call = f"{name}({{}}) OVER ()" if kind == "window" else f"{name}({{}})"
+        key = (name, None if result == "TABLE" else call, tuple(names), varargs)
         groups.setdefault(key, []).append((types, result, page))
+    arities: dict[str, set[int]] = {}
+    for name, _, names, _ in groups:
+        arities.setdefault(name, set()).add(len(names))
     lines: dict[str, str] = {}
-    for (name, _, names, varargs), overloads in groups.items():
+    for (name, call, names, varargs), overloads in groups.items():
+        required = len(names)
+        if call and not varargs:
+            required = duckdb_required(con, call, len(names), arities[name] - {len(names)})
         if len(overloads) > DUCKDB_OVERLOADS:
             merged = [{types[i] for types, _, _ in overloads} for i in range(len(names))]
             results = {result for _, result, _ in overloads}
@@ -220,7 +282,9 @@ def duckdb_catalog() -> list[str]:
                 )
             ]
         for types, result, page in overloads:
-            params = ", ".join(f"{n}: {t}" for n, t in zip(names, types, strict=True))
+            params = duckdb_optional(
+                [f"{n}: {t}" for n, t in zip(names, types, strict=True)], required
+            )
             if varargs:
                 params += f"[{', ' if params else ''}{varargs}, ...]"
             lines.setdefault(f"{name}({params}) -> {result}", f"{page}.html")
@@ -233,6 +297,14 @@ MYSQL_DOCS = f"https://dev.mysql.com/doc/refman/{MYSQL_VERSION}/en/"
 MYSQL_MODIFIERS = {"over_clause", "null_treatment", "from_first_last"}
 # Predicates the help tables write as calls.
 MYSQL_SYNTAX = {"exists"}
+# Forms a help topic gives only in prose (the full syntax of GROUP_CONCAT, GeomCollection()
+# "with no arguments is permitted"), and ATAN2(X), which the server takes as ATAN(X).
+MYSQL_FORMS = {
+    "group_concat(expr[, ...])": "aggregate-functions.html",
+    "geomcollection()": "gis-mysql-specific-functions.html",
+    "geometrycollection()": "gis-mysql-specific-functions.html",
+    "atan2(X)": "mathematical-functions.html",
+}
 MYSQL_CALL = re.compile(r"\s*([A-Za-z_]\w*)(\()?")
 MYSQL_MODIFIER = re.compile(r"\s*\[?(\w+)\]?")
 MYSQL_NEXT = re.compile(r"\s*(?:,|$)")
@@ -272,6 +344,8 @@ def mysql_parameters(arguments: str) -> str | None:
     if re.match(r"\s*DISTINCT\b", arguments):
         return None
     arguments = re.sub(r"^\s*\[DISTINCT\]\s+", "", arguments)
+    # `[,info | iterations]`: one parameter, named either way.
+    arguments = re.sub(r"\[\s*,\s*(\w+)\s*\|\s*\w+\s*\]", r"[,\1]", arguments)
     while (shorter := MYSQL_KEYWORD_OPTION.sub("", arguments)) != arguments:
         arguments = shorter
     if re.search(r"[{|(]|\b[A-Z]{2,}\b", arguments):
@@ -286,6 +360,8 @@ def mysql_parameters(arguments: str) -> str | None:
         (r",\s*\[(?!,)", "[, "),
         # A part after a parameter without a comma is not one: `str [flags]`.
         (r"(\w)\[(?!,)[^\[\]]*\]", r"\1"),
+        # The documentation numbers examples, `str1, str2, str3, ...`; one is enough.
+        (r"(\w+1)(?:, \w+\d)+, \.\.\.", r"\1[, ...]"),
     ):
         arguments = re.sub(pattern, replacement, arguments)
     return arguments.strip()
@@ -324,6 +400,7 @@ def mysql_catalog(dsn: str) -> tuple[str, list[str]]:
             parameters = mysql_parameters(arguments)
             if parameters is not None and name.lower() not in MYSQL_SYNTAX:
                 lines.setdefault(f"{name.lower()}({parameters})", url.removeprefix(MYSQL_DOCS))
+    lines.update(MYSQL_FORMS)
     return f"mysql.help_topic of MySQL {version}", [f"{line}\t{doc}" for line, doc in lines.items()]
 
 

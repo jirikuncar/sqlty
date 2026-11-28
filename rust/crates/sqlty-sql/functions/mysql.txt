@@ -5,8 +5,8 @@ abs(X)	mathematical-functions.html
 acos(X)	mathematical-functions.html
 adddate(date, days)	date-and-time-functions.html
 addtime(expr1, expr2)	date-and-time-functions.html
-aes_decrypt(crypt_str, key_str[, init_vector][, kdf_name][, salt])	encryption-functions.html
-aes_encrypt(str, key_str[, init_vector][, kdf_name][, salt])	encryption-functions.html
+aes_decrypt(crypt_str, key_str[, init_vector][, kdf_name][, salt][, info])	encryption-functions.html
+aes_encrypt(str, key_str[, init_vector][, kdf_name][, salt][, info])	encryption-functions.html
 any_value(arg)	miscellaneous-functions.html
 ascii(str)	string-functions.html
 asin(X)	mathematical-functions.html
@@ -17,6 +17,7 @@ asymmetric_verify(algorithm, text, sig_str, pub_key_str, digest_type)	enterprise
 atan(X)	mathematical-functions.html
 atan(Y, X)	mathematical-functions.html
 atan2(Y, X)	mathematical-functions.html
+atan2(X)	mathematical-functions.html
 avg(expr)	aggregate-functions.html
 benchmark(count, expr)	information-functions.html
 bin(N)	string-functions.html
@@ -37,8 +38,8 @@ coalesce(value, ...)	comparison-operators.html
 coercibility(str)	information-functions.html
 collation(str)	information-functions.html
 compress(string_to_compress)	encryption-functions.html
-concat(str1, str2, ...)	string-functions.html
-concat_ws(separator, str1, str2, ...)	string-functions.html
+concat(str1[, ...])	string-functions.html
+concat_ws(separator, str1[, ...])	string-functions.html
 connection_id()	information-functions.html
 conv(N, from_base, to_base)	mathematical-functions.html
 convert_tz(dt, from_tz, to_tz)	date-and-time-functions.html
@@ -69,11 +70,11 @@ dayofyear(date)	date-and-time-functions.html
 default(col_name)	miscellaneous-functions.html
 degrees(X)	mathematical-functions.html
 dense_rank()	window-function-descriptions.html
-elt(N, str1, str2, str3, ...)	string-functions.html
+elt(N, str1[, ...])	string-functions.html
 exp(X)	mathematical-functions.html
 export_set(bits, on, off[, separator[, number_of_bits]])	string-functions.html
 extractvalue(xml_frag, xpath_expr)	xml-functions.html
-field(str, str1, str2, str3, ...)	string-functions.html
+field(str, str1[, ...])	string-functions.html
 find_in_set(str, strlist)	string-functions.html
 first_value(expr)	window-function-descriptions.html
 floor(X)	mathematical-functions.html
@@ -85,10 +86,13 @@ from_base64(str)	string-functions.html
 from_days(N)	date-and-time-functions.html
 from_unixtime(unix_timestamp[, format])	date-and-time-functions.html
 geomcollection(g[, g, ...])	gis-mysql-specific-functions.html
+geomcollection()	gis-mysql-specific-functions.html
 geometrycollection(g[, g, ...])	gis-mysql-specific-functions.html
+geometrycollection()	gis-mysql-specific-functions.html
 get_lock(str, timeout)	locking-functions.html
-greatest(value1, value2, ...)	comparison-operators.html
+greatest(value1[, ...])	comparison-operators.html
 group_concat(expr)	aggregate-functions.html
+group_concat(expr[, ...])	aggregate-functions.html
 grouping(expr[, expr, ...])	miscellaneous-functions.html
 gtid_subset(set1, set2)	gtid-functions.html
 gtid_subtract(set1, set2)	gtid-functions.html
@@ -104,7 +108,7 @@ inet_aton(expr)	miscellaneous-functions.html
 inet_ntoa(expr)	miscellaneous-functions.html
 insert(str, pos, len, newstr)	string-functions.html
 instr(str, substr)	string-functions.html
-interval(N, N1, N2, N3, ...)	comparison-operators.html
+interval(N, N1[, ...])	comparison-operators.html
 is_free_lock(str)	locking-functions.html
 is_ipv4(expr)	miscellaneous-functions.html
 is_ipv4_compat(expr)	miscellaneous-functions.html
@@ -151,7 +155,7 @@ last_insert_id(expr)	information-functions.html
 last_value(expr)	window-function-descriptions.html
 lcase(str)	string-functions.html
 lead(expr[, N[, default]])	window-function-descriptions.html
-least(value1, value2, ...)	comparison-operators.html
+least(value1[, ...])	comparison-operators.html
 left(str, len)	string-functions.html
 length(str)	string-functions.html
 linestring(pt[, pt, ...])	gis-mysql-specific-functions.html
@@ -168,7 +172,7 @@ log2(X)	mathematical-functions.html
 lower(str)	string-functions.html
 lpad(str, len, padstr)	string-functions.html
 ltrim(str)	string-functions.html
-make_set(bits, str1, str2, ...)	string-functions.html
+make_set(bits, str1[, ...])	string-functions.html
 makedate(year, dayofyear)	date-and-time-functions.html
 maketime(hour, minute, second)	date-and-time-functions.html
 master_pos_wait(log_name, log_pos[, timeout][, channel])	replication-functions-synchronization.html
