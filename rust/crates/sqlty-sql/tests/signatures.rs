@@ -26,8 +26,14 @@ fn dialects() {
     assert_eq!(generic, signatures(Dialect::Postgres, "left"));
     assert!(signatures(Dialect::ClickHouse, "left").is_empty());
     let duckdb = &signatures(Dialect::Other("duckdb"), "left")[0];
-    assert_eq!(duckdb.label, "left(string: VARCHAR, count: BIGINT) -> VARCHAR");
-    assert_eq!(duckdb.url(), "https://duckdb.org/docs/2.0/sql/functions/text.html");
+    assert_eq!(
+        duckdb.label,
+        "left(string: VARCHAR, count: BIGINT) -> VARCHAR"
+    );
+    assert_eq!(
+        duckdb.url(),
+        "https://duckdb.org/docs/2.0/sql/functions/text.html"
+    );
     assert!(signatures(Dialect::Postgres, "no_such_function").is_empty());
 }
 
