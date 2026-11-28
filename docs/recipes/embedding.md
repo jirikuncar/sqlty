@@ -47,6 +47,20 @@ A request takes the module as `source`, the `CREATE TABLE` statements as `schema
 Offsets and ranges count UTF-16 code units, as JavaScript strings and most editors
 do. `index.d.ts` types each request and answer.
 
+## Type a query
+
+`query` types one SQL string, for a host that is not Python, such as
+[`@sqlty/eslint-plugin`](eslint.md): its columns, parameters and diagnostics, offsets
+into the string. With a `schema_key`, the schema is sent once; a request with the key
+alone gets `{ need: "schema" }` once the engine no longer holds it.
+
+```js
+const schema = "CREATE TABLE users (id integer PRIMARY KEY, name text NOT NULL);";
+const answer = sqlty({ op: "query", sql: "SELECT name FROM users WHERE id = $1", schema, schema_key: "v1" });
+answer.columns; // [{ name: "name", sql_type: "TEXT", nullable: false }]
+answer.params; // [{ index: 1, name: null, sql_type: "INT", nullable: null }]
+```
+
 ## Load the module
 
 `load()` fetches `sqlty_wasm.wasm` next to the package's module in a browser and
