@@ -11,7 +11,8 @@
 //! key links to one already in scope come first, with their `ON` clause. An unqualified
 //! column with nothing typed is offered as `alias.column` when several relations are in scope.
 //! A typed word in an expression also completes to the functions the schema defines and the
-//! dialect's built-ins (see [`crate::signatures`]), after the columns.
+//! dialect's built-ins (see [`crate::signatures`]), after the columns; one in `FROM` or
+//! after `JOIN`, to the built-ins that return rows, after the relations.
 //!
 //! ```
 //! use sqlty_sql::analyzer::{complete, load_schema_with_skipped, CandidateKind};
@@ -35,6 +36,7 @@ use std::ops::Range;
 use super::nullability::Nullability;
 use super::{parse, SchemaData, SqlDialect};
 use crate::catalog::{Columns, RelationKind};
+use crate::signatures::Signature;
 
 /// The column name the cursor's word is replaced by, which no schema defines.
 pub(super) const PLACEHOLDER: &str = "__sqlty_cursor__";
@@ -132,7 +134,7 @@ pub fn complete(
     let typed = &query[prefix.clone()];
     let folded = schema.fold_typed(typed);
     let mut candidates = match context {
-        Context::Relation(qualifier, join) => {
+        Context::Relation(qualifier, join, rows) => {
             let relations = match &qualifier {
                 Some(qualifier) => schema.relations_with_prefix(typed, Some(qualifier), limit + 1),
                 None => schema.visible_relations_with_prefix(typed, limit + 1),
@@ -153,6 +155,9 @@ pub fn complete(
             if join {
                 let scope = &before[..before.len() - usize::from(!prefix.is_empty())];
                 found.extend(joins(scope, typed, schema, dialect, limit + 1));
+            }
+            if rows && !typed.is_empty() {
+                found.extend(table_functions(typed, dialect, limit + 1));
             }
             if qualifier.is_none() {
                 found.extend(
@@ -257,24 +262,50 @@ fn functions<'a>(
         });
     let builtin = crate::signatures::with_prefix(dialect, typed)
         .take(limit)
-        .map(|overloads| Candidate {
-            label: overloads[0].name.to_string(),
-            kind: CandidateKind::Function,
-            detail: Some(match overloads.len() {
-                1 => overloads[0].label.to_string(),
-                n => format!("{} (+{} more)", overloads[0].label, n - 1),
-            }),
-            sql_type: None,
-            nullable: None,
-        });
+        .map(|overloads| builtin(overloads.iter().collect()));
     defined.chain(builtin)
+}
+
+/// The dialect's built-in functions whose name starts with `typed` and that return rows, at
+/// most `limit`, each with its first such overload. O(log n + m) in the function catalog,
+/// for the m names that start with `typed`.
+fn table_functions(
+    typed: &str,
+    dialect: SqlDialect,
+    limit: usize,
+) -> impl Iterator<Item = Candidate> + '_ {
+    crate::signatures::with_prefix(dialect, typed)
+        .map(|overloads| {
+            overloads
+                .iter()
+                .filter(|s| s.returns.starts_with("setof ") || s.returns.starts_with("TABLE"))
+                .collect::<Vec<_>>()
+        })
+        .filter(|rows| !rows.is_empty())
+        .take(limit)
+        .map(builtin)
+}
+
+/// A built-in function, its first overload as detail.
+fn builtin(overloads: Vec<&Signature>) -> Candidate {
+    Candidate {
+        label: overloads[0].name.to_string(),
+        kind: CandidateKind::Function,
+        detail: Some(match overloads.len() {
+            1 => overloads[0].label.to_string(),
+            n => format!("{} (+{} more)", overloads[0].label, n - 1),
+        }),
+        sql_type: None,
+        nullable: None,
+    }
 }
 
 /// What the cursor stands for; the qualifier is the schema of a relation, the alias or
 /// table of a column.
 enum Context {
-    /// Also whether it follows `JOIN`.
-    Relation(Option<String>, bool),
+    /// Also whether it follows `JOIN`, and whether a table function can go there: in `FROM`
+    /// or after `JOIN`, unqualified.
+    Relation(Option<String>, bool, bool),
     Column(Option<String>),
 }
 
@@ -327,7 +358,11 @@ fn context(tokens: &[Tok], cursor: usize) -> Option<(Context, Range<usize>)> {
             return None;
         }
         let join = qualifier.is_none() && is(prev, &["JOIN"]);
-        Context::Relation(qualifier, join)
+        let rows = qualifier.is_none()
+            && ["FROM", "JOIN"]
+                .iter()
+                .any(|w| clause.eq_ignore_ascii_case(w));
+        Context::Relation(qualifier, join, rows)
     } else {
         let after_name = prev.is_some_and(|tok| {
             (tok.word && !is(Some(tok), &COLUMN_CLAUSES) && !is(Some(tok), &OPERATOR_WORDS))

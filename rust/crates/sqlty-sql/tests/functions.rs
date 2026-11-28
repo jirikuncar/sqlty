@@ -119,3 +119,20 @@ fn a_function_name_hovers_outside_a_call_too() {
     );
     assert!(hovered("SELECT up|per(1, 2, 3)").is_some_and(|text| text.contains("upper(text)")));
 }
+
+#[test]
+fn table_functions_complete_after_relations_in_from() {
+    let found = completed("SELECT * FROM users, generate_s|", "postgres");
+    assert_eq!(found[0].0, "generate_series");
+    assert_eq!(found[0].1, CandidateKind::Function);
+    assert!(completed("SELECT * FROM us|", "postgres")[0].1 == CandidateKind::Table);
+    assert!(
+        completed("SELECT * FROM low|", "postgres").is_empty(),
+        "lower returns no rows"
+    );
+    assert!(completed("UPDATE generate_s|", "postgres").is_empty());
+    assert!(completed("SELECT * FROM public.generate_s|", "postgres").is_empty());
+    assert!(completed("SELECT * FROM |", "postgres")
+        .iter()
+        .all(|c| c.1 != CandidateKind::Function));
+}

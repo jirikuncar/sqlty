@@ -246,6 +246,25 @@ q = "--sql\nSELECT id FROM users ORDER BY na<CURSOR>"
 # completions: name column users
 ```
 
+In `FROM` and after `JOIN`, a typed word also completes to the built-ins that return rows,
+after the relations.
+
+```python
+q = "--sql\nSELECT * FROM users, gen<CURSOR>"
+# completions: generate_series function generate_series(start: integer, stop: integer[, step: integer]) -> setof integer (+4 more)
+# completions: generate_subscripts function generate_subscripts(array: anyarray, dim: integer) -> setof integer (+1 more)
+```
+
+```python
+q = "--sql\nSELECT * FROM users u CROSS JOIN LATERAL jsonb_each<CURSOR>"
+# completions: None
+```
+
+```python
+q = "--sql\nUPDATE gen<CURSOR>"
+# completions: None
+```
+
 Nothing typed, or a qualified name, offers no function.
 
 ```python
@@ -316,4 +335,17 @@ dialect = "sqlite"
 q = "--sql\nSELECT * FROM US<CURSOR>"
 # completions: user_names view -
 # completions: users table -
+```
+
+## DuckDB table functions
+
+```toml
+[tool.sqlty]
+dialect = "duckdb"
+```
+
+```python
+q = "--sql\nSELECT * FROM read_cs<CURSOR>"
+# completions: read_csv function read_csv(path: VARCHAR) -> TABLE (+2 more)
+# completions: read_csv_auto function read_csv_auto(path: VARCHAR) -> TABLE (+2 more)
 ```
