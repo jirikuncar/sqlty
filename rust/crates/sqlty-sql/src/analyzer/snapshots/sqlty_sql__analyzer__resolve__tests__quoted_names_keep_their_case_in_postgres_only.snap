@@ -23,7 +23,7 @@ mixed: int | INT | NonNull
 
 SELECT PLAIN FROM case_
 PLAIN: ? | ? | Unknown
-[unknown-table] table `case_` is not defined in the schema
+[unknown-table] table `case_` is not defined in the schema; did you mean `case`?
 
 SELECT `MIXED` FROM `case`
 MIXED: int | INT | NonNull

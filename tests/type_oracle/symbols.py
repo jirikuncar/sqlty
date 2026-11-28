@@ -6,7 +6,7 @@ import ast
 import contextlib
 import typing
 
-from sqlty._source import ParsedSource
+from sqlty.core import ParsedSource
 from tests.type_oracle.ast_fields import _ast_type, _module_types
 from tests.type_oracle.outline import outline
 

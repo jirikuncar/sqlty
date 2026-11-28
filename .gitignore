@@ -35,6 +35,8 @@ src/sqlty/_core.*.pyd
 site/
 docs/assets/playground/sqlty_wasm.wasm
 docs/assets/playground/engine.js
+docs/assets/playground/core.js
+docs/assets/playground/types.js
 npm/wasm/sqlty_wasm.wasm
 docs/assets/playground/examples.json
 bench-result.json

@@ -570,7 +570,7 @@ class Loosens(Scores, extra_items=str):
 
 
 def test_a_coerced_row_keeps_the_fields_of_a_base_in_another_module():
-    from sqlty._source import ParsedSource
+    from sqlty.core import ParsedSource
     from tests.type_oracle.resolver import Resolver
 
     remote = "from dataclasses import dataclass\n@dataclass\nclass Remote:\n    total: int\n"

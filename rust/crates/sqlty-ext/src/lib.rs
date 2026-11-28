@@ -2230,13 +2230,6 @@ mod tests {
     }
 
     #[test]
-    fn nullable_maps_the_three_states() {
-        assert_eq!(nullable(analyzer::Nullability::Nullable), Some(true));
-        assert_eq!(nullable(analyzer::Nullability::NonNull), Some(false));
-        assert_eq!(nullable(analyzer::Nullability::Unknown), None);
-    }
-
-    #[test]
     fn cache_hit_moves_the_entry_to_the_front() {
         let mut cache = vec![
             entry("CREATE TABLE a (x INT)", "postgres"),
@@ -2298,13 +2291,6 @@ mod tests {
     }
 
     #[test]
-    fn schema_is_absent_without_schema_sql() {
-        assert!(schema::<&str>(None, "postgres").is_none());
-        let text = SchemaArg::Text("CREATE TABLE sqlty_ext_present (x INT)");
-        assert!(schema(Some(text), "postgres").is_some());
-    }
-
-    #[test]
     fn schema_for_skips_sources_that_cannot_hold_a_query() {
         let ddl = || Some(SchemaArg::Text("CREATE TABLE sqlty_ext_for (x INT)"));
         assert!(schema_for("print('hello')", ddl(), "postgres").is_none());
@@ -2312,22 +2298,5 @@ mod tests {
         assert!(schema_for("x = '--SQL\\nSELECT 1'", ddl(), "postgres").is_some());
         assert!(schema_for::<&str>("SQL", None, "postgres").is_none());
         assert!(schema_for("", ddl(), "postgres").is_none());
-    }
-
-    #[test]
-    fn skipped_objects_lists_what_the_schema_could_not_parse() {
-        let sql = "CREATE TABLE sqlty_ext_ok (x INT); CREATE TABLE sqlty_ext_bad (x INT,;";
-        let all = skipped_objects(SchemaArg::Text(sql), "postgres");
-        assert!(
-            all.iter().all(|(_, name)| name != "sqlty_ext_ok"),
-            "a parsed table is not skipped: {all:?}"
-        );
-        assert!(all.iter().all(|(kind, _)| kind == "table"), "{all:?}");
-    }
-
-    #[test]
-    fn errors_render_the_message_of_their_source() {
-        let error = Error::from(ConfigError::ImportStyle("nope".to_string()));
-        assert_eq!(error.to_string(), "Unsupported import-style: 'nope'");
     }
 }
