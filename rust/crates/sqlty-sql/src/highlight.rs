@@ -6,8 +6,8 @@
 //! reserves (<https://www.postgresql.org/docs/17/sql-keywords-appendix.html>) and the
 //! verbs and clauses of a statement, which a query rarely uses as a name. A quoted word,
 //! or one after a `.`, is a name. Any other word directly followed by `(` is a function,
-//! unless it names a table, a CTE, an alias or a type: after `INTO`, `TABLE`, `REFERENCES`,
-//! `AS`, `WITH`, `RECURSIVE` or `::`.
+//! unless it names a table, a CTE, an alias or a type: after a name, `)`, `::` or one of
+//! [`RELATION_WORDS`], or before `) AS (`.
 //!
 //! ```
 //! use sqlty_sql::highlight::{highlight, Highlight};
@@ -32,6 +32,7 @@
 
 use std::ops::Range;
 
+use sqlparser::keywords::Keyword;
 use sqlparser::tokenizer::{Token, TokenWithSpan, Tokenizer, Whitespace};
 
 use crate::analyzer::SqlDialect;
@@ -75,15 +76,9 @@ pub fn highlight(sql: &str, dialect: &str) -> Vec<(Range<usize>, Highlight)> {
         .iter()
         .map(|at| (at.clone(), Highlight::Parameter))
         .collect();
+    let calls = calls(&tokens);
     let mut after_period = false;
-    let mut names_relation = false;
     for (at, TokenWithSpan { token, span }) in tokens.iter().enumerate() {
-        let called = || {
-            !names_relation
-                && tokens
-                    .get(at + 1)
-                    .is_some_and(|next| next.token == Token::LParen)
-        };
         let kind = match token {
             Token::Whitespace(
                 Whitespace::SingleLineComment { .. } | Whitespace::MultiLineComment(_),
@@ -98,7 +93,10 @@ pub fn highlight(sql: &str, dialect: &str) -> Vec<(Range<usize>, Highlight)> {
                 {
                     Some(Highlight::Keyword)
                 } else {
-                    called().then_some(Highlight::Function)
+                    calls
+                        .binary_search(&at)
+                        .is_ok()
+                        .then_some(Highlight::Function)
                 }
             }
             Token::Number(..) => Some(Highlight::Number),
@@ -118,22 +116,6 @@ pub fn highlight(sql: &str, dialect: &str) -> Vec<(Range<usize>, Highlight)> {
             _ => Some(Highlight::Operator),
         };
         after_period = *token == Token::Period;
-        let qualifies = || {
-            tokens
-                .get(at + 1)
-                .is_some_and(|next| next.token == Token::Period)
-        };
-        names_relation = match token {
-            Token::Word(_) if names_relation && qualifies() => true,
-            Token::Word(word) if word.quote_style.is_none() => {
-                ["INTO", "TABLE", "REFERENCES", "AS", "WITH", "RECURSIVE"]
-                    .iter()
-                    .any(|before| word.value.eq_ignore_ascii_case(before))
-            }
-            Token::DoubleColon => true,
-            Token::Period => names_relation,
-            _ => false,
-        };
         let (Some(kind), Some(start), Some(end)) =
             (kind, offsets.offset(span.start), offsets.offset(span.end))
         else {
@@ -148,6 +130,73 @@ pub fn highlight(sql: &str, dialect: &str) -> Vec<(Range<usize>, Highlight)> {
     found.sort_by_key(|(range, _)| range.start);
     found
 }
+
+/// The indexes of the words called as functions, in order: each directly followed by `(`, and
+/// not a table, CTE, alias or type. One pass, and one more to pair parentheses.
+fn calls(tokens: &[TokenWithSpan]) -> Vec<usize> {
+    let significant: Vec<usize> = (0..tokens.len())
+        .filter(|&at| !matches!(tokens[at].token, Token::Whitespace(_)))
+        .collect();
+    let mut closing = vec![None; significant.len()];
+    let mut open = Vec::new();
+    for (k, &at) in significant.iter().enumerate() {
+        match tokens[at].token {
+            Token::LParen => open.push(k),
+            Token::RParen => {
+                if let Some(opened) = open.pop() {
+                    closing[opened] = Some(k);
+                }
+            }
+            _ => {}
+        }
+    }
+    let token = |k: usize| significant.get(k).map(|&at| &tokens[at].token);
+    let word = |k: usize, words: &[&str]| {
+        matches!(token(k), Some(Token::Word(w)) if w.quote_style.is_none()
+            && words.iter().any(|word| w.value.eq_ignore_ascii_case(word)))
+    };
+    let mut found = Vec::new();
+    for (k, &at) in significant.iter().enumerate() {
+        if !matches!(tokens[at].token, Token::Word(_))
+            || tokens
+                .get(at + 1)
+                .is_none_or(|next| next.token != Token::LParen)
+        {
+            continue;
+        }
+        let mut first = k;
+        while first >= 2 && token(first - 1) == Some(&Token::Period) {
+            first -= 2;
+        }
+        let names = first.checked_sub(1).is_some_and(|before| {
+            word(before, RELATION_WORDS)
+                || matches!(token(before), Some(Token::RParen | Token::DoubleColon))
+                || matches!(token(before), Some(Token::Word(w))
+                    if w.quote_style.is_some() || w.keyword == Keyword::NoKeyword)
+        });
+        let cte = closing[k + 1].is_some_and(|end| {
+            word(end + 1, &["AS"])
+                && (token(end + 2) == Some(&Token::LParen)
+                    || word(end + 2, &["MATERIALIZED", "NOT"]))
+        });
+        if !names && !cte {
+            found.push(at);
+        }
+    }
+    found
+}
+
+/// Words after which a name followed by `(` is a table, CTE, alias or type.
+const RELATION_WORDS: &[&str] = &[
+    "AS",
+    "COPY",
+    "EXISTS",
+    "INTO",
+    "RECURSIVE",
+    "REFERENCES",
+    "TABLE",
+    "WITH",
+];
 
 fn is_string(token: &Token) -> bool {
     matches!(
@@ -461,6 +510,25 @@ mod tests {
                 "postgres"
             ),
             Vec::<&str>::new()
+        );
+        for sql in [
+            "WITH a AS (SELECT 1), b(x) AS (SELECT 2) SELECT x FROM b",
+            "SELECT n FROM generate_series(1, 3) g(n)",
+            "SELECT id FROM unnest(%(ids)s::int[]) t(id)",
+            "CREATE TABLE IF NOT EXISTS t(a varchar(3), b numeric(10, 2))",
+            "COPY users(id) FROM STDIN",
+            "INSERT INTO /* c */ users(id) VALUES (1)",
+        ] {
+            assert!(
+                functions(sql, "postgres")
+                    .iter()
+                    .all(|name| ["generate_series", "unnest"].contains(name)),
+                "{sql}"
+            );
+        }
+        assert_eq!(
+            functions("SELECT count(*) AS n, lower(x) FROM t", "postgres"),
+            ["count", "lower"]
         );
     }
 

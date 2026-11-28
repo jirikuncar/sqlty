@@ -189,6 +189,25 @@ q = "--sql\nWITH c(a) AS (SELECT CAST(1 AS numeric(10, 2))) INSERT INTO users(id
 # highlighted: keyword AS
 ```
 
+An alias without `AS`, and a later CTE, are not functions either.
+
+```python
+q = "--sql\nWITH a AS (SELECT 1), b(x) AS (SELECT 2) SELECT n FROM b, generate_series(1, 3) g(n)"
+# highlighted: comment --sql
+# highlighted: keyword WITH
+# highlighted: keyword AS
+# highlighted: keyword SELECT
+# highlighted: number 1
+# highlighted: keyword AS
+# highlighted: keyword SELECT
+# highlighted: number 2
+# highlighted: keyword SELECT
+# highlighted: keyword FROM
+# highlighted: function generate_series
+# highlighted: number 1
+# highlighted: number 3
+```
+
 ### MySQL
 
 ```toml

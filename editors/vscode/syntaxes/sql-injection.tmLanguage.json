@@ -200,7 +200,7 @@
         },
         {
           "name": "support.function.sql",
-          "match": "(?:(?<=\\\\[ntr])|(?<![\\w$\\\\]))(?<!::)[A-Za-z_]\\w*(?=\\()"
+          "match": "(?:(?<=\\\\[ntr])|(?<![\\w$\\\\]))(?<!::)(?<!(?i:as|copy|exists|into|recursive|references|table|with)\\s)(?<!\\)\\s)[A-Za-z_]\\w*(?=\\()"
         },
         {
           "name": "constant.numeric.sql",

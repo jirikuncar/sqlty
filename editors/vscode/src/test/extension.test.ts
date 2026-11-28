@@ -100,10 +100,11 @@ suite("sqlty", () => {
     const keywords = ["SELECT", "FROM", "WHERE", "SELECT", "AS", "FROM", "SELECT", "FROM", "WHERE"];
     const interpolated = ["SELECT", "FROM", "SELECT", "FROM", "WHERE", "LIMIT"];
     interpolated.push("SELECT", "FROM", "SELECT", "FROM", "SELECT", "FROM");
+    interpolated.push("INSERT", "INTO", "SELECT", "CAST", "AS");
     assert.deepEqual(sql("keyword.other.sql"), [...keywords, "SELECT", "FROM", ...interpolated]);
     assert.deepEqual(sql("support.function.sql"), ["count", "now"]);
     const comments = ["--sql", "-- note", "-- sql", "--sql", "--sql"];
-    comments.push("--sql", "--sql", "--sql", "--sql", "--sql");
+    comments.push("--sql", "--sql", "--sql", "--sql", "--sql", "--sql");
     assert.deepEqual(sql("comment.line.double-dash.sql"), comments);
     assert.deepEqual(sql("comment.block.sql"), ["/* the", "key */"]);
     assert.deepEqual(sql("string.quoted.single.sql").join(""), "'it''s''{{literal}}'");
@@ -116,7 +117,7 @@ suite("sqlty", () => {
     const expressions = tokens.filter((token) => /\b(user_id|limit)\b/.test(token.c));
     assert.ok(expressions.every((token) => !token.t.includes("keyword.other.sql")));
     assert.deepEqual(sql("variable.parameter.sql"), ["%(id)s", "$1"]);
-    assert.deepEqual(sql("constant.numeric.sql"), ["1"]);
+    assert.deepEqual(sql("constant.numeric.sql"), ["1", "1", "10", "2"]);
     const unmarked = ["SELECT plain", "SELECT raw", "SELECT data", "unmarked_"];
     const outside = tokens.filter(
       (token) =>
