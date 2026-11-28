@@ -55,7 +55,10 @@ fn functions_by_prefix() {
     assert!(names("zzz").is_empty());
     assert!(names("é").is_empty());
     let all = names("");
-    assert!(all.windows(2).all(|w| w[0].0 < w[1].0), "one entry per name, in order");
+    assert!(
+        all.windows(2).all(|w| w[0].0 < w[1].0),
+        "one entry per name, in order"
+    );
     assert_eq!(with_prefix(Dialect::ClickHouse, "").count(), 0);
 }
 
