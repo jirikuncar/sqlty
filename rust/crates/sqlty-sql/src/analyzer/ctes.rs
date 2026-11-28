@@ -95,8 +95,8 @@ impl Walk {
     /// `TABLE name`, which sqlparser does not visit as a relation.
     fn tables(&mut self, body: &SetExpr) {
         match body {
-            SetExpr::Table(table) if table.schema_name.is_none() => {
-                if let Some(name) = &table.table_name {
+            SetExpr::Table(table) => {
+                if let (None, Some(name)) = (&table.schema_name, &table.table_name) {
                     let name = fold(name, self.dialect);
                     self.read(&name);
                 }
@@ -147,19 +147,15 @@ impl Visitor for Walk {
 
     fn post_visit_query(&mut self, query: &Query) -> ControlFlow<()> {
         self.tables(&query.body);
-        if query.with.is_some() {
-            if let Some(frame) = self.frames.pop() {
-                for cte in &frame.ctes[..frame.visible] {
-                    if let Some(found) = self.scope.get_mut(&cte.name) {
-                        found.pop();
-                    }
-                }
-                let unused = frame
-                    .ctes
-                    .into_iter()
-                    .filter(|cte| !cte.read && !cte.modifies);
-                self.unused.extend(unused.map(|cte| (cte.name, cte.span)));
+        if let Some(frame) = self.frames.pop_if(|_| query.with.is_some()) {
+            for cte in &frame.ctes[..frame.visible] {
+                self.scope.get_mut(&cte.name).and_then(Vec::pop);
             }
+            let unused = frame
+                .ctes
+                .into_iter()
+                .filter(|cte| !cte.read && !cte.modifies);
+            self.unused.extend(unused.map(|cte| (cte.name, cte.span)));
         }
         self.enter(query, true);
         ControlFlow::Continue(())
@@ -174,11 +170,13 @@ impl Visitor for Walk {
         if std::mem::take(&mut self.function) {
             return ControlFlow::Continue(());
         }
-        if let [part] = relation.0.as_slice() {
-            if let Some(ident) = part.as_ident() {
-                let name = fold(ident, self.dialect);
-                self.read(&name);
-            }
+        let ident = match relation.0.as_slice() {
+            [part] => part.as_ident(),
+            _ => None,
+        };
+        if let Some(ident) = ident {
+            let name = fold(ident, self.dialect);
+            self.read(&name);
         }
         ControlFlow::Continue(())
     }
