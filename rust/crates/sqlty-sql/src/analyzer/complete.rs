@@ -156,8 +156,8 @@ pub fn complete(
                 let scope = &before[..before.len() - usize::from(!prefix.is_empty())];
                 found.extend(joins(scope, typed, schema, dialect, limit + 1));
             }
-            if rows && !typed.is_empty() {
-                found.extend(table_functions(typed, dialect, limit + 1));
+            if rows {
+                found.extend(table_functions(typed, schema, dialect, limit + 1));
             }
             if qualifier.is_none() {
                 found.extend(
@@ -175,6 +175,7 @@ pub fn complete(
             }
             found
         }
+        Context::Function => table_functions(typed, schema, dialect, limit + 1).collect(),
         Context::Column(qualifier) => {
             let mut probe = query[..prefix.start].to_string();
             probe.push_str(PLACEHOLDER);
@@ -262,32 +263,47 @@ fn functions<'a>(
         });
     let builtin = crate::signatures::with_prefix(dialect, typed)
         .take(limit)
-        .map(|overloads| builtin(overloads.iter().collect()));
+        .map(|overloads| builtin(&overloads.iter().collect::<Vec<_>>()));
     defined.chain(builtin)
 }
 
 /// The dialect's built-in functions whose name starts with `typed` and that return rows, at
 /// most `limit`, each with its first such overload. O(log n + m) in the function catalog,
 /// for the m names that start with `typed`.
-fn table_functions(
-    typed: &str,
+fn table_functions<'a>(
+    typed: &'a str,
+    schema: &'a SchemaData,
     dialect: SqlDialect,
     limit: usize,
-) -> impl Iterator<Item = Candidate> + '_ {
-    crate::signatures::with_prefix(dialect, typed)
-        .map(|overloads| {
-            overloads
-                .iter()
-                .filter(|s| s.returns.starts_with("setof ") || s.returns.starts_with("TABLE"))
-                .collect::<Vec<_>>()
-        })
-        .filter(|rows| !rows.is_empty())
+) -> impl Iterator<Item = Candidate> + 'a {
+    let rows = |s: &&Signature| {
+        ["setof ", "TABLE", "record"]
+            .iter()
+            .any(|kind| s.returns.starts_with(kind))
+    };
+    let defined = schema
+        .functions_with_prefix(typed, None, limit)
+        .into_iter()
+        .filter(|function| schema.returns_rows(function.key))
+        .map(move |function| Candidate {
+            label: spelled(function.name, dialect),
+            kind: CandidateKind::Function,
+            detail: function.schema.map(str::to_string),
+            sql_type: None,
+            nullable: None,
+        });
+    let builtin = crate::signatures::with_prefix(dialect, typed)
+        .filter(move |overloads| overloads.iter().any(|s| rows(&s)))
         .take(limit)
-        .map(builtin)
+        .map(move |overloads| builtin(&overloads.iter().filter(rows).collect::<Vec<_>>()));
+    (!typed.is_empty())
+        .then(|| defined.chain(builtin))
+        .into_iter()
+        .flatten()
 }
 
 /// A built-in function, its first overload as detail.
-fn builtin(overloads: Vec<&Signature>) -> Candidate {
+fn builtin(overloads: &[&Signature]) -> Candidate {
     Candidate {
         label: overloads[0].name.to_string(),
         kind: CandidateKind::Function,
@@ -306,6 +322,8 @@ enum Context {
     /// Also whether it follows `JOIN`, and whether a table function can go there: in `FROM`
     /// or after `JOIN`, unqualified.
     Relation(Option<String>, bool, bool),
+    /// After `LATERAL`, where only a function or a subquery can go.
+    Function,
     Column(Option<String>),
 }
 
@@ -354,14 +372,20 @@ fn context(tokens: &[Tok], cursor: usize) -> Option<(Context, Range<usize>)> {
         .iter()
         .any(|w| clause.eq_ignore_ascii_case(w))
     {
-        if crossed || !(is(prev, &RELATION_CLAUSES) || prev.is_some_and(|tok| tok.text == ",")) {
-            return None;
-        }
-        let join = qualifier.is_none() && is(prev, &["JOIN"]);
         let rows = qualifier.is_none()
             && ["FROM", "JOIN"]
                 .iter()
                 .any(|w| clause.eq_ignore_ascii_case(w));
+        if !crossed && rows && is(prev, &["LATERAL"]) {
+            return Some((Context::Function, prefix));
+        }
+        if crossed || !(is(prev, &RELATION_CLAUSES) || prev.is_some_and(|tok| tok.text == ",")) {
+            return None;
+        }
+        let join = qualifier.is_none() && is(prev, &["JOIN"]);
+        let deleted =
+            is(prev, &["FROM"]) && is(end.checked_sub(2).map(|i| &tokens[i]), &["DELETE"]);
+        let rows = rows && !deleted;
         Context::Relation(qualifier, join, rows)
     } else {
         let after_name = prev.is_some_and(|tok| {
