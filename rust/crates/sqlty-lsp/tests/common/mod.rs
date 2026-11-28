@@ -6,12 +6,16 @@ use std::path::{Path, PathBuf};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
-use lsp_server::{Connection, Message, Notification, Request, RequestId};
+use lsp_server::{Connection, Message, Notification, Request, RequestId, Response};
 use serde_json::{json, Value};
-use sqlty_lsp::{run, Diagnostic, Settings, Workspace};
+use sqlty_lsp::{run, CompletionContext, Diagnostic, Settings, Workspace};
+use sqlty_sql::analyzer::{load_schema_with_skipped, Schema};
 
-/// A workspace whose files have no diagnostics and whose commands change nothing.
-pub struct Plain;
+/// A workspace whose files have no diagnostics and whose commands change nothing, checked
+/// against `schema` once a check has read them.
+pub struct Plain {
+    schema: Option<Schema>,
+}
 
 impl Workspace for Plain {
     fn check(&mut self, _: &Path, _: &str) -> Result<Vec<Diagnostic>, String> {
@@ -37,6 +41,15 @@ impl Workspace for Plain {
     fn breaking(&mut self) -> Result<Vec<(PathBuf, Vec<Diagnostic>)>, String> {
         Ok(Vec::new())
     }
+
+    fn completion(&mut self, _: &Path) -> Option<CompletionContext> {
+        Some(CompletionContext {
+            schema: self.schema.clone(),
+            dialect: "postgres".to_string(),
+            import_style: None,
+            helper_starts: Vec::new(),
+        })
+    }
 }
 
 pub struct Client {
@@ -50,9 +63,21 @@ pub struct Client {
 impl Client {
     /// A server for the folder `file:///work`, initialized with `options`.
     pub fn start(options: &Value) -> Self {
+        Self::with(&json!({}), options, None)
+    }
+
+    /// [`Client::start`] for a client with `capabilities`, its files checked against the
+    /// PostgreSQL `schema`.
+    pub fn with(capabilities: &Value, options: &Value, schema: Option<&str>) -> Self {
+        let schema = schema.map(|sql| load_schema_with_skipped(sql, "postgres").0);
         let (server, connection) = Connection::memory();
         let server = std::thread::spawn(move || {
-            run(&server, |_: &Path, _: &Settings| Ok(Plain)).map_err(|error| error.to_string())
+            run(&server, move |_: &Path, _: &Settings| {
+                Ok(Plain {
+                    schema: schema.clone(),
+                })
+            })
+            .map_err(|error| error.to_string())
         });
         let mut client = Self {
             initialized: Value::Null,
@@ -63,7 +88,7 @@ impl Client {
         let folders = json!([{"uri": "file:///work", "name": "work"}]);
         client.initialized = client.request(
             "initialize",
-            json!({"capabilities": {}, "workspaceFolders": folders, "initializationOptions": options}),
+            json!({"capabilities": capabilities, "workspaceFolders": folders, "initializationOptions": options}),
         );
         client.notify("initialized", json!({}));
         client
@@ -86,12 +111,7 @@ impl Client {
         let request = Request::new(id.clone(), method.to_string(), params);
         self.connection.sender.send(request.into()).unwrap();
         loop {
-            let message = self
-                .connection
-                .receiver
-                .recv_timeout(Duration::from_secs(10))
-                .unwrap();
-            match message {
+            match self.receive() {
                 Message::Response(response) if response.id == id => {
                     return response.response_result.unwrap_or(Value::Null);
                 }
@@ -100,8 +120,41 @@ impl Client {
         }
     }
 
-    /// Semantic tokens of `uri` as `(line, character, length, type)`, positions absolute.
-    pub fn tokens(&mut self, uri: &str) -> Vec<(u64, u64, u64, u64)> {
+    /// The params of the next `method` notification, skipping what the server sends before.
+    pub fn notification(&self, method: &str) -> Value {
+        loop {
+            match self.receive() {
+                Message::Notification(notification) if notification.method == method => {
+                    return notification.params;
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// Waits for the server to send the request `method`, and answers it.
+    pub fn asked(&self, method: &str) {
+        loop {
+            if let Message::Request(request) = self.receive() {
+                let response = Response::new_ok(request.id, Value::Null);
+                self.connection.sender.send(response.into()).unwrap();
+                if request.method == method {
+                    return;
+                }
+            }
+        }
+    }
+
+    fn receive(&self) -> Message {
+        self.connection
+            .receiver
+            .recv_timeout(Duration::from_secs(10))
+            .unwrap()
+    }
+
+    /// Semantic tokens of `uri` as `(line, character, length, type, modifiers)`, positions
+    /// absolute.
+    pub fn tokens(&mut self, uri: &str) -> Vec<(u64, u64, u64, u64, u64)> {
         let tokens = self.request(
             "textDocument/semanticTokens/full",
             json!({"textDocument": {"uri": uri}}),
@@ -116,7 +169,7 @@ impl Client {
                 } else {
                     token[1]
                 };
-                (line, character, token[2], token[3])
+                (line, character, token[2], token[3], token[4])
             })
             .collect()
     }

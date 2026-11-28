@@ -86,9 +86,9 @@ def test_cursor_defaults() -> None:
     assert _core.complete_source(QUERY, 15) == (15, 15, False, [])
     assert _core.hover_source(QUERY, 18) is None
     assert _core.highlight_source(QUERY) == [
-        (5, 10, "comment"),
-        (12, 18, "keyword"),
-        (19, 20, "number"),
+        (5, 10, "comment", []),
+        (12, 18, "keyword", []),
+        (19, 20, "number", []),
     ]
     source = 'q = "--sql\\nSELECT * FROM "\n'
     found = _core.complete_source(source, 26, schema_sql="CREATE VIEW v AS SELECT 1 AS a;")

@@ -46,7 +46,6 @@ use sqlty_sql::analyzer::{
     explain_select, load_schema_with_overrides, load_schema_with_skipped, parse, route, row_type,
     CandidateKind, Nullability, RuleRef, Schema, SchemaData, TypeOverrides,
 };
-use sqlty_sql::highlight::Highlight;
 
 #[derive(Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -287,9 +286,9 @@ pub fn run(request: &str) -> String {
                 .map(|(line, _, sql)| described(line, &sql, dialect, &options))
                 .collect::<Vec<_>>(),
             "highlights": queries
-                .highlights(dialect)
+                .highlights(dialect, schema.as_deref())
                 .into_iter()
-                .map(|(range, kind)| json!([utf16(range.start), utf16(range.end), highlight(kind)]))
+                .map(|(range, kind)| json!([utf16(range.start), utf16(range.end), kind.token_type(), kind.modifiers()]))
                 .collect::<Vec<_>>(),
             "rewritten": params(rewrite_source_with(source, &options, false)),
             "stripped": strip_source(source, &options.style),
@@ -673,18 +672,6 @@ fn byte_offset(source: &str, units: usize) -> usize {
         counted += char.len_utf16();
     }
     source.len()
-}
-
-fn highlight(kind: Highlight) -> &'static str {
-    match kind {
-        Highlight::Keyword => "keyword",
-        Highlight::Function => "function",
-        Highlight::String => "string",
-        Highlight::Number => "number",
-        Highlight::Comment => "comment",
-        Highlight::Operator => "operator",
-        Highlight::Parameter => "parameter",
-    }
 }
 
 fn candidate_kind(kind: CandidateKind) -> &'static str {

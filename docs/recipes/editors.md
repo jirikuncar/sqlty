@@ -46,8 +46,12 @@ vim.api.nvim_create_autocmd("FileType", {
 ### Highlighting
 
 The server sends the SQL of each checked string as semantic tokens: keywords, function
-names, strings, numbers, comments, operators and placeholders. Neovim colors them with its default
-`@lsp.type.keyword`, `@lsp.type.string`, ... highlight groups, so a theme needs no change.
+names, strings, numbers, comments, operators, placeholders and cast types, and each name by
+what it resolves to in the schema: `class` for a table, `interface` for a view, `namespace`
+for a schema, `variable` for an alias or CTE (`declaration` where the query defines it),
+`property` for a column (`deprecated` when the project deprecates it). A function or type
+the schema does not define is `defaultLibrary`. Neovim colors them with its default `@lsp.type.keyword`,
+`@lsp.type.property`, ... highlight groups, so a theme needs no change.
 
 ```python
 from typing import Annotated, LiteralString
@@ -69,8 +73,8 @@ plain = "SELECT name FROM users"
 ```
 
 The helper's query is colored because `sqlty check` checks it; `plain` stays a Python
-string. Names are left uncolored: only reserved words and clauses are keywords, so a
-column named `name` or `status` reads as a name.
+string. Only reserved words and clauses are keywords, so a column named `name` or `status`
+reads as a name; without a schema that defines `users`, its names stay uncolored.
 
 !!! note "Semantic tokens need no tree-sitter query"
     A tree-sitter injection reads the source, where `\n` is two characters, so it would

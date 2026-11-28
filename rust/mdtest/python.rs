@@ -320,7 +320,7 @@ impl<'s> Run<'s> {
             "highlighted" => {
                 let queries = self.queries_of(text)?;
                 let lines: Vec<String> = queries
-                    .highlights(self.dialect)
+                    .highlights(self.dialect, self.schema.as_deref())
                     .into_iter()
                     .flat_map(|(range, kind)| {
                         text[range]
@@ -573,16 +573,12 @@ fn candidate_kind(kind: CandidateKind) -> &'static str {
     }
 }
 
-fn highlight_kind(kind: Highlight) -> &'static str {
-    match kind {
-        Highlight::Keyword => "keyword",
-        Highlight::Function => "function",
-        Highlight::String => "string",
-        Highlight::Number => "number",
-        Highlight::Comment => "comment",
-        Highlight::Operator => "operator",
-        Highlight::Parameter => "parameter",
-    }
+/// `type` or `type.modifier`, as the LSP legend names them.
+fn highlight_kind(kind: Highlight) -> String {
+    std::iter::once(kind.token_type())
+        .chain(kind.modifiers().iter().copied())
+        .collect::<Vec<_>>()
+        .join(".")
 }
 
 /// `output`, which must be valid Python with the same comments when `source` is; with

@@ -90,8 +90,13 @@ export type Query = {
 export type Analysis = {
   diagnostics: Diagnostic[];
   queries: Query[];
-  /** SQL tokens to color: start, end and `keyword`, `function`, `string`, `number`, `comment`, `operator` or `parameter`. */
-  highlights: [number, number, string][];
+  /**
+   * SQL tokens to color: start, end, the LSP semantic token type (`keyword`, `function`,
+   * `string`, `number`, `comment`, `operator`, `parameter`, `class` for a table, `interface`
+   * for a view, `namespace` for a schema, `variable` for an alias or CTE, `property` for a
+   * column, `type`) and its modifiers (`declaration`, `defaultLibrary`, `deprecated`).
+   */
+  highlights: [number, number, string, string[]][];
   /** What `sqlty rewrite`, `sqlty strip` and `sqlty check --fix` make of the source. */
   rewritten: string;
   stripped: string;

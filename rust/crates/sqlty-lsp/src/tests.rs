@@ -679,8 +679,18 @@ fn completion_hover_and_highlighting_are_advertised_unless_off() {
                     "comment",
                     "operator",
                     "parameter",
-                    "function"
+                    "function",
+                    "class",
+                    "interface",
+                    "namespace",
+                    "variable",
+                    "property",
+                    "type"
                 ])
+            );
+            assert_eq!(
+                tokens["legend"]["tokenModifiers"],
+                json!(["declaration", "defaultLibrary", "deprecated"])
             );
         } else {
             assert!(tokens.is_null(), "{tokens}");

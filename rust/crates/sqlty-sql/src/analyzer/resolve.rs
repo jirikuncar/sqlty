@@ -14,6 +14,7 @@ use sqlparser::ast::{Expr, Ident, TableFactor, TableWithJoins};
 
 use crate::catalog::{fold, folded, lowercase};
 use crate::diagnostics::{NameDiagnostic, Rule};
+use crate::highlight::Highlight;
 
 use super::dialect::SqlDialect;
 use super::literals::value_set;
@@ -264,6 +265,49 @@ impl<'a> Analyzer<'a> {
         expr: &'r Expr,
         scope: &'r Scope,
     ) -> Option<Resolved<'r, 'a>> {
+        let resolved = self.find_reference(expr, scope)?;
+        if self.diag.names_wanted() {
+            self.name_reference(expr, &resolved);
+        }
+        Some(resolved)
+    }
+
+    /// Records what the parts of the column reference `expr` name: the column, its
+    /// qualifier (an alias, CTE, table or view) and the qualifier's schema.
+    fn name_reference(&self, expr: &Expr, resolved: &Resolved<'_, '_>) {
+        let parts = match expr {
+            Expr::Identifier(ident) => std::slice::from_ref(ident),
+            Expr::CompoundIdentifier(parts) => parts.as_slice(),
+            _ => return,
+        };
+        let (table, column) = (&*resolved.table, &*resolved.column);
+        let deprecated = matches!(resolved.found, ColumnRef::Schema(_))
+            && self.schema.deprecation(table, column).is_some();
+        let mut parts = parts.iter().rev();
+        if let Some(name) = parts.next() {
+            self.diag
+                .name(name.span, || Highlight::Column { deprecated });
+        }
+        if let Some(qualifier) = parts.next() {
+            let named = table.rsplit('.').next().unwrap_or(table);
+            self.diag.name(qualifier.span, || {
+                if self.virtuals.contains_key(table)
+                    || !resolved.reference.eq_ignore_ascii_case(named)
+                {
+                    Highlight::Variable { declaration: false }
+                } else if self.schema.view(table).is_some() {
+                    Highlight::View
+                } else {
+                    Highlight::Table
+                }
+            });
+        }
+        if let Some(schema) = parts.next() {
+            self.diag.name(schema.span, || Highlight::Schema);
+        }
+    }
+
+    fn find_reference<'r>(&'r self, expr: &'r Expr, scope: &'r Scope) -> Option<Resolved<'r, 'a>> {
         match expr {
             Expr::Identifier(ident) => {
                 let column = folded(ident, self.dialect);

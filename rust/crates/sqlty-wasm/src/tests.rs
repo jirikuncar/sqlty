@@ -30,8 +30,8 @@ fn analyze_types_each_query_and_its_parameters() {
         answer["rewritten"],
         "from sqlty import SQL\nq = SQL[tuple[int, str | None], tuple[str | None]](\"--sql\\nSELECT id, email FROM users WHERE name = %s\")\n"
     );
-    assert_eq!(answer["highlights"][0], json!([5, 10, "comment"]));
-    assert_eq!(answer["highlights"][1], json!([12, 18, "keyword"]));
+    assert_eq!(answer["highlights"][0], json!([5, 10, "comment", []]));
+    assert_eq!(answer["highlights"][1], json!([12, 18, "keyword", []]));
 }
 
 #[test]
@@ -45,8 +45,8 @@ fn analyze_highlights_a_long_line_in_utf16_units() {
         ask(&json!({"op": "analyze", "source": source, "schema": SCHEMA, "dialect": "postgres"}));
     let highlights = answer["highlights"].as_array().unwrap();
     assert_eq!(highlights.len(), 3 + 50_000);
-    assert_eq!(highlights[2], json!([19, 22, "string"]));
-    assert_eq!(highlights[3], json!([24, 25, "number"]));
+    assert_eq!(highlights[2], json!([19, 22, "string", []]));
+    assert_eq!(highlights[3], json!([24, 25, "number", []]));
 }
 
 #[test]
@@ -509,8 +509,9 @@ fn an_offset_past_the_end_is_the_end() {
 #[test]
 fn every_highlight_and_candidate_kind_has_a_name() {
     let source = "q = \"--sql\\nWITH c AS (SELECT 1) SELECT 'a', 1 + $1, now() FROM \"";
+    let colored = "q = \"--sql\\nWITH c AS (SELECT 1 AS x) SELECT 'a', 1 + $1, now(), u.id::int, c.x FROM public.users u, v, c\"";
     let answer = ask(&json!({
-        "op": "analyze", "source": source,
+        "op": "analyze", "source": colored,
         "schema": format!("{SCHEMA}\nCREATE VIEW v AS SELECT id FROM users;"), "dialect": "postgres",
     }));
     let kinds: std::collections::BTreeSet<_> = answer["highlights"]
@@ -522,13 +523,19 @@ fn every_highlight_and_candidate_kind_has_a_name() {
     assert_eq!(
         kinds,
         [
+            "class",
             "comment",
             "function",
+            "interface",
             "keyword",
+            "namespace",
             "number",
             "operator",
             "parameter",
-            "string"
+            "property",
+            "string",
+            "type",
+            "variable",
         ]
         .into()
     );

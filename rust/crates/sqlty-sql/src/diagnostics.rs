@@ -55,6 +55,8 @@ struct Inner {
     explained: usize,
     /// The columns the completion placeholder could name, once the analyzer reaches it.
     probe: Option<Vec<crate::analyzer::Candidate>>,
+    /// What each name resolved to, when highlighting asked for it.
+    names: Option<Vec<(Span, crate::highlight::Highlight)>>,
 }
 
 impl Inner {
@@ -109,6 +111,32 @@ impl Diagnostics {
         if inner.enabled && inner.probe.is_none() {
             inner.probe = Some(candidates());
         }
+    }
+
+    /// A sink that also keeps what each name resolves to, for [`Diagnostics::names`].
+    pub(crate) fn naming() -> Self {
+        Diagnostics(Rc::new(RefCell::new(Inner {
+            enabled: true,
+            names: Some(Vec::new()),
+            ..Inner::default()
+        })))
+    }
+
+    /// Record that the name sqlparser read at `span` is `kind`, when naming.
+    pub(crate) fn name(&self, span: Span, kind: impl FnOnce() -> crate::highlight::Highlight) {
+        if let Some(names) = &mut self.0.borrow_mut().names {
+            names.push((span, kind()));
+        }
+    }
+
+    /// Whether names are recorded.
+    pub(crate) fn names_wanted(&self) -> bool {
+        self.0.borrow().names.is_some()
+    }
+
+    /// The names recorded, in the order the analyzer resolved them.
+    pub(crate) fn names(&self) -> Vec<(Span, crate::highlight::Highlight)> {
+        self.0.borrow_mut().names.take().unwrap_or_default()
     }
 
     /// Whether diagnostics are collected. Guard the building of messages with it.

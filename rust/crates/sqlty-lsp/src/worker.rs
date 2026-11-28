@@ -171,9 +171,22 @@ where
         .map(|d| actions::diagnostic(d, &index))
         .collect();
     document.diagnostics = Some((version, diagnostics));
-    let before = highlight::reading(document.completion.as_ref(), &text);
+    let schema = |document: &crate::Document| {
+        document
+            .completion
+            .as_ref()
+            .and_then(|(_, context)| context.schema.as_ref().map(std::sync::Arc::as_ptr))
+    };
+    let before = (
+        highlight::reading(document.completion.as_ref(), &text),
+        schema(document),
+    );
     document.completion = completion.map(|context| (text.clone(), context));
-    let unchanged = before == highlight::reading(document.completion.as_ref(), &text);
+    let unchanged = before
+        == (
+            highlight::reading(document.completion.as_ref(), &text),
+            schema(document),
+        );
     drop(documents);
     shared.publish(uri, published, Some(version));
     if !unchanged {

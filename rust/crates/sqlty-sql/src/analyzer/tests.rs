@@ -782,7 +782,7 @@ fn rarer_suggestions_highlights_and_placeholders() {
         parse_error("UPDATE t SET (a, b) = (1, 2)", "postgres"),
         None
     );
-    let operators: Vec<_> = crate::highlight::highlight("SELECT a ~~~ b", "postgres")
+    let operators: Vec<_> = crate::highlight::highlight("SELECT a ~~~ b", "postgres", None)
         .into_iter()
         .map(|(range, _)| range)
         .collect();

@@ -510,22 +510,28 @@ def complete_source(
 class Highlight(NamedTuple):
     """A token to color: the bytes ``start`` to ``end`` of the source.
 
-    ``kind`` is ``keyword``, ``function``, ``string``, ``number``, ``comment``, ``operator``
-    or ``parameter``.
+    ``kind`` is an LSP semantic token type: ``keyword``, ``function``, ``string``, ``number``,
+    ``comment``, ``operator``, ``parameter``, ``class`` (a table), ``interface`` (a view),
+    ``namespace`` (a schema), ``variable`` (an alias or CTE), ``property`` (a column) or
+    ``type``. ``modifiers`` are ``declaration``, ``defaultLibrary`` and ``deprecated``.
     """
 
     start: int
     end: int
     kind: str
+    modifiers: tuple[str, ...] = ()
 
 
 def highlight_source(source: str | ParsedSource, settings: Settings = DEFAULT) -> list[Highlight]:
     r"""The SQL tokens to color in the strings ``sqlty check`` reads, in order.
 
-    The strings are those of ``complete_source``; every other string stays a Python string. Names
-    are not colored: a word is a keyword only when it is a reserved word or a clause, so
-    ``name`` and ``status`` stay names, and a function only when ``(`` follows it. A token written across string literals or escape
-    sequences gets one range per piece. ``sqlty server`` sends these as semantic tokens.
+    The strings are those of ``complete_source``; every other string stays a Python string. A
+    word is a keyword only when it is a reserved word or a clause, so ``name`` and ``status``
+    stay names, and a function only when ``(`` follows it. A name is colored by what it
+    resolves to in the query and ``settings.schema_sql``: a table, view, schema, alias, CTE
+    or column; one that resolves to nothing stays uncolored. A token written across string
+    literals or escape sequences gets one range per piece. ``sqlty server`` sends these as
+    semantic tokens.
 
     Example:
         >>> source = 'q = "--sql\\nSELECT 1"; x = "SELECT 2"'
@@ -536,10 +542,11 @@ def highlight_source(source: str | ParsedSource, settings: Settings = DEFAULT) -
     found = _highlight_source(
         parsed.text,
         dialect=settings.dialect,
+        schema_sql=settings.schema_sql,
         import_style=settings.import_style,
         helper_starts=_helper_starts(parsed, settings),
     )
-    return [Highlight(*item) for item in found]
+    return [Highlight(start, end, kind, tuple(modifiers)) for start, end, kind, modifiers in found]
 
 
 def _rules(settings: Settings) -> dict[str, str] | None:

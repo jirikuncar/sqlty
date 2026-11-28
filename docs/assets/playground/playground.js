@@ -5,7 +5,22 @@ import { fold, unfold } from "./steps.js";
 import { drivers, lint, tsType } from "./typescript.js";
 
 const MONACO = new URL("../vendor/monaco/vs", import.meta.url).href;
-const LEGEND = ["keyword", "string", "number", "comment", "operator", "parameter", "function"];
+const LEGEND = [
+  "keyword",
+  "string",
+  "number",
+  "comment",
+  "operator",
+  "parameter",
+  "function",
+  "class",
+  "interface",
+  "namespace",
+  "variable",
+  "property",
+  "type",
+];
+const MODIFIERS = ["declaration", "defaultLibrary", "deprecated"];
 
 const SCHEMA = `CREATE TABLE users (
     id INTEGER PRIMARY KEY,
@@ -110,6 +125,15 @@ for (const [name, base] of [["sqlty-light", "vs"], ["sqlty-dark", "vs-dark"]]) {
       { token: "operator", foreground: base === "vs" ? "000000" : "d4d4d4" },
       { token: "parameter", foreground: base === "vs" ? "001080" : "9cdcfe" },
       { token: "function", foreground: base === "vs" ? "795e26" : "dcdcaa" },
+      ...["class", "interface", "namespace", "type"].map((token) => ({
+        token,
+        foreground: base === "vs" ? "267f99" : "4ec9b0",
+      })),
+      ...["variable", "property"].map((token) => ({
+        token,
+        foreground: base === "vs" ? "001080" : "9cdcfe",
+      })),
+      { token: "property.deprecated", fontStyle: "strikethrough" },
       { token: "string", foreground: base === "vs" ? "a31515" : "ce9178" },
     ],
     colors: {},
@@ -288,19 +312,20 @@ function take(found) {
 
 monaco.languages.registerDocumentSemanticTokensProvider("python", {
   onDidChange: refreshed.event,
-  getLegend: () => ({ tokenTypes: LEGEND, tokenModifiers: [] }),
+  getLegend: () => ({ tokenTypes: LEGEND, tokenModifiers: MODIFIERS }),
   provideDocumentSemanticTokens(model) {
     const data = [];
     let line = 0;
     let column = 0;
-    for (const [start, end, kind] of current.highlights) {
+    for (const [start, end, kind, modifiers] of current.highlights) {
+      const bits = modifiers.reduce((bits, name) => bits | (1 << MODIFIERS.indexOf(name)), 0);
       let from = start;
       for (const piece of model.getValue().slice(start, end).split("\n")) {
         const at = model.getPositionAt(from);
         if (piece.length) {
           const deltaLine = at.lineNumber - 1 - line;
           data.push(deltaLine, deltaLine ? at.column - 1 : at.column - 1 - column);
-          data.push(piece.length, LEGEND.indexOf(kind), 0);
+          data.push(piece.length, LEGEND.indexOf(kind), bits);
           line = at.lineNumber - 1;
           column = at.column - 1;
         }

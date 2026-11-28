@@ -29,6 +29,7 @@ mod literals;
 mod memo;
 mod merged_star;
 mod names;
+mod naming;
 mod narrowing;
 mod nullability;
 mod operators;

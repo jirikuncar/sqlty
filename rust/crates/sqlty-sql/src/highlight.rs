@@ -1,19 +1,24 @@
-//! What to color in a query: keywords, function names, literals, comments, operators and
-//! placeholders.
+//! What to color in a query: keywords, function names, literals, comments, operators,
+//! placeholders, cast types, and names by what they resolve to.
 //!
-//! Other names stay uncolored. sqlparser knows 900 keywords, `name`, `status` and `type` among
-//! them, so a word is a keyword only when it is in [`KEYWORDS`]: the words PostgreSQL
-//! reserves (<https://www.postgresql.org/docs/17/sql-keywords-appendix.html>) and the
-//! verbs and clauses of a statement, which a query rarely uses as a name. A quoted word,
-//! or one after a `.`, is a name. Any other word directly followed by `(` is a function,
-//! unless it names a table, a CTE, an alias or a type: after a name, `)`, `::` or one of
-//! [`RELATION_WORDS`], or before `) AS (`.
+//! sqlparser knows 900 keywords, `name`, `status` and `type` among them, so a word is a
+//! keyword only when it is in [`KEYWORDS`]: the words PostgreSQL reserves
+//! (<https://www.postgresql.org/docs/17/sql-keywords-appendix.html>) and the verbs and
+//! clauses of a statement, which a query rarely uses as a name. A quoted word, or one after
+//! a `.`, is a name. Any other word directly followed by `(` is a function, unless it names
+//! a table, a CTE, an alias or a type: after a name, `)`, `::` or one of
+//! [`RELATION_WORDS`], or before `) AS (`. The word after `::`, or after the `AS` of
+//! `CAST(`, is a type.
+//!
+//! The other names take what the analyzer resolves them to, as `sqlty check` reads the
+//! query: a table, view, schema, alias, CTE or column. A name that resolves to nothing, or
+//! any name of a query that does not parse, stays uncolored.
 //!
 //! ```
 //! use sqlty_sql::highlight::{highlight, Highlight};
 //!
 //! let sql = "SELECT name FROM users WHERE id = $1 -- one";
-//! let found: Vec<_> = highlight(sql, "postgres")
+//! let found: Vec<_> = highlight(sql, "postgres", None)
 //!     .into_iter()
 //!     .map(|(range, kind)| (&sql[range], kind))
 //!     .collect();
@@ -35,7 +40,7 @@ use std::ops::Range;
 use sqlparser::keywords::Keyword;
 use sqlparser::tokenizer::{Token, TokenWithSpan, Tokenizer, Whitespace};
 
-use crate::analyzer::SqlDialect;
+use crate::analyzer::{SchemaData, SqlDialect};
 use crate::placeholders::percent_placeholders;
 
 /// How to color a token.
@@ -44,7 +49,10 @@ pub enum Highlight {
     /// `SELECT`, `FROM`, `NULL`, ...
     Keyword,
     /// `count` in `count(*)`, `now` in `pg_catalog.now()`.
-    Function,
+    Function {
+        /// A schema is loaded and does not define it.
+        builtin: bool,
+    },
     /// A quoted string.
     String,
     /// A number.
@@ -55,11 +63,82 @@ pub enum Highlight {
     Operator,
     /// `$1`, `?`, `:name`, `%s`, `%(name)s`.
     Parameter,
+    /// A schema table.
+    Table,
+    /// A schema view.
+    View,
+    /// The schema that qualifies a table: `public` in `public.users`.
+    Schema,
+    /// An alias or a CTE.
+    Variable {
+        /// Where the query defines it.
+        declaration: bool,
+    },
+    /// A column.
+    Column {
+        /// The project deprecates it.
+        deprecated: bool,
+    },
+    /// A cast's type: `int` in `x::int` or `CAST(x AS int)`.
+    Type {
+        /// A schema is loaded and does not define it.
+        builtin: bool,
+    },
+}
+
+impl Highlight {
+    /// The LSP semantic token type: `keyword`, `function`, `class` for a table, `interface`
+    /// for a view, `namespace` for a schema, `variable` for an alias or CTE, `property` for
+    /// a column, `type`, ...
+    pub fn token_type(self) -> &'static str {
+        match self {
+            Highlight::Keyword => "keyword",
+            Highlight::Function { .. } => "function",
+            Highlight::String => "string",
+            Highlight::Number => "number",
+            Highlight::Comment => "comment",
+            Highlight::Operator => "operator",
+            Highlight::Parameter => "parameter",
+            Highlight::Table => "class",
+            Highlight::View => "interface",
+            Highlight::Schema => "namespace",
+            Highlight::Variable { .. } => "variable",
+            Highlight::Column { .. } => "property",
+            Highlight::Type { .. } => "type",
+        }
+    }
+
+    /// The LSP semantic token modifiers: `declaration`, `defaultLibrary` or `deprecated`.
+    pub fn modifiers(self) -> &'static [&'static str] {
+        match self {
+            Highlight::Function { builtin: true } | Highlight::Type { builtin: true } => {
+                &["defaultLibrary"]
+            }
+            Highlight::Variable { declaration: true } => &["declaration"],
+            Highlight::Column { deprecated: true } => &["deprecated"],
+            _ => &[],
+        }
+    }
 }
 
 /// The tokens of `sql` to color, in order, as byte ranges. A query that stops in the
 /// middle of a token, as it does while typed, is colored up to that token.
-pub fn highlight(sql: &str, dialect: &str) -> Vec<(Range<usize>, Highlight)> {
+///
+/// Names are colored by what they resolve to in the query and `schema`, as `sqlty check`
+/// reads them: one parse and one analysis of the first statement. A query that does not
+/// parse keeps the colors its tokens give: keywords, functions and cast types.
+pub fn highlight(
+    sql: &str,
+    dialect: &str,
+    schema: Option<&SchemaData>,
+) -> Vec<(Range<usize>, Highlight)> {
+    let (dialect, schema) = crate::analyzer::route(sql, dialect, schema);
+    let names = crate::analyzer::parse(sql, dialect).names(schema);
+    let schema = schema.unwrap_or_else(|| crate::catalog::empty(SqlDialect::from_name(dialect)));
+    // Without a schema, a function or type the database defines looks built in.
+    let builtin = |name: String, defines: fn(&SchemaData, &str) -> bool| {
+        !schema.is_empty() && !defines(schema, &name)
+    };
     let dialect = SqlDialect::from_name(dialect).parser_dialect();
     let tokens = match Tokenizer::new(dialect.as_ref(), sql).tokenize_with_location() {
         Ok(tokens) => tokens,
@@ -77,6 +156,8 @@ pub fn highlight(sql: &str, dialect: &str) -> Vec<(Range<usize>, Highlight)> {
         .map(|at| (at.clone(), Highlight::Parameter))
         .collect();
     let calls = calls(&tokens);
+    let types = cast_types(&tokens);
+    let mut names = names.into_iter().peekable();
     let mut after_period = false;
     for (at, TokenWithSpan { token, span }) in tokens.iter().enumerate() {
         let kind = match token {
@@ -92,11 +173,19 @@ pub fn highlight(sql: &str, dialect: &str) -> Vec<(Range<usize>, Highlight)> {
                         .is_ok()
                 {
                     Some(Highlight::Keyword)
+                } else if calls.binary_search(&at).is_ok() {
+                    Some(Highlight::Function {
+                        builtin: builtin(
+                            qualified(&tokens, at, schema),
+                            SchemaData::defines_function,
+                        ),
+                    })
+                } else if types.binary_search(&at).is_ok() {
+                    Some(Highlight::Type {
+                        builtin: builtin(qualified(&tokens, at, schema), SchemaData::defines_type),
+                    })
                 } else {
-                    calls
-                        .binary_search(&at)
-                        .is_ok()
-                        .then_some(Highlight::Function)
+                    None
                 }
             }
             Token::Number(..) => Some(Highlight::Number),
@@ -116,18 +205,82 @@ pub fn highlight(sql: &str, dialect: &str) -> Vec<(Range<usize>, Highlight)> {
             _ => Some(Highlight::Operator),
         };
         after_period = *token == Token::Period;
-        let (Some(kind), Some(start), Some(end)) =
-            (kind, offsets.offset(span.start), offsets.offset(span.end))
+        let (Some(start), Some(end)) = (offsets.offset(span.start), offsets.offset(span.end))
         else {
             continue;
         };
         let end = start + sql[start..end].trim_end().len();
+        while names.next_if(|(range, _)| range.start < start).is_some() {}
+        let name = names
+            .next_if(|(range, _)| *range == (start..end))
+            .map(|(_, name)| name);
+        let kind = match (kind, name) {
+            (None | Some(Highlight::Type { .. }), Some(name)) => name,
+            (Some(kind), _) => kind,
+            (None, None) => continue,
+        };
         let after = percent.partition_point(|at| at.end <= start);
         if start < end && !percent.get(after).is_some_and(|at| at.contains(&start)) {
             found.push((start..end, kind));
         }
     }
     found.sort_by_key(|(range, _)| range.start);
+    found
+}
+
+/// The name of the word `tokens[at]` with its qualifiers, folded as the schema keys it.
+fn qualified(tokens: &[TokenWithSpan], at: usize, schema: &SchemaData) -> String {
+    let mut parts = Vec::new();
+    let mut i = at;
+    loop {
+        if let Token::Word(word) = &tokens[i].token {
+            parts.push(schema.fold_typed(&word.to_string()));
+        }
+        match i.checked_sub(2) {
+            Some(before) if tokens[i - 1].token == Token::Period => i = before,
+            _ => break,
+        }
+    }
+    parts.reverse();
+    parts.join(".")
+}
+
+/// The indexes of the words that name a cast's type, in order: the first word after `::`,
+/// and after the `AS` of `CAST(`, `TRY_CAST(` or `SAFE_CAST(`. A qualified type colors its
+/// last part.
+fn cast_types(tokens: &[TokenWithSpan]) -> Vec<usize> {
+    let mut found = Vec::new();
+    let mut casts = Vec::new();
+    let (mut cast, mut typed) = (false, false);
+    for (at, TokenWithSpan { token, .. }) in tokens.iter().enumerate() {
+        match token {
+            Token::Whitespace(_) => continue,
+            Token::Word(_) if typed => {
+                if tokens
+                    .get(at + 1)
+                    .is_none_or(|next| next.token != Token::Period)
+                {
+                    found.push(at);
+                    typed = false;
+                }
+                continue;
+            }
+            Token::Period if typed => continue,
+            Token::DoubleColon => typed = true,
+            Token::LParen => casts.push(cast),
+            Token::RParen => {
+                casts.pop();
+            }
+            Token::Word(word) if word.quote_style.is_none() => {
+                let is = |name: &str| word.value.eq_ignore_ascii_case(name);
+                typed = is("AS") && casts.last() == Some(&true);
+                cast = ["CAST", "TRY_CAST", "SAFE_CAST"].into_iter().any(is);
+                continue;
+            }
+            _ => typed = false,
+        }
+        cast = false;
+    }
     found
 }
 
@@ -225,7 +378,7 @@ fn is_string(token: &Token) -> bool {
 
 /// Byte offsets of 1-based lines and columns (in characters), read forward from the last
 /// one asked for: tokens come in order, so a long line is walked once, not once per token.
-struct Offsets<'s> {
+pub(crate) struct Offsets<'s> {
     sql: &'s str,
     lines: Vec<usize>,
     line: usize,
@@ -234,7 +387,7 @@ struct Offsets<'s> {
 }
 
 impl<'s> Offsets<'s> {
-    fn new(sql: &'s str) -> Self {
+    pub(crate) fn new(sql: &'s str) -> Self {
         let lines = std::iter::once(0)
             .chain(sql.match_indices('\n').map(|(at, _)| at + 1))
             .collect();
@@ -247,7 +400,7 @@ impl<'s> Offsets<'s> {
         }
     }
 
-    fn offset(&mut self, location: sqlparser::tokenizer::Location) -> Option<usize> {
+    pub(crate) fn offset(&mut self, location: sqlparser::tokenizer::Location) -> Option<usize> {
         let line = usize::try_from(location.line).ok()?.checked_sub(1)?;
         let column = usize::try_from(location.column).ok()?.checked_sub(1)?;
         let start = *self.lines.get(line)?;
@@ -375,7 +528,7 @@ mod tests {
     use super::*;
 
     fn colored<'a>(sql: &'a str, dialect: &str) -> Vec<(&'a str, Highlight)> {
-        highlight(sql, dialect)
+        highlight(sql, dialect, None)
             .into_iter()
             .map(|(range, kind)| (&sql[range], kind))
             .collect()
@@ -452,6 +605,7 @@ mod tests {
                 ("->>", Highlight::Operator),
                 ("'k'", Highlight::String),
                 ("::", Highlight::Operator),
+                ("int", Highlight::Type { builtin: false }),
                 ("/* c\n d */", Highlight::Comment),
                 ("FROM", Highlight::Keyword),
             ]
