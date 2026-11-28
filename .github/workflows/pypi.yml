@@ -598,6 +598,45 @@ jobs:
           fi
           npm publish --access public --provenance
 
+  # Installs the release from the registry, retrying until it is served, and lints the demo.
+  verify-eslint-plugin:
+    name: Verify @sqlty/eslint-plugin from npm
+    if: github.event_name == 'release' && github.event.action == 'published'
+    needs: publish-eslint-plugin-to-npm
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24.22.1
+          package-manager-cache: false
+
+      # Outside the repository, so the demo resolves the published plugin, not the checkout.
+      - name: Install and lint the demo
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: | # zizmor: ignore[adhoc-packages]
+          version=${TAG#v}
+          demo="$RUNNER_TEMP/demo"
+          cp -r npm/eslint-plugin/demo "$demo"
+          deps="@sqlty/eslint-plugin@$version $(node -p "Object.entries(require('./npm/eslint-plugin/package.json').devDependencies).map(([n, v]) => n + '@' + v).join(' ')")"
+          cd "$demo"
+          echo '{"private": true, "type": "module"}' > package.json
+          for delay in 0 10 20 40 80 160; do
+            sleep "$delay"
+            npm install --no-audit --no-fund --no-package-lock $deps && break
+          done
+          [ "$(node -p "require('@sqlty/eslint-plugin/package.json').version")" = "$version" ]
+          [ "$(node -p "require.resolve('@sqlty/eslint-plugin')")" = "$demo/node_modules/@sqlty/eslint-plugin/index.js" ]
+          status=0
+          npx eslint . > lint.txt || status=$?
+          cat lint.txt
+          [ "$status" = 1 ] && grep -q "5 problems" lint.txt
+
   # The formula downloads the platform packages from npm. A run by hand prints it without
   # pushing it.
   publish-to-homebrew:

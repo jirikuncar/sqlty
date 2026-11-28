@@ -17,7 +17,7 @@
     ".": "./index.js",
     "./package.json": "./package.json"
   },
-  "files": ["index.js"],
+  "files": ["index.js", "core.js", "types.js"],
   "scripts": {
     "test": "node --test"
   },
