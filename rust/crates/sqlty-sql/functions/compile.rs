@@ -1,10 +1,11 @@
 //! The function catalog compiler: `functions/<dialect>.txt` to Rust source. `build.rs`
 //! runs it; `tests/function_catalog_compiler.rs` tests it.
 //!
-//! A line is `name(parameters) -> result<TAB>page`. A parameter is `name: type` or
-//! `type`, `VARIADIC` before it when it repeats; `[, ...]` holds optional parameters, and
-//! `...` repeats the parameter before it. A type may hold `(...)` and `[...]` (`MAP(K, V)`,
-//! `FLOAT[3]`): a `[` right after a type is part of it unless a `,` follows. `# docs: URL` sets the base of the pages.
+//! A line is `name(parameters) -> result<TAB>page`, or `name(parameters)<TAB>page` when the
+//! documentation gives no result. A parameter is `name: type` or `type`, `VARIADIC` before it
+//! when it repeats; `[, ...]` holds optional parameters, and `...` repeats the parameter before
+//! it. A type may hold `(...)` and `[...]` (`MAP(K, V)`, `FLOAT[3]`): a `[` right after a type
+//! is part of it unless a `,` follows. `# docs: URL` sets the base of the pages.
 
 use std::fmt::Write as _;
 
@@ -76,9 +77,11 @@ fn signature(line: &str) -> Result<Signature, String> {
     {
         return Err(format!("`{name}` is not a lower-case function name"));
     }
-    let (params, returns) = label[open + 1..]
+    let rest = &label[open + 1..];
+    let (params, returns) = rest
         .split_once(") -> ")
-        .ok_or("no `) -> ` before the result")?;
+        .or_else(|| Some((rest.strip_suffix(')')?, "")))
+        .ok_or("no `)` at the end or before ` -> `")?;
     let mut parameters = Vec::new();
     let mut variadic = false;
     let mut depth = 0usize;

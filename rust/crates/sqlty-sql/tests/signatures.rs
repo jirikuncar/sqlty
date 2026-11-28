@@ -34,6 +34,12 @@ fn dialects() {
         duckdb.url(),
         "https://duckdb.org/docs/2.0/sql/functions/text.html"
     );
+    let mysql = &signatures(Dialect::MySql, "LEFT")[0];
+    assert_eq!((mysql.label, mysql.returns), ("left(str, len)", ""));
+    assert_eq!(
+        mysql.url(),
+        "https://dev.mysql.com/doc/refman/8.4/en/string-functions.html"
+    );
     assert!(signatures(Dialect::Postgres, "no_such_function").is_empty());
 }
 

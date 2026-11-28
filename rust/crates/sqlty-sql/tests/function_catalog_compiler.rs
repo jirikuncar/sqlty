@@ -56,6 +56,16 @@ fn types_hold_parentheses_and_brackets() {
 }
 
 #[test]
+fn a_result_is_optional() {
+    let code = compile("t.txt", "T", "# docs: https://x/\nabs(X)\tabs.html\n")
+        .expect("the catalog compiles");
+    assert!(
+        code.contains("label: \"abs(X)\", returns: \"\", "),
+        "{code}"
+    );
+}
+
+#[test]
 fn errors_name_the_line() {
     assert_eq!(
         compile("t.txt", "T", "a() -> int\tp\n").expect_err("no docs"),
@@ -75,7 +85,10 @@ fn errors_name_the_line() {
         error("(x) -> int\tp"),
         "t.txt:2: `` is not a lower-case function name"
     );
-    assert_eq!(error("a(x)\tp"), "t.txt:2: no `) -> ` before the result");
+    assert_eq!(
+        error("a(x\tp"),
+        "t.txt:2: no `)` at the end or before ` -> `"
+    );
     assert_eq!(error("a(x]) -> int\tp"), "t.txt:2: unbalanced `]`");
     assert_eq!(error("a([x) -> int\tp"), "t.txt:2: unbalanced `[` or `(`");
     assert_eq!(error("a(x), b) -> int\tp"), "t.txt:2: unbalanced `)`");

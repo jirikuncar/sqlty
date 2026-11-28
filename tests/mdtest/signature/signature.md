@@ -209,6 +209,26 @@ q = "--sql\nSELECT * FROM read_csv(<CURSOR>)"
 # signature: read_csv(paths: ANY[]) -> TABLE
 ```
 
+## MySQL
+
+MySQL's catalog is the syntax of its help tables, which names parameters but no types.
+
+```toml
+[tool.sqlty]
+dialect = "mysql"
+```
+
+```python
+q = "--sql\nSELECT ROUND(price, <CURSOR>) FROM orders"
+# signature: round(X)
+# signature: > round(X, **D**)
+```
+
+```python
+q = "--sql\nSELECT JSON_EXTRACT(doc, '$.a', <CURSOR>) FROM orders"
+# signature: > json_extract(json_doc, path[, **path**, ...])
+```
+
 ## Dialects without a catalog
 
 ```toml
