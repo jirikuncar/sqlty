@@ -8,4 +8,3 @@ sqlty-lsp 44
 sqlty-project 27
 sqlty-python 207
 sqlty-sql 422
-sqlty-wasm 34
