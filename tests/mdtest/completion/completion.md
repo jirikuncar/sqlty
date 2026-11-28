@@ -147,11 +147,27 @@ q = "--sql\nSELECT * FROM orders JOIN us<CURSOR>"
 
 ## Prefix
 
-Only names that start with the word before the cursor complete.
+Names that start with the word before the cursor complete first.
 
 ```python
 q = "--sql\nSELECT * FROM users u WHERE u.e<CURSOR>"
 # completions: email column u
+```
+
+## Subsequence
+
+Columns and CTEs also match when the typed letters appear in order, the first at the start
+of a word: names whose words start with them (`uid` and `u_i` for `user_id`) come after the
+prefix matches, then the rest. Tables match by prefix only.
+
+```python
+q = "--sql\nSELECT uid<CURSOR> FROM orders"
+# completions: user_id column orders
+```
+
+```python
+q = "--sql\nWITH recent_orders AS (SELECT 1) SELECT * FROM ro<CURSOR>"
+# completions: recent_orders cte -
 ```
 
 ## Qualified names

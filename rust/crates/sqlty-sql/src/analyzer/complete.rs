@@ -12,6 +12,8 @@
 //! column with nothing typed is offered as `alias.column` when several relations are in scope;
 //! with none in scope, a typed one comes from the catalog's column index, O(log C + k).
 //! Right after `FROM`, the relations that have the columns the select list names come first.
+//! Columns in scope and CTEs match the typed word as a subsequence too, after the prefix
+//! matches; names from an index (relations, functions) match by prefix only.
 //! A typed word in an expression also completes to the functions the schema defines and the
 //! dialect's built-ins (see [`crate::signatures`]), after the columns; one in `FROM` or
 //! after `JOIN`, to the built-ins that return rows, after the relations.
@@ -100,7 +102,8 @@ impl Candidate {
 /// What can be typed at a cursor.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Completions {
-    /// Candidates whose name starts with the word before the cursor, at most `limit`.
+    /// Candidates matching the word before the cursor, at most `limit`: by prefix, and
+    /// columns and CTEs also by subsequence.
     pub candidates: Vec<Candidate>,
     /// The bytes of the query a candidate replaces: the word before the cursor.
     pub replace: Range<usize>,
@@ -134,7 +137,6 @@ pub fn complete(
         return Completions::default();
     };
     let typed = &query[prefix.clone()];
-    let folded = schema.fold_typed(typed);
     let mut ranked = Vec::new();
     let candidates = match context {
         Context::Relation(qualifier, join, rows) => {
@@ -166,7 +168,7 @@ pub fn complete(
                 found.extend(
                     ctes(&before)
                         .into_iter()
-                        .filter(|name| name.to_lowercase().starts_with(&folded))
+                        .filter(|name| matched(name, typed).is_some())
                         .map(|name| Candidate {
                             label: name.to_string(),
                             kind: CandidateKind::Cte,
@@ -193,6 +195,7 @@ pub fn complete(
                     everywhere(typed, schema, dialect, limit + 1)
                         .chain(functions(typed, schema, dialect, limit + 1))
                         .collect(),
+                    typed,
                     prefix,
                     limit,
                 );
@@ -203,11 +206,7 @@ pub fn complete(
                 .filter(|candidate| {
                     qualifier.is_none() || candidate.detail.as_deref() == qualifier.as_deref()
                 })
-                .filter(|candidate| {
-                    schema
-                        .fold_typed(&candidate.label)
-                        .starts_with(folded.as_str())
-                })
+                .filter(|candidate| matched(&candidate.label, typed).is_some())
                 .collect();
             // With nothing typed and several relations in scope, `alias.column` says whose it is.
             if blank && found.iter().any(|c| c.detail != found[0].detail) {
@@ -224,7 +223,7 @@ pub fn complete(
             found
         }
     };
-    finish_ranked(ranked, candidates, prefix, limit)
+    finish_ranked(ranked, candidates, typed, prefix, limit)
 }
 
 /// A relation as a candidate.
@@ -245,6 +244,7 @@ fn relation_candidate(relation: RelationRef<'_>, dialect: SqlDialect) -> Candida
 fn finish_ranked(
     ranked: Vec<Candidate>,
     candidates: Vec<Candidate>,
+    typed: &str,
     replace: Range<usize>,
     limit: usize,
 ) -> Completions {
@@ -256,7 +256,7 @@ fn finish_ranked(
         .into_iter()
         .filter(|c| !first.contains(&(c.label.as_str(), c.detail.as_deref())))
         .collect();
-    let rest = finish(rest, replace, limit);
+    let rest = finish(rest, typed, replace, limit);
     let mut candidates = ranked;
     candidates.extend(rest.candidates);
     Completions {
@@ -363,8 +363,44 @@ const SELECT_WORDS: [&str; 32] = [
     "EXISTS",
 ];
 
+/// How `typed` matches `label`, case and quotes aside: 0 when the label starts with it, 1
+/// when each typed character starts a word of the label (after `_`) or follows the one
+/// before (`u_i` and `uid` find `user_id`), 2 as a subsequence from the start of a word
+/// (`usd` finds `user_id`, `d` finds nothing); `None` for no match.
+fn matched(label: &str, typed: &str) -> Option<u8> {
+    let unquote = |text: &str| text.trim_matches(['"', '`', '[', ']']).to_lowercase();
+    let (label, typed) = (unquote(label), unquote(typed));
+    if label.starts_with(&typed) {
+        return Some(0);
+    }
+    let label: Vec<char> = label.chars().collect();
+    let mut at = 0;
+    let mut prev = None;
+    let words = typed.chars().all(|c| {
+        let found = (at..label.len()).find(|&i| {
+            label[i] == c && (prev == Some(i.wrapping_sub(1)) || i == 0 || label[i - 1] == '_')
+        });
+        prev = found;
+        at = found.map_or(label.len(), |i| i + 1);
+        found.is_some()
+    });
+    if words {
+        return Some(1);
+    }
+    let mut chars = typed.chars();
+    let first = chars.next()?;
+    let start = (0..label.len()).find(|&i| label[i] == first && (i == 0 || label[i - 1] == '_'))?;
+    let mut rest = label[start + 1..].iter();
+    chars.all(|c| rest.any(|&l| l == c)).then_some(2)
+}
+
 /// `candidates` in the order completion lists them, at most `limit`.
-fn finish(mut candidates: Vec<Candidate>, replace: Range<usize>, limit: usize) -> Completions {
+fn finish(
+    mut candidates: Vec<Candidate>,
+    typed: &str,
+    replace: Range<usize>,
+    limit: usize,
+) -> Completions {
     // The schema's own relations before PostgreSQL's system catalogs, whose columns name
     // their relation `schema.name`.
     let builtin = |c: &Candidate| match (c.kind, c.detail.as_deref()) {
@@ -382,6 +418,7 @@ fn finish(mut candidates: Vec<Candidate>, replace: Range<usize>, limit: usize) -
             c.kind != CandidateKind::Join,
             c.kind == CandidateKind::Function,
             builtin(c) || signature(c),
+            matched(&c.label, typed).unwrap_or(0),
             c.label.to_lowercase(),
             c.detail.clone(),
             c.label.clone(),
@@ -1048,7 +1085,10 @@ mod tests {
         let both = ["o.id:o", "o.total:o", "o.user_id:o", "u.id:u"];
         let from = "FROM users u JOIN orders o ON u.id = o.user_id";
         assert_eq!(pg(&format!("SELECT u.name, | {from}"))[..1], ["o.id:o"]);
-        assert_eq!(pg(&format!("SELECT * {from} WHERE i|")), ["id:o", "id:u"]);
+        assert_eq!(
+            pg(&format!("SELECT * {from} WHERE i|")),
+            ["id:o", "id:u", "user_id:o"]
+        );
         assert_eq!(
             pg(&format!("SELECT * {from} WHERE u.id = 1 AND t|")),
             ["total:o"]

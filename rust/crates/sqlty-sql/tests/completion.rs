@@ -197,3 +197,46 @@ fn from_ranks_the_relations_that_have_the_selected_columns() {
         "{functions:?}"
     );
 }
+
+#[test]
+fn columns_and_ctes_match_by_subsequence() {
+    let catalog = load(
+        "CREATE TABLE orders (id INT, user_id INT, uid_legacy INT, status TEXT, used_at DATE);
+        CREATE TABLE users (id INT);",
+        "postgres",
+    );
+    let pg = |sql: &str| -> Vec<String> {
+        complete(sql, &catalog, "postgres")
+            .into_iter()
+            .filter(|c| !c.contains(":Function:"))
+            .collect()
+    };
+    assert_eq!(
+        pg("SELECT uid| FROM orders"),
+        ["uid_legacy:Column:orders", "user_id:Column:orders"]
+    );
+    assert_eq!(pg("SELECT u_i| FROM orders"), ["user_id:Column:orders"]);
+    assert_eq!(
+        pg("SELECT usd| FROM orders"),
+        ["used_at:Column:orders", "user_id:Column:orders"],
+        "word starts before other subsequences"
+    );
+    assert_eq!(pg("SELECT UID| FROM orders")[1], "user_id:Column:orders");
+    assert!(
+        pg("SELECT d| FROM orders").is_empty(),
+        "the first letter starts a word"
+    );
+    assert_eq!(
+        pg("WITH recent_orders AS (SELECT 1) SELECT * FROM ro|"),
+        ["recent_orders:Cte:"]
+    );
+    assert!(pg("SELECT * FROM ur|").is_empty(), "tables match by prefix");
+}
+
+#[test]
+fn a_cut_list_is_incomplete() {
+    let catalog = load("CREATE TABLE t (b_ax INT, a_xy INT, ax INT);", "postgres");
+    let found = analyzer::complete("SELECT ax FROM t", 9, "postgres", Some(&catalog), 2);
+    let labels: Vec<_> = found.candidates.iter().map(|c| c.label.as_str()).collect();
+    assert_eq!((labels, found.incomplete), (vec!["ax", "a_xy"], true));
+}
