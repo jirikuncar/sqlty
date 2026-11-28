@@ -561,3 +561,42 @@ fn defined(dialect: &str, ddl: &str) -> Vec<String> {
 fn each_schema_defines_its_table() {
     check(SCHEMAS, defined);
 }
+
+#[test]
+fn a_table_is_suggested_only_when_every_candidate_is_compared() {
+    let suggested = |fillers: usize| {
+        let ddl: String = ["abca", "abcz"]
+            .into_iter()
+            .map(str::to_string)
+            .chain((0..fillers).map(|i| format!("abcb{i:02}")))
+            .map(|table| format!("CREATE TABLE {table} (id INT);"))
+            .collect();
+        let schema = analyzer::load_schema_with_skipped(&ddl, "postgres").0;
+        let (_, found) =
+            analyzer::analyze_with_diagnostics("SELECT 1 FROM abcd", "postgres", Some(&schema));
+        found[0].message.contains("did you mean")
+    };
+    assert!(!suggested(0), "abca and abcz tie");
+    assert!(!suggested(70), "the tie lies past the names compared");
+}
+
+#[test]
+fn a_quoted_table_is_fixed_in_its_quotes_and_a_cte_is_suggested() {
+    let replaced = |sql: &str, dialect: &str| {
+        let schema = analyzer::load_schema_with_skipped("CREATE TABLE users (id INT);", dialect).0;
+        let (_, found) = analyzer::analyze_with_diagnostics(sql, dialect, Some(&schema));
+        (found[0].message.clone(), found[0].replacement.clone())
+    };
+    assert_eq!(
+        replaced("SELECT 1 FROM \"userz\"", "postgres").1.as_deref(),
+        Some("\"users\"")
+    );
+    assert_eq!(
+        replaced("SELECT 1 FROM [userz]", "sqlite").1.as_deref(),
+        Some("[users]")
+    );
+    let (message, replacement) =
+        replaced("WITH recent AS (SELECT 1) SELECT 1 FROM recnt", "postgres");
+    assert!(message.ends_with("did you mean `recent`?"), "{message}");
+    assert_eq!(replacement.as_deref(), Some("recent"));
+}

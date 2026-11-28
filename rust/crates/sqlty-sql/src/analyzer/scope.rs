@@ -237,6 +237,14 @@ pub(super) fn table_source(factor: &TableFactor, dialect: SqlDialect) -> Source 
     }
 }
 
+/// The last part of a table's name, as the query writes it.
+fn written_name(factor: &TableFactor) -> Option<&sqlparser::ast::Ident> {
+    match factor {
+        TableFactor::Table { name, .. } => name.0.last()?.as_ident(),
+        _ => None,
+    }
+}
+
 /// The virtual table a derived table's columns are kept under: `(alias)`, or one named
 /// after the subquery's place in the statement when it has no alias.
 fn derived_table(factor: &TableFactor) -> String {
@@ -449,6 +457,14 @@ pub(super) struct Virtuals {
 impl Virtuals {
     pub(super) fn get(&self, table: &str) -> Option<&[Column]> {
         self.tables.get(table).map(|columns| &**columns)
+    }
+
+    /// The names of the CTEs in scope.
+    pub(super) fn names(&self) -> impl Iterator<Item = &str> {
+        self.tables
+            .keys()
+            .map(String::as_str)
+            .filter(|name| !name.starts_with('('))
     }
 
     pub(super) fn contains_key(&self, table: &str) -> bool {
@@ -792,7 +808,7 @@ impl<'a> Analyzer<'a> {
                     };
                     let _at = analyzer.diag.at(name);
                     for source in &entries {
-                        analyzer.check_table(&source.table);
+                        analyzer.check_table(&source.table, written_name(other));
                     }
                     scope.extend(entries);
                 }
