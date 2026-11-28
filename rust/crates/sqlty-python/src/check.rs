@@ -437,6 +437,26 @@ fn nullable(nullability: Nullability) -> Option<bool> {
     }
 }
 
+/// Why PostgreSQL rejects `text` for `param`: a value its column never holds, or text the
+/// input function of its type does not read.
+fn rejected_text(param: &analyzer::Param, text: &str) -> Option<String> {
+    let spelled = crate::unparse::repr_str(text);
+    let values = param.literal.as_deref().and_then(column_literal_values);
+    if let Some(values) = values.filter(|values| values.iter().all(|v| matches!(v, Lit::Str(_)))) {
+        if values
+            .iter()
+            .any(|value| *value == Lit::Str(text.to_string()))
+        {
+            return None;
+        }
+        let mut values: Vec<String> = values.iter().map(Lit::repr).collect();
+        values.sort();
+        return Some(format!("is {spelled}, not one of {}", values.join(", ")));
+    }
+    let name = crate::input::rejected(param.sql_type.as_deref()?, text)?;
+    Some(format!("is {spelled}, which is not valid input for {name}"))
+}
+
 fn key_text(key: &Key) -> String {
     match key {
         Key::Index(index) => index.to_string(),
@@ -707,6 +727,13 @@ impl<'a> Module<'a, '_> {
                     postgres,
                     asyncpg,
                 ) {
+                    found.push((Rule::ParamTypeMismatch, format!("{label} {problem}")));
+                } else if let Some(problem) = arg
+                    .text
+                    .as_deref()
+                    .filter(|_| postgres && !param.cast && arg.kind.as_deref() == Some("str"))
+                    .and_then(|text| rejected_text(param, text))
+                {
                     found.push((Rule::ParamTypeMismatch, format!("{label} {problem}")));
                 }
             }
@@ -1145,7 +1172,11 @@ impl<'a> Module<'a, '_> {
                         1 => types.into_iter().next().flatten(),
                         _ => None,
                     };
-                    Param { key, kind }
+                    Param {
+                        key,
+                        kind,
+                        text: None,
+                    }
                 })
                 .collect();
             bindings.push((call.span, params));
@@ -1436,6 +1467,7 @@ pub fn diagnostics(source: &Arc<Source>, run: &Run<'_>) -> Found {
                         .map(|(i, kind)| Param {
                             key: Key::Index(i + 1),
                             kind,
+                            text: None,
                         })
                         .collect(),
                 ),

@@ -2,7 +2,7 @@
 
 A column with a value set (a `CHECK ... IN`, an enum, a constant) gives its parameters the
 type `str` or `int`, not a `Literal`: the check cannot know which value a caller passes,
-and a `str` is always accepted.
+and a `str` is accepted unless it is a literal outside the set.
 
 ```toml
 [tool.sqlty]
@@ -41,6 +41,7 @@ def by_status(status: str, priority: int) -> list[int]:
     return fetch_all("SELECT id FROM orders WHERE status = %s AND priority = %s", (status, priority), int)
 
 known = fetch_all("SELECT id FROM orders WHERE status = %s", ("paid",), int)
+# error: [param-type-mismatch] "parameter 1 is 'unknown', not one of 'paid', 'pending'"
 unlisted = fetch_all("SELECT id FROM orders WHERE status = %s", ("unknown",), int)
 # error: [param-type-mismatch] "parameter 1 expects str, got bytes"
 wrong = fetch_all("SELECT id FROM orders WHERE status = %s", (b"paid",), int)
