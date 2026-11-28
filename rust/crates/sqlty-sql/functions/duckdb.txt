@@ -97,7 +97,7 @@ array_sort(list: ANY[], sort_order: VARCHAR) -> ANY[]	list.html
 array_sort(list: ANY[], sort_order: VARCHAR, null_order: VARCHAR) -> ANY[]	list.html
 array_to_json([ANY, ...]) -> JSON	overview.html
 array_to_string(arr: ANY, sep: ANY) -> ANY	overview.html
-array_to_string_comma_default(arr: ANY, sep: ANY) -> ANY	overview.html
+array_to_string_comma_default(arr: ANY[, sep: ANY]) -> ANY	overview.html
 array_transform(list: ANY[], lambda: LAMBDA) -> ANY[]	list.html
 array_unique(list: ANY[]) -> UBIGINT	list.html
 array_value([ANY, ...]) -> ARRAY	array.html
@@ -512,7 +512,7 @@ generate_series(start: TIMESTAMP WITH TIME ZONE, stop: TIMESTAMP WITH TIME ZONE,
 generate_series(start: TIMESTAMP WITH TIME ZONE, stop: TIMESTAMP WITH TIME ZONE, step: INTERVAL) -> TIMESTAMP WITH TIME ZONE[]	list.html
 generate_series(start: TIMESTAMP, stop: TIMESTAMP, step: INTERVAL) -> TIMESTAMP[]	list.html
 generate_series(start: BIGINT, stop: BIGINT, step: BIGINT) -> BIGINT[]	list.html
-generate_subscripts(arr: ANY, dim: ANY) -> ANY	overview.html
+generate_subscripts(arr: ANY[, dim: ANY]) -> ANY	overview.html
 geomean(x: ANY) -> ANY	overview.html
 geometric_mean(x: ANY) -> ANY	overview.html
 get_bit(bitstring: BIT, index: INTEGER) -> INTEGER	overview.html
@@ -805,8 +805,8 @@ json_pretty(json: JSON) -> VARCHAR	overview.html
 json_quote([ANY, ...]) -> JSON	overview.html
 json_remove(json: JSON, path: VARCHAR) -> JSON	overview.html
 json_replace(json: JSON, path: VARCHAR, value: JSON) -> JSON	overview.html
-json_serialize_plan(sql: VARCHAR, skip_null: BOOLEAN, skip_empty: BOOLEAN, skip_default: BOOLEAN, format: BOOLEAN, optimize: BOOLEAN) -> JSON	overview.html
-json_serialize_sql(sql: VARCHAR, skip_null: BOOLEAN, skip_empty: BOOLEAN, skip_default: BOOLEAN, format: BOOLEAN) -> JSON	overview.html
+json_serialize_plan(sql: VARCHAR[, skip_null: BOOLEAN[, skip_empty: BOOLEAN[, skip_default: BOOLEAN[, format: BOOLEAN[, optimize: BOOLEAN]]]]]) -> JSON	overview.html
+json_serialize_sql(sql: VARCHAR[, skip_null: BOOLEAN[, skip_empty: BOOLEAN[, skip_default: BOOLEAN[, format: BOOLEAN]]]]) -> JSON	overview.html
 json_set(json: JSON, path: VARCHAR, value: JSON) -> JSON	overview.html
 json_strip_nulls(json: JSON) -> JSON	overview.html
 json_structure(json: VARCHAR) -> JSON	overview.html
@@ -839,7 +839,7 @@ julian(ts: TIMESTAMP WITH TIME ZONE) -> DOUBLE	overview.html
 kahan_sum(arg: DOUBLE) -> DOUBLE	aggregates.html
 kurtosis(x: DOUBLE) -> DOUBLE	aggregates.html
 kurtosis_pop(x: DOUBLE) -> DOUBLE	aggregates.html
-lag(col: T, offset: BIGINT, default: ANY) -> T	window_functions.html
+lag(col: T[, offset: BIGINT[, default: ANY]]) -> T	window_functions.html
 last(arg: ANY) -> ANY	aggregates.html
 last(arg: DECIMAL) -> DECIMAL	aggregates.html
 last_day(ts: TIMESTAMP WITH TIME ZONE) -> DATE	overview.html
@@ -849,7 +849,7 @@ last_value(expr: ANY) -> ANY	window_functions.html
 lcase(string: VARCHAR) -> VARCHAR	text.html
 lcm(x: HUGEINT, y: HUGEINT) -> HUGEINT	overview.html
 lcm(x: BIGINT, y: BIGINT) -> BIGINT	overview.html
-lead(col: T, offset: BIGINT, default: ANY) -> T	window_functions.html
+lead(col: T[, offset: BIGINT[, default: ANY]]) -> T	window_functions.html
 least(arg1: ANY[, ANY, ...]) -> ANY	text.html
 least_common_multiple(x: HUGEINT, y: HUGEINT) -> HUGEINT	overview.html
 least_common_multiple(x: BIGINT, y: BIGINT) -> BIGINT	overview.html
@@ -1212,7 +1212,7 @@ repeat(list: T[], count: BIGINT) -> T[]	overview.html
 repeat_row(num_rows: BIGINT[, ANY, ...]) -> TABLE	overview.html
 replace(string: VARCHAR, source: VARCHAR, target: VARCHAR) -> VARCHAR	text.html
 replace_type(param: ANY, type1: ANY, type2: ANY) -> ANY	overview.html
-reservoir_quantile(x: ANY, quantile: ANY, sample_size: INTEGER) -> ANY	aggregates.html
+reservoir_quantile(x: ANY[, quantile: ANY[, sample_size: INTEGER]]) -> ANY	aggregates.html
 reverse(string: VARCHAR) -> VARCHAR	text.html
 right(string: VARCHAR, count: BIGINT) -> VARCHAR	text.html
 right_grapheme(string: VARCHAR, count: BIGINT) -> VARCHAR	text.html
@@ -1340,7 +1340,7 @@ timezone_minute(ts: ANY) -> BIGINT	overview.html
 to_aggregate_state(data: ANY, name: VARCHAR, signature: ANY[]) -> ANY	overview.html
 to_aggregate_state(data: ANY, name: VARCHAR, signature: ANY[], constant_parameters: ANY) -> ANY	overview.html
 to_aggregate_state(data: ANY, name: VARCHAR, signature: ANY[], constant_parameters: ANY, order_by: ANY) -> ANY	overview.html
-to_base(number: BIGINT, radix: INTEGER, min_length: INTEGER) -> VARCHAR	text.html
+to_base(number: BIGINT, radix: INTEGER[, min_length: INTEGER]) -> VARCHAR	text.html
 to_base64(blob: BLOB) -> VARCHAR	text.html
 to_binary(value: ANY) -> VARCHAR	numeric.html
 to_binary(string: VARCHAR) -> VARCHAR	text.html

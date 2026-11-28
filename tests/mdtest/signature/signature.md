@@ -52,6 +52,20 @@ q = "--sql\nSELECT coalesce(nickname, name, <CURSOR>) FROM users"
 # signature: > coalesce(**value: anyelement**, ...) -> anyelement
 ```
 
+A parameter with a default is optional, and a function PostgreSQL also defines without
+arguments has that overload too.
+
+```python
+q = "--sql\nSELECT pg_terminate_backend(<CURSOR>)"
+# signature: > pg_terminate_backend(**pid: integer**[, timeout: bigint]) -> boolean
+```
+
+```python
+q = "--sql\nSELECT jsonb_build_object(<CURSOR>)"
+# signature: > jsonb_build_object(VARIADIC **"any"**) -> jsonb
+# signature: jsonb_build_object() -> jsonb
+```
+
 ## Named arguments
 
 An argument passed by name makes its parameter active; after it, positions say nothing.
@@ -187,6 +201,13 @@ q = "--sql\nSELECT concat_ws(', ', <CURSOR>) FROM users"
 # signature: > concat_ws(separator: VARCHAR, **string: ANY**[, ANY, ...]) -> VARCHAR
 ```
 
+A parameter a call may leave out is optional, as DuckDB binds the call.
+
+```python
+q = "--sql\nSELECT lag(price, <CURSOR>) OVER () FROM orders"
+# signature: > lag(col: T[, **offset: BIGINT**[, default: ANY]]) -> T
+```
+
 A type holds its brackets and parentheses, and a `[...]` or `{...}` literal holds its commas.
 
 ```python
@@ -227,6 +248,13 @@ q = "--sql\nSELECT ROUND(price, <CURSOR>) FROM orders"
 ```python
 q = "--sql\nSELECT JSON_EXTRACT(doc, '$.a', <CURSOR>) FROM orders"
 # signature: > json_extract(json_doc, path[, **path**, ...])
+```
+
+Numbered example parameters, `str1, str2, ...`, take one or more.
+
+```python
+q = "--sql\nSELECT CONCAT(<CURSOR>) FROM orders"
+# signature: > concat(**str1**[, ...])
 ```
 
 ## Dialects without a catalog

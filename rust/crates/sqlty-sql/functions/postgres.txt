@@ -202,7 +202,9 @@ json_array_elements(json) -> setof json	functions-json.html#FUNCTIONS-JSON-PROCE
 json_array_elements_text(json) -> setof text	functions-json.html#FUNCTIONS-JSON-PROCESSING-TABLE
 json_array_length(json) -> integer	functions-json.html#FUNCTIONS-JSON-PROCESSING-TABLE
 json_build_array(VARIADIC "any") -> json	functions-json.html#FUNCTIONS-JSON-CREATION-TABLE
+json_build_array() -> json	functions-json.html#FUNCTIONS-JSON-CREATION-TABLE
 json_build_object(VARIADIC "any") -> json	functions-json.html#FUNCTIONS-JSON-CREATION-TABLE
+json_build_object() -> json	functions-json.html#FUNCTIONS-JSON-CREATION-TABLE
 json_each(json) -> setof record(key text, value json)	functions-json.html#FUNCTIONS-JSON-PROCESSING-TABLE
 json_each_text(json) -> setof record(key text, value text)	functions-json.html#FUNCTIONS-JSON-PROCESSING-TABLE
 json_extract_path(from_json: json, VARIADIC path_elems: text[]) -> json	functions-json.html#FUNCTIONS-JSON-PROCESSING-TABLE
@@ -227,7 +229,9 @@ jsonb_array_elements(jsonb) -> setof jsonb	functions-json.html#FUNCTIONS-JSON-PR
 jsonb_array_elements_text(jsonb) -> setof text	functions-json.html#FUNCTIONS-JSON-PROCESSING-TABLE
 jsonb_array_length(jsonb) -> integer	functions-json.html#FUNCTIONS-JSON-PROCESSING-TABLE
 jsonb_build_array(VARIADIC "any") -> jsonb	functions-json.html#FUNCTIONS-JSON-CREATION-TABLE
+jsonb_build_array() -> jsonb	functions-json.html#FUNCTIONS-JSON-CREATION-TABLE
 jsonb_build_object(VARIADIC "any") -> jsonb	functions-json.html#FUNCTIONS-JSON-CREATION-TABLE
+jsonb_build_object() -> jsonb	functions-json.html#FUNCTIONS-JSON-CREATION-TABLE
 jsonb_each(jsonb) -> setof record(key text, value jsonb)	functions-json.html#FUNCTIONS-JSON-PROCESSING-TABLE
 jsonb_each_text(jsonb) -> setof record(key text, value text)	functions-json.html#FUNCTIONS-JSON-PROCESSING-TABLE
 jsonb_extract_path(from_json: jsonb, VARIADIC path_elems: text[]) -> jsonb	functions-json.html#FUNCTIONS-JSON-PROCESSING-TABLE
@@ -462,7 +466,7 @@ pg_partition_ancestors(regclass) -> setof regclass	functions-admin.html#FUNCTION
 pg_partition_root(regclass) -> regclass	functions-admin.html#FUNCTIONS-INFO-PARTITION
 pg_partition_tree(regclass) -> setof record(relid regclass, parentrelid regclass, isleaf boolean, level integer)	functions-admin.html#FUNCTIONS-INFO-PARTITION
 pg_postmaster_start_time() -> timestamp with time zone	functions-info.html#FUNCTIONS-INFO-SESSION-TABLE
-pg_promote(wait: boolean, wait_seconds: integer) -> boolean	functions-admin.html#FUNCTIONS-RECOVERY-CONTROL-TABLE
+pg_promote([wait: boolean[, wait_seconds: integer]]) -> boolean	functions-admin.html#FUNCTIONS-RECOVERY-CONTROL-TABLE
 pg_read_binary_file(filename: text[, offset: bigint, length: bigint][, missing_ok: boolean]) -> bytea	functions-admin.html#FUNCTIONS-ADMIN-GENFILE-TABLE
 pg_read_file(filename: text[, offset: bigint, length: bigint][, missing_ok: boolean]) -> text	functions-admin.html#FUNCTIONS-ADMIN-GENFILE-TABLE
 pg_relation_filenode(relation: regclass) -> oid	functions-admin.html#FUNCTIONS-ADMIN-DBLOCATION
@@ -501,7 +505,7 @@ pg_tablespace_databases(tablespace: oid) -> setof oid	functions-info.html#FUNCTI
 pg_tablespace_location(tablespace: oid) -> text	functions-info.html#FUNCTIONS-INFO-CATALOG-TABLE
 pg_tablespace_size(name) -> bigint	functions-admin.html#FUNCTIONS-ADMIN-DBSIZE
 pg_tablespace_size(oid) -> bigint	functions-admin.html#FUNCTIONS-ADMIN-DBSIZE
-pg_terminate_backend(pid: integer, timeout: bigint) -> boolean	functions-admin.html#FUNCTIONS-ADMIN-SIGNAL-TABLE
+pg_terminate_backend(pid: integer[, timeout: bigint]) -> boolean	functions-admin.html#FUNCTIONS-ADMIN-SIGNAL-TABLE
 pg_total_relation_size(regclass) -> bigint	functions-admin.html#FUNCTIONS-ADMIN-DBSIZE
 pg_trigger_depth() -> integer	functions-info.html#FUNCTIONS-INFO-SESSION-TABLE
 pg_try_advisory_lock(key: bigint) -> boolean	functions-admin.html#FUNCTIONS-ADVISORY-LOCKS-TABLE
