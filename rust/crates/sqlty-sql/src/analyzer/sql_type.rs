@@ -755,6 +755,9 @@ pub(super) fn decimal_type(dialect: SqlDialect) -> &'static str {
     }
 }
 
+/// Types that PostgreSQL extensions define, mapped in PostgreSQL only.
+const POSTGRES_EXTENSION_TYPES: [&str; 1] = ["HSTORE"];
+
 /// The Python type of a scalar type by its canonical spelling; unknown types are `None`.
 fn scalar_python(sql_type: &str, dialect: SqlDialect) -> Option<String> {
     let base = sql_type.split(['(', '<']).next().unwrap_or_default().trim();
@@ -794,6 +797,9 @@ fn scalar_python(sql_type: &str, dialect: SqlDialect) -> Option<String> {
         "BIT" | "VARBIT" => Some("str".to_string()),
         _ => SQL_TO_PYTHON_TYPE
             .get(base)
+            .filter(|_| {
+                dialect == SqlDialect::Postgres || !POSTGRES_EXTENSION_TYPES.contains(&base)
+            })
             .map(ToString::to_string)
             .or_else(|| (dialect == SqlDialect::Sqlite).then(|| sqlite_affinity(base))?),
     }
