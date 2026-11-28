@@ -157,6 +157,12 @@ pub(super) enum Taint {
     Function,
 }
 
+/// Where the schema last defined a relation.
+#[derive(Clone, Default)]
+pub(super) struct Defined {
+    pub(super) at: Range<usize>,
+}
+
 /// A statement and the `search_path` it ran under.
 pub(super) struct Op {
     pub(super) path: Rc<Vec<String>>,
@@ -215,6 +221,8 @@ pub(super) struct Loader {
     written: usize,
     /// Where the statement being applied is in the schema.
     pub(super) at: Range<usize>,
+    /// Where each relation the schema itself defines was last defined; not the built-ins.
+    pub(super) defined: FxHashMap<String, Defined>,
 }
 
 /// The most columns all relations hold besides the ones a schema could spell out (see
@@ -257,6 +265,7 @@ impl Loader {
             allowance: 0,
             written: 0,
             at: 0..0,
+            defined: FxHashMap::default(),
         }
     }
 
@@ -283,6 +292,7 @@ impl Loader {
             allowance: self.allowance,
             written: 0,
             at: 0..0,
+            defined: FxHashMap::default(),
         }
     }
 
@@ -530,6 +540,7 @@ impl Loader {
 
     fn give_up_as(&mut self, kind: &'static str, create: &CreateTable, path: &[String]) {
         let key = self.new_key(&create.name, path);
+        self.define(&key);
         self.skipped.push((kind, create.name.to_string()));
         self.set_relation(
             key,
@@ -598,7 +609,12 @@ impl Loader {
                     return true;
                 }
                 table.unknown |= from_table.unknown;
-                merge_columns(&mut table.columns, from_table.columns.clone());
+                // Copied columns are defined here.
+                let copied = from_table.columns.iter().map(|column| RawColumn {
+                    at: 0..0,
+                    ..column.clone()
+                });
+                merge_columns(&mut table.columns, copied.collect::<Vec<_>>());
             }
         }
         // A PostgreSQL `PARTITION OF` column without a type only adds constraints; a SQLite
@@ -737,9 +753,16 @@ impl Loader {
             table.foreign_keys = declared;
         }
         if create.query.is_none() && !table.columns.is_empty() {
+            self.define(&key);
             self.set_relation(key, Some(Rel::Table(table)));
         }
         true
+    }
+
+    /// Record that the statement being applied defines the relation `key`.
+    pub(super) fn define(&mut self, key: &str) {
+        let at = self.at.clone();
+        self.defined.entry(key.to_string()).or_default().at = at;
     }
 
     /// A foreign key of the table `key`, which `table` is, over `columns`. One to a table
@@ -883,6 +906,7 @@ impl Loader {
         if !force && undefined_calls && columns.iter().any(|c| c.python_type.is_none()) {
             return false;
         }
+        self.define(&key);
         self.set_relation(key, Some(Rel::View(columns)));
         true
     }
@@ -955,7 +979,13 @@ impl Loader {
     /// cached catalog without building it again.
     pub(super) fn set_relation(&mut self, key: String, rel: Option<Rel>) {
         match rel {
-            Some(rel) => {
+            Some(mut rel) => {
+                if let Rel::Table(table) = &mut rel {
+                    let at = u32_range(&self.at);
+                    for column in table.columns.iter_mut().filter(|c| c.at.end == 0) {
+                        column.at = at.clone();
+                    }
+                }
                 let rel = self.within_limits(&key, rel);
                 self.relations.insert(key.clone(), rel);
             }
@@ -964,6 +994,7 @@ impl Loader {
                     .held
                     .saturating_sub(self.relations.get(&key).map_or(0, Rel::width));
                 self.relations.remove(&key);
+                self.defined.remove(&key);
             }
         }
         if self.cache.is_none() {
@@ -982,8 +1013,13 @@ impl Loader {
         self.stale_relations.insert(key);
     }
 
-    /// Move the relation at `from`, if any, to `to`, replacing what is there.
+    /// Move the relation at `from`, if any, to `to`, replacing what is there: the statement
+    /// being applied defines it under its new name.
     pub(super) fn move_relation(&mut self, from: &str, to: String) {
+        if let Some(mut defined) = self.defined.remove(from) {
+            defined.at = self.at.clone();
+            self.defined.insert(to.clone(), defined);
+        }
         let replaced = self
             .relations
             .remove(from)
@@ -1151,6 +1187,7 @@ impl Loader {
                         let schema = name_parts.last().map_or("", String::as_str);
                         let prefix = format!("{schema}.");
                         self.relations.retain(|key, _| !key.starts_with(&prefix));
+                        self.defined.retain(|key, _| !key.starts_with(&prefix));
                         self.held = self.relations.values().map(Rel::width).sum();
                         self.types.retain(|key, _| !key.starts_with(&prefix));
                         self.enum_labels.retain(|key, _| !key.starts_with(&prefix));
@@ -1305,4 +1342,10 @@ fn forget_values(column: &mut Column, dialect: SqlDialect) {
     if checkable && values::parse(python).is_some() {
         column.python_type = typed(sql.clone(), None, dialect).0;
     }
+}
+
+/// `at` in the `u32` offsets the catalog keeps; a schema past 4 GiB is cut by the limits first.
+pub(super) fn u32_range(at: &Range<usize>) -> Range<u32> {
+    let cut = |n: usize| u32::try_from(n).unwrap_or(u32::MAX);
+    cut(at.start)..cut(at.end)
 }

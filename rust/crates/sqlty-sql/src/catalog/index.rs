@@ -477,7 +477,7 @@ mod tests {
     }
 
     /// The index holds the catalog's keys, not copies: two pointers per name, and every
-    /// key's one allocation is shared by the map and both sorted orders.
+    /// key's one allocation is shared by the map, both sorted orders and the sources.
     #[test]
     fn index_shares_the_catalog_keys() {
         let mut sql = String::new();
@@ -489,7 +489,8 @@ mod tests {
         assert_eq!(sorted.by_key.len(), c.relations.len());
         assert_eq!(sorted.by_name.len(), c.relations.len());
         for key in c.relations.keys() {
-            assert_eq!(Arc::strong_count(key), 3, "{key}");
+            let sources = usize::from(c.sources.contains_key(key));
+            assert_eq!(Arc::strong_count(key), 3 + sources, "{key}");
         }
         let pointers =
             (sorted.by_key.capacity() + sorted.by_name.capacity()) * size_of::<Arc<str>>();

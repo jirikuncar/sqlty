@@ -44,6 +44,10 @@ pub(super) struct RawColumn {
     pub(super) collated: bool,
     /// MySQL's `INVISIBLE`: left out of `SELECT *`.
     pub(super) invisible: bool,
+    /// The statement that last defined it; empty until [`Loader::set_relation`] stamps it.
+    ///
+    /// [`Loader::set_relation`]: super::loader::Loader::set_relation
+    pub(super) at: std::ops::Range<u32>,
 }
 
 impl RawColumn {
@@ -192,6 +196,7 @@ pub(super) fn raw_column(column: &ColumnDef, dialect: SqlDialect) -> RawColumn {
             .options
             .iter()
             .any(|option| matches!(option.option, ColumnOption::Invisible)),
+        at: 0..0,
     }
 }
 

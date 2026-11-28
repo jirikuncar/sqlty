@@ -194,13 +194,18 @@ impl TableRelation {
 
     /// The first column named `name`.
     fn column(&self, name: &str) -> Option<&SchemaColumn> {
+        self.position(name).map(|at| &self.columns[at])
+    }
+
+    /// Where the first column named `name` is among the columns.
+    fn position(&self, name: &str) -> Option<usize> {
         let hash = name_hash(name);
         let at = self.by_name.partition_point(|&(h, _)| h < hash);
         self.by_name[at..]
             .iter()
             .take_while(|&&(h, _)| h == hash)
-            .map(|&(_, at)| &self.columns[at as usize])
-            .find(|column| column.name == name)
+            .map(|&(_, at)| at as usize)
+            .find(|&at| self.columns[at].name == name)
     }
 }
 
@@ -278,6 +283,30 @@ pub struct CatalogData {
     index: NameIndex,
     /// The tenant keys of each table, built on first use; see [`Catalog::tenant_keys`].
     tenants: OnceLock<FxHashMap<Arc<str>, Vec<Vec<String>>>>,
+    /// Where the schema defines each of its own relations, sharing the keys above.
+    sources: FxHashMap<Arc<str>, Source>,
+}
+
+/// Where the schema last defined a relation and its columns: bytes of the schema text it
+/// was loaded from.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct Source {
+    /// The statement that last defined or renamed it.
+    pub(crate) at: Range<u32>,
+    /// The statement that last defined each column of a table, in the table's order; a
+    /// view's columns are defined by its own statement.
+    columns: Box<[Range<u32>]>,
+}
+
+impl Source {
+    pub(super) fn new(at: Range<u32>, columns: Box<[Range<u32>]>) -> Self {
+        Self { at, columns }
+    }
+
+    /// The statement that defines the column at `position`.
+    pub(crate) fn column_at(&self, position: usize) -> Range<u32> {
+        self.columns.get(position).unwrap_or(&self.at).clone()
+    }
 }
 
 /// Python types a project sets for SQL types or columns (`[tool.sqlty.types]`), for
@@ -523,6 +552,22 @@ impl Catalog {
         index::visit();
         lookup_key(&self.relations, &self.search_path, self.norm(name))
             .and_then(|key| self.relations.get(key))
+    }
+
+    /// The catalog key of the relation `name` the schema itself defines, and where.
+    pub(crate) fn source(&self, name: &str) -> Option<(&str, &Source)> {
+        let key = lookup_key(&self.relations, &self.search_path, self.norm(name))?;
+        let (key, source) = self.sources.get_key_value(key)?;
+        Some((key, source))
+    }
+
+    /// The position of the column `column`, folded, among those of the relation `key`.
+    pub(crate) fn column_position(&self, key: &str, column: &str) -> Option<usize> {
+        match self.relations.get(key)? {
+            Relation::Table(table) => table.position(column),
+            Relation::View(columns) => columns.iter().position(|c| c.name == column),
+            Relation::Unknown => None,
+        }
     }
 
     /// The statements a `BEFORE ... FOR EACH ROW` trigger of the table `name` fires for:

@@ -231,9 +231,9 @@ enum Context {
 }
 
 /// Clauses whose items are relations.
-const RELATION_CLAUSES: [&str; 5] = ["FROM", "JOIN", "UPDATE", "INTO", "TABLE"];
+pub(super) const RELATION_CLAUSES: [&str; 5] = ["FROM", "JOIN", "UPDATE", "INTO", "TABLE"];
 /// Clauses whose items are expressions over columns.
-const COLUMN_CLAUSES: [&str; 8] = [
+pub(super) const COLUMN_CLAUSES: [&str; 8] = [
     "SELECT",
     "WHERE",
     "ON",
@@ -480,7 +480,7 @@ fn named_relations<'t>(
 }
 
 /// Whether `word` is a keyword that can follow a `FROM` item, so it is no alias.
-fn is_keyword(word: &str) -> bool {
+pub(super) fn is_keyword(word: &str) -> bool {
     [
         "WHERE",
         "JOIN",
@@ -491,6 +491,7 @@ fn is_keyword(word: &str) -> bool {
         "CROSS",
         "ON",
         "USING",
+        "TABLESAMPLE",
         "GROUP",
         "ORDER",
         "HAVING",

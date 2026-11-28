@@ -509,6 +509,7 @@ pub(crate) fn load_with(
         );
         loader.run(ops);
         loader.search_path = vec!["public".to_string()];
+        loader.defined.clear();
         loader
     });
     let dialect = SqlDialect::from_name(dialect);
@@ -533,6 +534,7 @@ pub(crate) fn load_with(
     loader.resolve_foreign_keys();
     skipped.append(&mut loader.skipped);
     let mut catalog = loader.build();
+    catalog.sources = loader.sources(&catalog);
     if catalog.search_path.is_empty() {
         catalog.search_path.push("public".to_string());
     }
