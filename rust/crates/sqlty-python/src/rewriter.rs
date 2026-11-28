@@ -531,8 +531,8 @@ pub(crate) fn marked_query(sql_content: &str) -> Option<String> {
 }
 
 /// The value of the source text of plain (not raw) string literals: `\n`, `\"`, `\\`,
-/// `\x41`, `\u00e9`, ... decoded, a backslash-newline (LF, CRLF or CR) dropped. Unknown escapes, and
-/// `\N{...}`, stay as written.
+/// `\x41`, `\u00e9`, `\N{BULLET}`, ... decoded, a backslash-newline (LF, CRLF or CR) dropped.
+/// Unknown escapes, and a `\N{...}` that names no character, stay as written.
 pub(crate) fn decode_escapes(text: &str) -> Cow<'_, str> {
     if !text.contains('\\') {
         return Cow::Borrowed(text);
@@ -617,14 +617,20 @@ pub(crate) fn escapes(text: &str, mut piece: impl FnMut(&str, Range<usize>)) {
             _ => (0, 0),
         };
         let skip = usize::from(radix == 16);
-        let code = escape
-            .get(skip..skip + digits)
-            .filter(|_| digits > 0)
-            .and_then(|code| u32::from_str_radix(code, radix).ok())
-            .and_then(char::from_u32);
+        let (code, used) = match named(escape) {
+            Some((ch, used)) => (Some(ch), used),
+            _ => (
+                escape
+                    .get(skip..skip + digits)
+                    .filter(|_| digits > 0)
+                    .and_then(|code| u32::from_str_radix(code, radix).ok())
+                    .and_then(char::from_u32),
+                skip + digits,
+            ),
+        };
         match code {
             Some(ch) => {
-                rest = &escape[skip + digits..];
+                rest = &escape[used..];
                 piece(ch.encode_utf8(&mut [0; 4]), from..position(rest));
             }
             None => {
@@ -634,6 +640,19 @@ pub(crate) fn escapes(text: &str, mut piece: impl FnMut(&str, Range<usize>)) {
         }
     }
     piece(rest, position(rest)..text.len());
+}
+
+/// The character and the bytes of `N{NAME}` at the start of `escape` (what follows a
+/// backslash), by Unicode name as Python reads it; the name table is the one the parser
+/// already links.
+fn named(escape: &str) -> Option<(char, usize)> {
+    // The longest Unicode name or alias has 88 bytes; a bounded search keeps a run of
+    // unclosed `\N{` linear.
+    const LONGEST: usize = 128;
+    let name = escape.strip_prefix("N{")?;
+    let window = &name.as_bytes()[..name.len().min(LONGEST)];
+    let close = window.iter().position(|&b| b == b'}')?;
+    Some((unicode_names2::character(&name[..close])?, close + 3))
 }
 
 /// `\bname\b`, compiled once per name: the few import styles in use repeat call after call.
@@ -1146,7 +1165,8 @@ mod tests {
             (r"\101\0\08", "A\0\08"),
             ("a\\\nb", "ab"),
             ("a\\\r\nb\\\rc", "abc"),
-            (r"\d\N{BULLET}\x4", r"\d\N{BULLET}\x4"),
+            (r"\d\N{BULLET}\x4", "\\d\u{2022}\\x4"),
+            (r"\N{NO SUCH NAME}", r"\N{NO SUCH NAME}"),
             ("end\\", "end\\"),
         ];
         for (source, value) in cases {
