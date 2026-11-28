@@ -69,13 +69,20 @@ POSTGRES_AGGREGATES = {
     "max(anyelement) -> anyelement",
     "min(anyelement) -> anyelement",
 }
-# pg_proc's overloads without arguments (`json_build_array_noargs` and the like), which the
-# documentation does not list.
-POSTGRES_NO_ARGUMENTS = {
-    "json_build_array() -> json",
-    "json_build_object() -> json",
-    "jsonb_build_array() -> jsonb",
-    "jsonb_build_object() -> jsonb",
+# Overloads pg_proc has that the documentation does not list: those without arguments
+# (`json_build_array_noargs`), a parameter with a default (`use_json_as_text`) and a
+# VARIADIC one that defaults to an empty array.
+POSTGRES_PG_PROC = {
+    "json_build_array() -> json": "functions-json.html#FUNCTIONS-JSON-CREATION-TABLE",
+    "json_build_object() -> json": "functions-json.html#FUNCTIONS-JSON-CREATION-TABLE",
+    "jsonb_build_array() -> jsonb": "functions-json.html#FUNCTIONS-JSON-CREATION-TABLE",
+    "jsonb_build_object() -> jsonb": "functions-json.html#FUNCTIONS-JSON-CREATION-TABLE",
+    "json_populate_record(base: anyelement, from_json: json, use_json_as_text: boolean) -> anyelement": "functions-json.html#FUNCTIONS-JSON-PROCESSING-TABLE",
+    "json_populate_recordset(base: anyelement, from_json: json, use_json_as_text: boolean) -> setof anyelement": "functions-json.html#FUNCTIONS-JSON-PROCESSING-TABLE",
+    "pg_logical_slot_get_changes(slot_name: name, upto_lsn: pg_lsn, upto_nchanges: integer) -> setof record(lsn pg_lsn, xid xid, data text)": "functions-admin.html#FUNCTIONS-REPLICATION-TABLE",
+    "pg_logical_slot_get_binary_changes(slot_name: name, upto_lsn: pg_lsn, upto_nchanges: integer) -> setof record(lsn pg_lsn, xid xid, data bytea)": "functions-admin.html#FUNCTIONS-REPLICATION-TABLE",
+    "pg_logical_slot_peek_changes(slot_name: name, upto_lsn: pg_lsn, upto_nchanges: integer) -> setof record(lsn pg_lsn, xid xid, data text)": "functions-admin.html#FUNCTIONS-REPLICATION-TABLE",
+    "pg_logical_slot_peek_binary_changes(slot_name: name, upto_lsn: pg_lsn, upto_nchanges: integer) -> setof record(lsn pg_lsn, xid xid, data bytea)": "functions-admin.html#FUNCTIONS-REPLICATION-TABLE",
 }
 DEFAULT = re.compile(r"\s*<literal>DEFAULT</literal>\s*<literal>[^<]*</literal>")
 
@@ -151,8 +158,7 @@ def postgres() -> list[str]:
         lines[line] = f"functions-conditional.html{anchor}"
     for line in POSTGRES_AGGREGATES:
         lines[line] = "functions-aggregate.html#FUNCTIONS-AGGREGATE-TABLE"
-    for line in POSTGRES_NO_ARGUMENTS:
-        lines[line] = "functions-json.html#FUNCTIONS-JSON-CREATION-TABLE"
+    lines.update(POSTGRES_PG_PROC)
     return [f"{line}\t{doc}" for line, doc in lines.items()]
 
 
@@ -338,6 +344,8 @@ def mysql_parameters(arguments: str) -> str | None:
     if re.match(r"\s*DISTINCT\b", arguments):
         return None
     arguments = re.sub(r"^\s*\[DISTINCT\]\s+", "", arguments)
+    # `[,info | iterations]`: one parameter, named either way.
+    arguments = re.sub(r"\[\s*,\s*(\w+)\s*\|\s*\w+\s*\]", r"[,\1]", arguments)
     while (shorter := MYSQL_KEYWORD_OPTION.sub("", arguments)) != arguments:
         arguments = shorter
     if re.search(r"[{|(]|\b[A-Z]{2,}\b", arguments):

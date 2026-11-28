@@ -217,7 +217,9 @@ json_object_agg_unique(key: "any", value: "any") -> json	functions-aggregate.htm
 json_object_agg_unique_strict(key: "any", value: "any") -> json	functions-aggregate.html#FUNCTIONS-AGGREGATE-TABLE
 json_object_keys(json) -> setof text	functions-json.html#FUNCTIONS-JSON-PROCESSING-TABLE
 json_populate_record(base: anyelement, from_json: json) -> anyelement	functions-json.html#FUNCTIONS-JSON-PROCESSING-TABLE
+json_populate_record(base: anyelement, from_json: json, use_json_as_text: boolean) -> anyelement	functions-json.html#FUNCTIONS-JSON-PROCESSING-TABLE
 json_populate_recordset(base: anyelement, from_json: json) -> setof anyelement	functions-json.html#FUNCTIONS-JSON-PROCESSING-TABLE
+json_populate_recordset(base: anyelement, from_json: json, use_json_as_text: boolean) -> setof anyelement	functions-json.html#FUNCTIONS-JSON-PROCESSING-TABLE
 json_strip_nulls(json) -> json	functions-json.html#FUNCTIONS-JSON-PROCESSING-TABLE
 json_to_record(json) -> record	functions-json.html#FUNCTIONS-JSON-PROCESSING-TABLE
 json_to_recordset(json) -> setof record	functions-json.html#FUNCTIONS-JSON-PROCESSING-TABLE
@@ -445,9 +447,13 @@ pg_log_standby_snapshot() -> pg_lsn	functions-admin.html#FUNCTIONS-SNAPSHOT-SYNC
 pg_logical_emit_message(transactional: boolean, prefix: text, message: text[, flush: boolean]) -> pg_lsn	functions-admin.html#FUNCTIONS-REPLICATION-TABLE
 pg_logical_emit_message(transactional: boolean, prefix: text, message: bytea[, flush: boolean]) -> pg_lsn	functions-admin.html#FUNCTIONS-REPLICATION-TABLE
 pg_logical_slot_get_binary_changes(slot_name: name, upto_lsn: pg_lsn, upto_nchanges: integer, VARIADIC options: text[]) -> setof record(lsn pg_lsn, xid xid, data bytea)	functions-admin.html#FUNCTIONS-REPLICATION-TABLE
+pg_logical_slot_get_binary_changes(slot_name: name, upto_lsn: pg_lsn, upto_nchanges: integer) -> setof record(lsn pg_lsn, xid xid, data bytea)	functions-admin.html#FUNCTIONS-REPLICATION-TABLE
 pg_logical_slot_get_changes(slot_name: name, upto_lsn: pg_lsn, upto_nchanges: integer, VARIADIC options: text[]) -> setof record(lsn pg_lsn, xid xid, data text)	functions-admin.html#FUNCTIONS-REPLICATION-TABLE
+pg_logical_slot_get_changes(slot_name: name, upto_lsn: pg_lsn, upto_nchanges: integer) -> setof record(lsn pg_lsn, xid xid, data text)	functions-admin.html#FUNCTIONS-REPLICATION-TABLE
 pg_logical_slot_peek_binary_changes(slot_name: name, upto_lsn: pg_lsn, upto_nchanges: integer, VARIADIC options: text[]) -> setof record(lsn pg_lsn, xid xid, data bytea)	functions-admin.html#FUNCTIONS-REPLICATION-TABLE
+pg_logical_slot_peek_binary_changes(slot_name: name, upto_lsn: pg_lsn, upto_nchanges: integer) -> setof record(lsn pg_lsn, xid xid, data bytea)	functions-admin.html#FUNCTIONS-REPLICATION-TABLE
 pg_logical_slot_peek_changes(slot_name: name, upto_lsn: pg_lsn, upto_nchanges: integer, VARIADIC options: text[]) -> setof record(lsn pg_lsn, xid xid, data text)	functions-admin.html#FUNCTIONS-REPLICATION-TABLE
+pg_logical_slot_peek_changes(slot_name: name, upto_lsn: pg_lsn, upto_nchanges: integer) -> setof record(lsn pg_lsn, xid xid, data text)	functions-admin.html#FUNCTIONS-REPLICATION-TABLE
 pg_ls_archive_statusdir() -> setof record(name text, size bigint, modification timestamp with time zone)	functions-admin.html#FUNCTIONS-ADMIN-GENFILE-TABLE
 pg_ls_dir(dirname: text[, missing_ok: boolean, include_dot_dirs: boolean]) -> setof text	functions-admin.html#FUNCTIONS-ADMIN-GENFILE-TABLE
 pg_ls_logdir() -> setof record(name text, size bigint, modification timestamp with time zone)	functions-admin.html#FUNCTIONS-ADMIN-GENFILE-TABLE
