@@ -471,8 +471,10 @@ changes the Python type (`HSTORE = "str"` without the adapter). `pg_trgm` (`simi
 and `intarray` (`icount`, `sort`, `uniq`, `&`, `|`, ...) are known the same way; an
 `ltree`, `lquery`, `ltxtquery` or `query_int` value is a `str`. pgvector (`CREATE EXTENSION
 vector`) brings `l2_distance`, `cosine_distance`, `vector_dims`, ...; a `vector`, `halfvec`
-or `sparsevec` is the `str` psycopg returns, or `VECTOR = "pgvector.Vector"` in
-`[tool.sqlty.types]` with `register_vector`, and `<->` and `<=>` give a `float`. Other
+or `sparsevec` is the `str` psycopg returns (with pgvector-python 0.5's `register_vector`,
+set `VECTOR = "pgvector.Vector"`, `HALFVEC = "pgvector.HalfVector"` and
+`SPARSEVEC = "pgvector.SparseVector"` in `[tool.sqlty.types]`), and `<->`, `<#>` and `<=>`
+give a `float`. Other
 extensions keep their functions unknown.
 
 ```toml

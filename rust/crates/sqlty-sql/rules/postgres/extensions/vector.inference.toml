@@ -2,43 +2,59 @@
 
 [[rule]]
 id = "postgres.vector.distance"
-operators = ["LtDashGt", "Spaceship"]
+operators = ["LtDashGt", "Spaceship", "Custom:<#>"]
 dialects = ["postgres"]
 left = ["VECTOR"]
 type = "DOUBLE"
+left-parameter = "VECTOR"
 right-parameter = "VECTOR"
-reference.postgres = "pgvector README, Reference, Vector Operators (<-> Euclidean distance, <=> cosine distance), as l2_distance ( vector, vector ) → double precision"
+reference.postgres = "pgvector 0.8 README, Reference, Vector Operators (<-> Euclidean distance, <#> negative inner product, <=> cosine distance), as l2_distance ( vector, vector ) → double precision"
 reasoning = "A distance between two vectors is a `double precision`, NULL only for a NULL operand."
 
 [[rule]]
 id = "postgres.vector.distance-halfvec"
-operators = ["LtDashGt", "Spaceship"]
+operators = ["LtDashGt", "Spaceship", "Custom:<#>"]
 dialects = ["postgres"]
 left = ["HALFVEC"]
 type = "DOUBLE"
+left-parameter = "HALFVEC"
 right-parameter = "HALFVEC"
-reference.postgres = "pgvector README, Reference, Halfvec Operators (halfvec: <-> Euclidean distance, <=> cosine distance), as l2_distance ( halfvec, halfvec ) → double precision"
+reference.postgres = "pgvector 0.8 README, Reference, Halfvec Operators (<-> Euclidean distance, <#> negative inner product, <=> cosine distance), as l2_distance ( halfvec, halfvec ) → double precision"
 reasoning = "A distance between two vectors is a `double precision`, NULL only for a NULL operand."
 
 [[rule]]
 id = "postgres.vector.distance-sparsevec"
-operators = ["LtDashGt", "Spaceship"]
+operators = ["LtDashGt", "Spaceship", "Custom:<#>"]
 dialects = ["postgres"]
 left = ["SPARSEVEC"]
 type = "DOUBLE"
+left-parameter = "SPARSEVEC"
 right-parameter = "SPARSEVEC"
-reference.postgres = "pgvector README, Reference, Sparsevec Operators (sparsevec: <-> Euclidean distance, <=> cosine distance), as l2_distance ( sparsevec, sparsevec ) → double precision"
+reference.postgres = "pgvector 0.8 README, Reference, Sparsevec Operators (<-> Euclidean distance, <#> negative inner product, <=> cosine distance), as l2_distance ( sparsevec, sparsevec ) → double precision"
 reasoning = "A distance between two vectors is a `double precision`, NULL only for a NULL operand."
+
+[[rule]]
+id = "postgres.vector.bit-distance"
+operators = ["Custom:<~>", "Custom:<%>"]
+dialects = ["postgres"]
+extension = "vector"
+left = ["BIT"]
+right = ["BIT"]
+type = "DOUBLE"
+left-parameter = "BIT"
+right-parameter = "BIT"
+reference.postgres = "pgvector 0.8 README, Reference, Bit Operators (<~> Hamming distance, <%> Jaccard distance), as hamming_distance ( bit, bit ) → double precision"
+reasoning = "A distance between two bit strings is a `double precision`."
 
 [[rule]]
 id = "postgres.vector.arithmetic"
 operators = ["Plus", "Minus", "Multiply"]
 dialects = ["postgres"]
-left = ["VECTOR", "HALFVEC"]
-right = ["VECTOR", "HALFVEC"]
+left = ["VECTOR"]
+right = ["VECTOR"]
 type = "@left"
-reference.postgres = "pgvector README, Reference, Vector Operators (+ element-wise addition)"
-reasoning = "Element-wise arithmetic gives a vector of the left operand's type and dimensions."
+reference.postgres = "pgvector 0.8 README, Reference, Vector Operators (+ element-wise addition, - element-wise subtraction, * element-wise multiplication)"
+reasoning = "Element-wise arithmetic keeps the vectors' type and dimensions."
 
 [[rule]]
 id = "postgres.vector.concat"
@@ -47,8 +63,18 @@ dialects = ["postgres"]
 left = ["VECTOR"]
 right = ["VECTOR"]
 type = "VECTOR"
-reference.postgres = "pgvector README, Reference, Vector Operators (|| concatenate)"
-reasoning = "Two vectors joined are a vector with the dimensions of both."
+reference.postgres = "pgvector 0.8 README, Reference, Vector Operators (|| concatenate)"
+reasoning = "Two vectors joined are a vector of the same type with the dimensions of both."
+
+[[rule]]
+id = "postgres.vector.arithmetic-halfvec"
+operators = ["Plus", "Minus", "Multiply"]
+dialects = ["postgres"]
+left = ["HALFVEC"]
+right = ["HALFVEC"]
+type = "@left"
+reference.postgres = "pgvector 0.8 README, Reference, Halfvec Operators (+ element-wise addition, - element-wise subtraction, * element-wise multiplication)"
+reasoning = "Element-wise arithmetic keeps the vectors' type and dimensions."
 
 [[rule]]
 id = "postgres.vector.concat-halfvec"
@@ -57,18 +83,38 @@ dialects = ["postgres"]
 left = ["HALFVEC"]
 right = ["HALFVEC"]
 type = "HALFVEC"
-reference.postgres = "pgvector README, Reference, Halfvec Operators (|| concatenate)"
-reasoning = "Two half vectors joined are a half vector with the dimensions of both."
+reference.postgres = "pgvector 0.8 README, Reference, Halfvec Operators (|| concatenate)"
+reasoning = "Two vectors joined are a vector of the same type with the dimensions of both."
+
+[[function]]
+id = "postgres.vector.average"
+function = "AVG"
+dialects = ["postgres"]
+argument = ["VECTOR", "HALFVEC"]
+type = "@argument-type(0)"
+nullability = "aggregate"
+reference.postgres = "pgvector 0.8 README, Reference, Vector Aggregate Functions (avg ( vector ) → vector); Halfvec Aggregate Functions (avg ( halfvec ) → halfvec)"
+reasoning = "The mean of vectors is a vector of the same type, NULL when no row has one."
 
 [[function]]
 id = "postgres.vector.distances"
-functions = ["COSINE_DISTANCE", "INNER_PRODUCT", "L1_DISTANCE", "L2_DISTANCE", "VECTOR_NORM", "L2_NORM", "HAMMING_DISTANCE", "JACCARD_DISTANCE"]
+functions = ["COSINE_DISTANCE", "INNER_PRODUCT", "L1_DISTANCE", "L2_DISTANCE", "VECTOR_NORM", "L2_NORM"]
 dialects = ["postgres"]
 extension = "vector"
 type = "DOUBLE"
 nullability = "strict"
-reference.postgres = "pgvector README, Reference, Vector Functions (cosine_distance ( vector, vector ) → double precision, vector_norm ( vector ) → double precision)"
+reference.postgres = "pgvector 0.8 README, Reference, Vector Functions (cosine_distance ( vector, vector ) → double precision, vector_norm ( vector ) → double precision); Halfvec Functions (l2_norm ( halfvec ) → double precision)"
 reasoning = "Distances and norms are `double precision`, NULL only for a NULL argument."
+
+[[function]]
+id = "postgres.vector.bit-distances"
+functions = ["HAMMING_DISTANCE", "JACCARD_DISTANCE"]
+dialects = ["postgres"]
+extension = "vector"
+type = "DOUBLE"
+nullability = "strict"
+reference.postgres = "pgvector 0.8 README, Reference, Bit Functions (hamming_distance ( bit, bit ) → double precision, jaccard_distance ( bit, bit ) → double precision)"
+reasoning = "A distance between bit strings is a `double precision`."
 
 [[function]]
 id = "postgres.vector.dimensions"
@@ -77,7 +123,7 @@ dialects = ["postgres"]
 extension = "vector"
 type = "INT"
 nullability = "strict"
-reference.postgres = "pgvector README, Reference, Vector Functions (vector_dims ( vector ) → integer)"
+reference.postgres = "pgvector 0.8 README, Reference, Vector Functions (vector_dims ( vector ) → integer)"
 reasoning = "The number of dimensions is an `integer`."
 
 [[function]]
@@ -87,7 +133,7 @@ dialects = ["postgres"]
 extension = "vector"
 type = "@argument"
 nullability = "strict"
-reference.postgres = "pgvector README, Reference, Vector Functions (l2_normalize ( vector ) → vector); Halfvec Functions (l2_normalize ( halfvec ) → halfvec)"
+reference.postgres = "pgvector 0.8 README, Reference, Vector Functions (l2_normalize ( vector ) → vector); Halfvec Functions (l2_normalize ( halfvec ) → halfvec)"
 reasoning = "A normalized vector keeps its type and dimensions."
 
 [[function]]
@@ -98,18 +144,19 @@ extension = "vector"
 argument = ["HALFVEC"]
 type = "HALFVEC"
 nullability = "strict"
-reference.postgres = "pgvector README, Reference, Halfvec Functions (subvector ( halfvec, integer, integer ) → halfvec)"
-reasoning = "A part of a half vector is a half vector."
+reference.postgres = "pgvector 0.8 README, Reference, Halfvec Functions (subvector ( halfvec, integer, integer ) → halfvec)"
+reasoning = "A part of a `halfvec` is a `halfvec`."
 
 [[function]]
 id = "postgres.vector.subvector"
 function = "SUBVECTOR"
 dialects = ["postgres"]
 extension = "vector"
+argument = ["VECTOR"]
 type = "VECTOR"
 nullability = "strict"
-reference.postgres = "pgvector README, Reference, Vector Functions (subvector ( vector, integer, integer ) → vector)"
-reasoning = "A part of a vector is a vector."
+reference.postgres = "pgvector 0.8 README, Reference, Vector Functions (subvector ( vector, integer, integer ) → vector)"
+reasoning = "A part of a `vector` is a `vector`."
 
 [[function]]
 id = "postgres.vector.quantize"
@@ -118,5 +165,5 @@ dialects = ["postgres"]
 extension = "vector"
 type = "BIT"
 nullability = "strict"
-reference.postgres = "pgvector README, Reference, Vector Functions (binary_quantize ( vector ) → bit)"
+reference.postgres = "pgvector 0.8 README, Reference, Vector Functions (binary_quantize ( vector ) → bit)"
 reasoning = "A binary quantization is a `bit` string."
