@@ -1,0 +1,6 @@
+{
+  "name": "sqlty-npm",
+  "private": true,
+  "description": "The npm packages that depend on each other, linked for tests: npm ci, then npm test -w @sqlty/eslint-plugin.",
+  "workspaces": ["wasm", "eslint-plugin"]
+}
