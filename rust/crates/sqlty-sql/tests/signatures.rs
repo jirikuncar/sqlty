@@ -1,6 +1,6 @@
 //! The function catalog through `sqlty_sql::signatures`.
 
-use sqlty_sql::signatures::signatures;
+use sqlty_sql::signatures::{signatures, with_prefix};
 use sqlty_sql::Dialect;
 
 #[test]
@@ -41,6 +41,22 @@ fn dialects() {
         "https://dev.mysql.com/doc/refman/8.4/en/string-functions.html"
     );
     assert!(signatures(Dialect::Postgres, "no_such_function").is_empty());
+}
+
+#[test]
+fn functions_by_prefix() {
+    let names = |prefix| -> Vec<_> {
+        with_prefix(Dialect::Postgres, prefix)
+            .map(|overloads| (overloads[0].name, overloads.len()))
+            .collect()
+    };
+    assert_eq!(names("COAL"), [("coalesce", 1)]);
+    assert_eq!(names("ltri"), [("ltrim", 2)]);
+    assert!(names("zzz").is_empty());
+    assert!(names("é").is_empty());
+    let all = names("");
+    assert!(all.windows(2).all(|w| w[0].0 < w[1].0), "one entry per name, in order");
+    assert_eq!(with_prefix(Dialect::ClickHouse, "").count(), 0);
 }
 
 #[test]

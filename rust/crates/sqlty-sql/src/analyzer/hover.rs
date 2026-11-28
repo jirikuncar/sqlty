@@ -3,7 +3,9 @@
 //!
 //! A word at the top level of a select item (`total` in `SUM(x) AS total`, `SUM`) shows the
 //! result column: its Python and SQL types and the inference rules behind them, as
-//! `sqlty check --explain` reads them. Any other name is looked up as completion would
+//! `sqlty check --explain` reads them. A function name before `(` shows the overloads that
+//! take as many arguments as the call passes, with their documentation (below the result
+//! column of a whole select item). Any other name is looked up as completion would
 //! offer it at the end of the word, so it costs what completion does; a word before `.`
 //! lists the columns of that relation.
 //!
@@ -22,8 +24,10 @@ use std::fmt::Write as _;
 use std::ops::Range;
 
 use super::complete::{complete, lex, Candidate, CandidateKind, Tok};
+use super::signature_help::unquoted;
 use super::{analyze_select, explain_select, SchemaData, SqlDialect};
 use crate::catalog::Columns;
+use crate::signatures::signatures;
 
 /// What a word of a query is.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -52,15 +56,28 @@ pub fn hover(
         .iter()
         .position(|tok| tok.word && tok.span.start <= cursor && cursor <= tok.span.end)?;
     let word = &tokens[at];
+    let called = tokens.get(at + 1).is_some_and(|tok| tok.text == "(");
+    let function = || {
+        called
+            .then(|| function(word, Some(arguments(&tokens, at + 1)), dialect, schema))
+            .flatten()
+    };
     let contents = if tokens.get(at + 1).is_some_and(|tok| tok.text == ".") {
         qualifier(query, &tokens[at + 1], dialect, schema)
     } else {
         match select_item(&tokens, at) {
-            Some(item) if word.depth == item.depth => result_column(query, &item, dialect, schema)
-                .or_else(|| named(query, word, dialect, schema)),
-            Some(item) => named(query, word, dialect, schema)
+            Some(item) if word.depth == item.depth => {
+                match (result_column(query, &item, dialect, schema), function()) {
+                    (Some(column), Some(function)) => Some(format!("{column}\n\n---\n\n{function}")),
+                    (column, function) => column
+                        .or(function)
+                        .or_else(|| named(query, word, dialect, schema)),
+                }
+            }
+            Some(item) => function()
+                .or_else(|| named(query, word, dialect, schema))
                 .or_else(|| result_column(query, &item, dialect, schema)),
-            None => named(query, word, dialect, schema),
+            None => function().or_else(|| named(query, word, dialect, schema)),
         }
     }?;
     Some(Hover {
@@ -90,6 +107,7 @@ fn named(query: &str, word: &Tok, dialect: &str, schema: &SchemaData) -> Option<
             }
         }
         CandidateKind::Cte => format!("CTE `{}` of the query", candidate.label),
+        CandidateKind::Function => function(word, None, dialect, schema)?,
         // No word is a join, whose label holds its `ON`.
         CandidateKind::Table | CandidateKind::View | CandidateKind::Join => {
             let name = match &candidate.detail {
@@ -124,6 +142,81 @@ fn named(query: &str, word: &Tok, dialect: &str, schema: &SchemaData) -> Option<
             listed(format!("{kind} `{name}`"), &columns, columns.len() > SHOWN)
         }
     })
+}
+
+/// The function a word names: whether the schema defines it, and the overloads of the
+/// dialect's built-in that take `arguments` (all of them when none does or the count is
+/// unknown), with their documentation.
+fn function(
+    word: &Tok,
+    arguments: Option<usize>,
+    dialect: &str,
+    schema: &SchemaData,
+) -> Option<String> {
+    let name = unquoted(&word.text)?;
+    let overloads = signatures(SqlDialect::from_name(dialect), name);
+    let defined = schema.defines_function(&word.text);
+    if overloads.is_empty() && !defined {
+        return None;
+    }
+    let mut text = String::new();
+    if defined {
+        let _ = write!(text, "Function `{name}` the schema defines");
+    }
+    let fitting: Vec<_> = overloads
+        .iter()
+        .filter(|s| arguments.is_none_or(|count| s.accepts(count)))
+        .collect();
+    let shown = if fitting.is_empty() {
+        overloads.iter().collect()
+    } else {
+        fitting
+    };
+    if shown.is_empty() {
+        return Some(text);
+    }
+    if defined {
+        text.push_str("\n\nBuilt-in:\n\n");
+    }
+    text.push_str("```sql\n");
+    for overload in &shown {
+        let _ = writeln!(text, "{}", overload.label);
+    }
+    text.push_str("```");
+    let mut urls: Vec<String> = Vec::new();
+    for overload in &shown {
+        let url = overload.url();
+        if !urls.contains(&url) {
+            let _ = write!(text, "\n\n[Documentation]({url})");
+            urls.push(url);
+        }
+    }
+    Some(text)
+}
+
+/// How many arguments the call whose `(` is token `open` passes, up to its `)` or the end.
+fn arguments(tokens: &[Tok], open: usize) -> usize {
+    let inner = tokens[open].depth + 1;
+    let mut brackets = 0usize;
+    let mut commas = 0;
+    let mut empty = true;
+    for tok in &tokens[open + 1..] {
+        if tok.depth < inner {
+            break;
+        }
+        empty = false;
+        match tok.text.as_str() {
+            "[" | "{" => brackets += 1,
+            "]" | "}" => brackets = brackets.saturating_sub(1),
+            "," if tok.depth == inner && brackets == 0 => commas += 1,
+            _ => {}
+        }
+    }
+    if empty {
+        0
+    } else {
+        commas + 1
+    }
 }
 
 /// The columns of the relation a word before `dot` names: an alias, a table or a CTE.
