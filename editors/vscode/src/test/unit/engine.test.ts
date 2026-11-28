@@ -68,6 +68,39 @@ test("diagnostics follow open, changed, closed files and project edits", async (
   }
   disposable.dispose();
   assert.equal(providers.hover.length, 0);
+  assert.equal(providers.signature.length, 0);
+});
+
+test("signature help comes from the engine", async () => {
+  const q = fixture("q.py");
+  const call = document(resolve("fixture", "call.py"), 'q = "--sql\\nSELECT left(name, 3, 4)"');
+  const { disposable } = await started(q);
+  const [signature] = providers.signature;
+  const at = (text: string) => call.positionAt(call.getText().indexOf(text));
+  const help = await signature.provideSignatureHelp(call, at("3"));
+  assert.deepEqual(
+    help.signatures.map((found: { label: string; documentation: { value: string } }) => [
+      found.label,
+      found.documentation.value,
+    ]),
+    [
+      [
+        "left(string: text, n: integer) -> text",
+        "[Documentation](https://www.postgresql.org/docs/17/functions-string.html#FUNCTIONS-STRING-OTHER)",
+      ],
+    ],
+  );
+  assert.deepEqual(
+    help.signatures[0].parameters.map((found: { label: [number, number] }) => found.label),
+    [
+      [5, 17],
+      [19, 29],
+    ],
+  );
+  assert.equal(help.activeParameter, 1);
+  assert.equal((await signature.provideSignatureHelp(call, at("4"))).activeParameter, 2);
+  assert.equal(await signature.provideSignatureHelp(q, new Position(0, 0)), undefined);
+  disposable.dispose();
 });
 
 test("a broken project or engine answer is logged, and checks nothing", async () => {

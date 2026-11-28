@@ -85,6 +85,34 @@ fn complete_and_hover_at_a_utf16_offset() {
         "Table `public.users`\n- `id` `INT NOT NULL`\n- `name` `TEXT NOT NULL`\n- `email` `TEXT NULL`"
     );
     assert_eq!(hover["start"], cursor + 6);
+    signature_help_names_the_active_parameter();
+}
+
+/// Checked from `complete_and_hover_at_a_utf16_offset`.
+fn signature_help_names_the_active_parameter() {
+    let source = "é = \"--sql\\nSELECT left(name, 3) FROM users\"";
+    let cursor = source.find('3').unwrap() - 1;
+    let answer = ask(
+        &json!({"op": "signature", "source": source, "schema": SCHEMA, "dialect": "postgres", "offset": cursor}),
+    );
+    assert_eq!(
+        answer,
+        json!({
+            "signatures": [{
+                "label": "left(string: text, n: integer) -> text",
+                "url": "https://www.postgresql.org/docs/17/functions-string.html#FUNCTIONS-STRING-OTHER",
+                "parameters": [[5, 17], [19, 29]],
+            }],
+            "active_signature": 0,
+            "active_parameter": 1,
+        })
+    );
+    let more = "q = \"--sql\\nSELECT left(name, 3, 4)\"";
+    let past = ask(&json!({"op": "signature", "source": more, "offset": more.find('4').unwrap()}));
+    assert_eq!(past["active_parameter"], 2);
+    let outside =
+        ask(&json!({"op": "signature", "source": source, "dialect": "postgres", "offset": 0}));
+    assert_eq!(outside, Value::Null);
 }
 
 #[test]

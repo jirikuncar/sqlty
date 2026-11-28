@@ -4,7 +4,7 @@
 > merged in [#853](https://github.com/jirikuncar/sqlty/pull/853). Stage 4a (`sqlty format` with sqruff) merged in
 > [#930](https://github.com/jirikuncar/sqlty/pull/930), stage 4b (the server's formatting) in
 > [#969](https://github.com/jirikuncar/sqlty/pull/969); stage 4c (sqruff's lint rules in `sqlty check`) in
-> [#972](https://github.com/jirikuncar/sqlty/pull/972). Stage 2 needs a decision on where signatures come from; stage 5
+> [#972](https://github.com/jirikuncar/sqlty/pull/972). Stage 2 is [#1364](https://github.com/jirikuncar/sqlty/issues/1364): signatures from a catalog generated from vendor documentation; stage 5
 > waits for demand after stage 1.
 
 Tracks [#847](https://github.com/jirikuncar/sqlty/issues/847): what `sqlty server` offers inside
@@ -16,7 +16,7 @@ only the schema and the parsed query: no connection, no execution.
 | Stage | Content | State |
 |-------|---------|-------|
 | 1 | Hover: a column's type and source, a table's columns, a result column with its inference rule; `core.hover_source`, `# hover:` mdtests, `textDocument/hover`, `hover.enable` | merged, [#852](https://github.com/jirikuncar/sqlty/pull/852) |
-| 2 | Signature help for functions the inference rules type, from their `function`, `argument` and `reference` | needs a decision: 36 of 389 function rules give arguments, none give arity or parameter names |
+| 2 | Signature help for functions the inference rules type, from their `function`, `argument` and `reference` | [#1364](https://github.com/jirikuncar/sqlty/issues/1364): a function catalog generated from vendor documentation, not the rules |
 | 3 | Join completion: after `JOIN`, tables linked by a foreign key first, with the `ON` clause | merged, [#853](https://github.com/jirikuncar/sqlty/pull/853) |
 | 4a | `sqlty format` and `core.format_source`: query strings laid out by sqruff's layout rules | merged, [#930](https://github.com/jirikuncar/sqlty/pull/930) |
 | 4b | Formatting in `sqlty server`: the code action `source.format.sqlty` | merged, [#969](https://github.com/jirikuncar/sqlty/pull/969) |

@@ -239,7 +239,7 @@ The file tabs above the editor switch between the files `sqlty check` reads:
 
 | File | What it holds | On your machine |
 |---|---|---|
-| `queries.py` | The Python source: diagnostics under the code with their quick fixes, SQL highlighted in query strings, completion and hover in queries | [`sqlty server`](recipes/vscode.md) |
+| `queries.py` | The Python source: diagnostics under the code with their quick fixes, SQL highlighted in query strings, completion, hover and signature help in queries | [`sqlty server`](recipes/vscode.md) |
 | `schema.sql` | The `CREATE TABLE` statements the queries are typed against | [`schema`](reference/configuration.md#schema) |
 | `before.sql` | The schema before a change to `schema.sql`, empty until you paste one | [`sqlty breaking --against`](guide/breaking-changes.md) |
 | `sqlty.toml` | The `dialect`, `driver`, `import-style`, `param-types`, `preview`, `max-query-variants`, `rules`, `types`, `deprecated-columns` and `tenancy` of [`[tool.sqlty]`](reference/configuration.md); its `dialect` wins over the select | `sqlty.toml` or `pyproject.toml` |
