@@ -72,11 +72,16 @@ impl Workspace for Fake {
         } else {
             Severity::Error
         };
+        let rule = if text.contains("unused") {
+            "unused-cte"
+        } else {
+            "stale-type"
+        };
         self.checked = text.to_string();
         Ok(text
             .match_indices("bad")
             .map(|(at, _)| Diagnostic {
-                rule: "stale-type".to_string(),
+                rule: rule.to_string(),
                 message: "bad should be good".to_string(),
                 severity,
                 start: at,
@@ -314,6 +319,10 @@ fn diagnostics_are_published_in_utf16_units() {
         diagnostic["codeDescription"]["href"],
         "https://sqlty.kuncar.dev/reference/rules/stale-type/"
     );
+    assert_eq!(diagnostic["tags"], Value::Null);
+    client.open("file:///work/u.py", "unused = bad\n");
+    let published = client.notification("textDocument/publishDiagnostics");
+    assert_eq!(published["diagnostics"][0]["tags"], json!([1]));
     client.shutdown();
 }
 
