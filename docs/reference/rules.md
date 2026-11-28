@@ -49,6 +49,7 @@ stale-type = "error"
 | [`insert-value-count`](rules/insert-value-count.md) | Names | error | no | INSERT that gives a different number of values than the columns it writes |
 | [`set-column-count`](rules/set-column-count.md) | Names | error | no | UNION, INTERSECT or EXCEPT branch with a different number of columns than the first |
 | [`position-out-of-range`](rules/position-out-of-range.md) | Names | error | no | ORDER BY or GROUP BY position that names no column of the select list |
+| [`unused-cte`](rules/unused-cte.md) | Names | warn | no | CTE that no later CTE or the statement reads |
 | [`literal-write`](rules/literal-write.md) | Names | error | no | INSERT or UPDATE writes a constant an enum or CHECK list does not allow |
 | [`unmatched-literal`](rules/unmatched-literal.md) | Names | warn | no | WHERE compares a column with a constant its enum or CHECK list never holds |
 | [`ungrouped-column`](rules/ungrouped-column.md) | Names | error | no | Grouped query selects a column it neither groups by nor aggregates |

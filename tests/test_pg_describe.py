@@ -375,6 +375,24 @@ def test_no_null_in_a_non_null_column(section: Queries, conn: Any, schemas: Sche
     assert problems == []
 
 
+ENDLESS = "WITH RECURSIVE r(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM r) SELECT 1"
+
+
+@needs_server[0]
+@needs_server[1]
+def test_a_recursive_cte_reading_only_itself_never_runs(conn: Any) -> None:
+    diagnostics = core.check_source(
+        f'from sqlty import SQL\n\nq = SQL[tuple[int]]("--sql\\n{ENDLESS}")\n'
+    )
+    assert [d["rule"] for d in diagnostics] == ["unused-cte"]
+    # Had r run, it would recurse until the statement timeout, as reading it does.
+    assert conn.execute(ENDLESS).fetchall() == [(1,)]
+    plan = "\n".join(row[0] for row in conn.execute(f"EXPLAIN {ENDLESS}"))
+    assert "Recursive Union" not in plan
+    with pytest.raises(Exception, match="statement timeout"):
+        conn.execute(ENDLESS.removesuffix("SELECT 1") + "SELECT count(*) FROM r")
+
+
 def test_corpus_is_not_empty() -> None:
     assert len(list(_corpus())) > 20
     assert len(list(nullability_corpus())) > 100

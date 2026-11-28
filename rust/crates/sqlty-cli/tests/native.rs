@@ -202,6 +202,31 @@ fn serves_the_language_server() {
 }
 
 #[test]
+fn fades_an_unused_cte() {
+    let file = (
+        "app/a.py",
+        "from sqlty import SQL\n\nq = SQL[tuple[int]](\"--sql\\nWITH unused AS (SELECT 1) SELECT 2\")\n",
+    );
+    let root = project("unused-cte", &[("pyproject.toml", "[tool.sqlty]\n"), file]);
+    let root = root.canonicalize().expect("exists");
+    let open = format!(
+        r#"{{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{{"textDocument":{{"uri":"file://{}/app/a.py","languageId":"python","version":1,"text":{:?}}}}}}}"#,
+        root.display(),
+        file.1
+    );
+    let initialized = r#"{"jsonrpc":"2.0","method":"initialized","params":{}}"#.to_string();
+    let (messages, code) = serve(
+        &root,
+        &[initialize(&root, "null"), initialized, open],
+        "unused-cte",
+    );
+    assert_eq!(code, 0);
+    let published = messages.last().expect("diagnostics");
+    assert!(published.contains(r#""tags":[1]"#), "{published}");
+    std::fs::remove_dir_all(&root).expect("removes");
+}
+
+#[test]
 fn reports_a_server_without_a_client() {
     let root = project("no-client", &[]);
     let (code, out, err) = sqlty(&root, &["server"], &[]);

@@ -149,6 +149,9 @@ function diagnostic(found: Found): vscode.Diagnostic {
     value: found.rule,
     target: vscode.Uri.parse(`https://sqlty.kuncar.dev/reference/rules/${found.rule}/`),
   };
+  if (found.rule === "unused-cte") {
+    created.tags = [vscode.DiagnosticTag.Unnecessary];
+  }
   return created;
 }
 

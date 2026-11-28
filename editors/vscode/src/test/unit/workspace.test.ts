@@ -52,7 +52,7 @@ test("the workspace check reports files that are not open", async () => {
       start: { line: 3, column: 5 },
       end: { line: 3, column: 9 },
     },
-    { file: "b.py", rule: "r", severity: "warn", message: "o" },
+    { file: "b.py", rule: "unused-cte", severity: "warn", message: "o" },
     { file: "open.py", line: 1, rule: "r", severity: "warn", message: "p" },
   ];
   const collection = diagnostics();
@@ -65,10 +65,9 @@ test("the workspace check reports files that are not open", async () => {
       [2, 4, 8, vscode.DiagnosticSeverity.Error],
     ],
   );
-  assert.equal(
-    collection.entries.get(Uri.file(join(root, "b.py")).toString())![0].range.start.line,
-    0,
-  );
+  const [b] = collection.entries.get(Uri.file(join(root, "b.py")).toString())!;
+  assert.equal(b.range.start.line, 0);
+  assert.deepEqual(b.tags, [vscode.DiagnosticTag.Unnecessary]);
   assert.equal(collection.entries.size, 2);
   assert.deepEqual(calls.at(-1), [
     "showInformationMessage",

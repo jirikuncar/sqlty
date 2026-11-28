@@ -397,6 +397,7 @@ function marked(model, diagnostics) {
         code: found.rule,
         source: "sqlty",
         severity: found.severity === "error" ? monaco.MarkerSeverity.Error : monaco.MarkerSeverity.Warning,
+        tags: found.rule === "unused-cte" ? [monaco.MarkerTag.Unnecessary] : [],
       };
     }),
   );

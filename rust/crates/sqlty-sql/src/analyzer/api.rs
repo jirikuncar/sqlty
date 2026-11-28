@@ -8,6 +8,7 @@ use sqlparser::ast::{visit_expressions, visit_expressions_mut, Expr, Statement, 
 use sqlparser::parser::Parser;
 use sqlparser::tokenizer::{Location, Span};
 
+use crate::diagnostics::Rule;
 use crate::diagnostics::{Diagnostics, NameDiagnostic};
 
 use super::dialect::SqlDialect;
@@ -396,6 +397,20 @@ impl Parsed {
         analyzer.diag = Diagnostics::collecting();
         analyzer.source = text_source(&self.input.source, self.dialect);
         let Ok(columns) = analyzer.statement_columns(stmt);
+        if contains_with(self.input.text()) {
+            for (name, span) in super::ctes::unused_ctes(stmt, self.dialect) {
+                let _at = analyzer.diag.at(span);
+                analyzer.diag.warn(NameDiagnostic {
+                    rule: Rule::UnusedCte,
+                    message: format!("CTE `{name}` is never read"),
+                    span: None,
+                    replacement: None,
+                    table: None,
+                    column: None,
+                    shadowed_by: None,
+                });
+            }
+        }
         let found = analyzer.diag.located().into_iter().map(|(mut found, at)| {
             found.span = self.as_written.then(|| self.bytes(at)).flatten();
             found
@@ -475,6 +490,13 @@ pub fn returns_rows(sql: &str, dialect: &str) -> bool {
 /// its expression's text.
 pub(super) fn text_source(input: &str, dialect: SqlDialect) -> Option<std::rc::Rc<str>> {
     matches!(dialect, SqlDialect::MySql | SqlDialect::Sqlite).then(|| std::rc::Rc::from(input))
+}
+
+/// Whether `text` has `WITH` in any case: a statement without it has no CTE.
+fn contains_with(text: &str) -> bool {
+    text.as_bytes()
+        .windows(4)
+        .any(|word| word.eq_ignore_ascii_case(b"with"))
 }
 
 #[cfg(test)]
