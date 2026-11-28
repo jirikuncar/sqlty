@@ -6,6 +6,7 @@ queue_rules:
       - -draft
       - or:
           - author = jirikuncar
+          - author = Kludex
           - and:
               - "#approved-reviews-by >= 1"
               - "#changes-requested-reviews-by = 0"
