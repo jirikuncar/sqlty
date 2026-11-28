@@ -5,6 +5,8 @@ abs(X)	mathematical-functions.html
 acos(X)	mathematical-functions.html
 adddate(date, days)	date-and-time-functions.html
 addtime(expr1, expr2)	date-and-time-functions.html
+aes_decrypt(crypt_str, key_str[, init_vector][, kdf_name][, salt])	encryption-functions.html
+aes_encrypt(str, key_str[, init_vector][, kdf_name][, salt])	encryption-functions.html
 any_value(arg)	miscellaneous-functions.html
 ascii(str)	string-functions.html
 asin(X)	mathematical-functions.html
@@ -27,6 +29,7 @@ bit_or(expr)	aggregate-functions.html
 bit_xor(expr)	aggregate-functions.html
 ceil(X)	mathematical-functions.html
 ceiling(X)	mathematical-functions.html
+char(N, ...)	string-functions.html
 char_length(str)	string-functions.html
 character_length(str)	string-functions.html
 charset(str)	information-functions.html
@@ -42,7 +45,6 @@ convert_tz(dt, from_tz, to_tz)	date-and-time-functions.html
 cos(X)	mathematical-functions.html
 cot(X)	mathematical-functions.html
 count(expr)	aggregate-functions.html
-count(expr[, expr, ...])	aggregate-functions.html
 crc32(expr)	mathematical-functions.html
 create_asymmetric_priv_key(algorithm, key_length)	enterprise-encryption-functions.html
 create_asymmetric_pub_key(algorithm, priv_key_str)	enterprise-encryption-functions.html
@@ -70,6 +72,7 @@ dense_rank()	window-function-descriptions.html
 elt(N, str1, str2, str3, ...)	string-functions.html
 exp(X)	mathematical-functions.html
 export_set(bits, on, off[, separator[, number_of_bits]])	string-functions.html
+extractvalue(xml_frag, xpath_expr)	xml-functions.html
 field(str, str1, str2, str3, ...)	string-functions.html
 find_in_set(str, strlist)	string-functions.html
 first_value(expr)	window-function-descriptions.html
@@ -81,10 +84,14 @@ found_rows()	information-functions.html
 from_base64(str)	string-functions.html
 from_days(N)	date-and-time-functions.html
 from_unixtime(unix_timestamp[, format])	date-and-time-functions.html
+geomcollection(g[, g, ...])	gis-mysql-specific-functions.html
+geometrycollection(g[, g, ...])	gis-mysql-specific-functions.html
 get_lock(str, timeout)	locking-functions.html
 greatest(value1, value2, ...)	comparison-operators.html
 group_concat(expr)	aggregate-functions.html
 grouping(expr[, expr, ...])	miscellaneous-functions.html
+gtid_subset(set1, set2)	gtid-functions.html
+gtid_subtract(set1, set2)	gtid-functions.html
 hex(str)	string-functions.html
 hex(N)	string-functions.html
 hour(time)	date-and-time-functions.html
@@ -147,6 +154,7 @@ lead(expr[, N[, default]])	window-function-descriptions.html
 least(value1, value2, ...)	comparison-operators.html
 left(str, len)	string-functions.html
 length(str)	string-functions.html
+linestring(pt[, pt, ...])	gis-mysql-specific-functions.html
 ln(X)	mathematical-functions.html
 load_file(file_name)	string-functions.html
 localtime([fsp])	date-and-time-functions.html
@@ -163,6 +171,7 @@ ltrim(str)	string-functions.html
 make_set(bits, str1, str2, ...)	string-functions.html
 makedate(year, dayofyear)	date-and-time-functions.html
 maketime(hour, minute, second)	date-and-time-functions.html
+master_pos_wait(log_name, log_pos[, timeout][, channel])	replication-functions-synchronization.html
 max(expr)	aggregate-functions.html
 mbrcontains(g1, g2)	spatial-relation-functions-mbr.html
 mbrcoveredby(g1, g2)	spatial-relation-functions-mbr.html
@@ -182,6 +191,9 @@ minute(time)	date-and-time-functions.html
 mod(N, M)	mathematical-functions.html
 month(date)	date-and-time-functions.html
 monthname(date)	date-and-time-functions.html
+multilinestring(ls[, ls, ...])	gis-mysql-specific-functions.html
+multipoint(pt[, pt2, ...])	gis-mysql-specific-functions.html
+multipolygon(poly[, poly, ...])	gis-mysql-specific-functions.html
 name_const(name, value)	miscellaneous-functions.html
 now([fsp])	date-and-time-functions.html
 nth_value(expr, N)	window-function-descriptions.html
@@ -194,6 +206,8 @@ percent_rank()	window-function-descriptions.html
 period_add(P, N)	date-and-time-functions.html
 period_diff(P1, P2)	date-and-time-functions.html
 pi()	mathematical-functions.html
+point(x, y)	gis-mysql-specific-functions.html
+polygon(ls[, ls, ...])	gis-mysql-specific-functions.html
 pow(X, Y)	mathematical-functions.html
 power(X, Y)	mathematical-functions.html
 ps_current_thread_id()	performance-schema-functions.html
@@ -232,6 +246,7 @@ sign(X)	mathematical-functions.html
 sin(X)	mathematical-functions.html
 sleep(duration)	miscellaneous-functions.html
 soundex(str)	string-functions.html
+source_pos_wait(log_name, log_pos[, timeout][, channel])	replication-functions-synchronization.html
 space(N)	string-functions.html
 sqrt(X)	mathematical-functions.html
 st_asbinary(g[, options])	gis-format-conversion-functions.html
@@ -357,12 +372,14 @@ timestampdiff(unit, datetime_expr1, datetime_expr2)	date-and-time-functions.html
 to_base64(str)	string-functions.html
 to_days(date)	date-and-time-functions.html
 to_seconds(expr)	date-and-time-functions.html
+trim(str)	string-functions.html
 truncate(X, D)	mathematical-functions.html
 ucase(str)	string-functions.html
 uncompress(string_to_uncompress)	encryption-functions.html
 uncompressed_length(compressed_string)	encryption-functions.html
 unhex(str)	string-functions.html
 unix_timestamp([date])	date-and-time-functions.html
+updatexml(xml_target, xpath_expr, new_xml)	xml-functions.html
 upper(str)	string-functions.html
 user()	information-functions.html
 utc_date()	date-and-time-functions.html
@@ -378,9 +395,11 @@ var_pop(expr)	aggregate-functions.html
 var_samp(expr)	aggregate-functions.html
 variance(expr)	aggregate-functions.html
 version()	information-functions.html
+wait_for_executed_gtid_set(gtid_set[, timeout])	gtid-functions.html
 week(date[, mode])	date-and-time-functions.html
 weekday(date)	date-and-time-functions.html
 weekofyear(date)	date-and-time-functions.html
+weight_string(str)	string-functions.html
 year(date)	date-and-time-functions.html
 yearweek(date)	date-and-time-functions.html
 yearweek(date, mode)	date-and-time-functions.html
