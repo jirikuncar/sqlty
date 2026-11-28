@@ -6,8 +6,8 @@ import ast
 
 import pytest
 
-from sqlty._cli import main
 from sqlty.core import HelperIndex, Settings, check_source
+from tests._core_views import main
 
 SCHEMA = "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL);\n"
 

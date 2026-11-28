@@ -8,8 +8,8 @@ import sys
 
 import pytest
 
-from sqlty._cli import main
 from sqlty.core import HelperIndex, ParsedSource, Settings, check_source
+from tests._core_views import main
 
 SCHEMA = """\
 CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, status TEXT NOT NULL);
