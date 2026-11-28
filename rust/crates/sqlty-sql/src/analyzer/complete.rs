@@ -11,6 +11,7 @@
 //! key links to one already in scope come first, with their `ON` clause. An unqualified
 //! column with nothing typed is offered as `alias.column` when several relations are in scope;
 //! with none in scope, a typed one comes from the catalog's column index, O(log C + k).
+//! Right after `FROM`, the relations that have the columns the select list names come first.
 //! A typed word in an expression also completes to the functions the schema defines and the
 //! dialect's built-ins (see [`crate::signatures`]), after the columns; one in `FROM` or
 //! after `JOIN`, to the built-ins that return rows, after the relations.
@@ -36,7 +37,7 @@ use std::ops::Range;
 
 use super::nullability::Nullability;
 use super::{parse, SchemaData, SqlDialect};
-use crate::catalog::{ColumnOf, Columns, RelationKind};
+use crate::catalog::{ColumnOf, Columns, RelationKind, RelationRef};
 use crate::signatures::Signature;
 
 /// The column name the cursor's word is replaced by, which no schema defines.
@@ -142,17 +143,20 @@ pub fn complete(
             };
             let mut found: Vec<Candidate> = relations
                 .into_iter()
-                .map(|relation| Candidate {
-                    label: spelled(relation.name.name, dialect),
-                    kind: match relation.kind {
-                        RelationKind::View => CandidateKind::View,
-                        RelationKind::Table | RelationKind::Unknown => CandidateKind::Table,
-                    },
-                    detail: relation.name.schema.map(str::to_string),
-                    sql_type: None,
-                    nullable: None,
-                })
+                .map(|relation| relation_candidate(relation, dialect))
                 .collect();
+            if qualifier.is_none() && rows && !join {
+                let selected =
+                    selected_columns(&before[..before.len() - usize::from(!prefix.is_empty())]);
+                if !selected.is_empty() {
+                    let ranked = schema
+                        .relations_with_columns(&selected, typed, limit + 1)
+                        .into_iter()
+                        .map(|(relation, _)| relation_candidate(relation, dialect))
+                        .collect();
+                    return finish_ranked(ranked, found, prefix, limit);
+                }
+            }
             if join {
                 let scope = &before[..before.len() - usize::from(!prefix.is_empty())];
                 found.extend(joins(scope, typed, schema, dialect, limit + 1));
@@ -224,6 +228,94 @@ pub fn complete(
     };
     finish(candidates, prefix, limit)
 }
+
+/// A relation as a candidate.
+fn relation_candidate(relation: RelationRef<'_>, dialect: SqlDialect) -> Candidate {
+    Candidate {
+        label: spelled(relation.name.name, dialect),
+        kind: match relation.kind {
+            RelationKind::View => CandidateKind::View,
+            RelationKind::Table | RelationKind::Unknown => CandidateKind::Table,
+        },
+        detail: relation.name.schema.map(str::to_string),
+        sql_type: None,
+        nullable: None,
+    }
+}
+
+/// `ranked` in its own order, then the rest of `candidates` as [`finish`] orders them.
+fn finish_ranked(
+    ranked: Vec<Candidate>,
+    candidates: Vec<Candidate>,
+    replace: Range<usize>,
+    limit: usize,
+) -> Completions {
+    let first: rustc_hash::FxHashSet<(&str, Option<&str>)> = ranked
+        .iter()
+        .map(|c| (c.label.as_str(), c.detail.as_deref()))
+        .collect();
+    let rest: Vec<Candidate> = candidates
+        .into_iter()
+        .filter(|c| !first.contains(&(c.label.as_str(), c.detail.as_deref())))
+        .collect();
+    let rest = finish(rest, replace, limit);
+    let mut candidates = ranked;
+    candidates.extend(rest.candidates);
+    Completions {
+        incomplete: rest.incomplete || candidates.len() > limit,
+        candidates: candidates.into_iter().take(limit).collect(),
+        replace: rest.replace,
+    }
+}
+
+/// The unqualified names of the columns the select list before the trailing `FROM` of
+/// `tokens` reads: the last part of a dotted name, not a function, an alias, a type after
+/// `::`, a number or a keyword. Empty when the `FROM` follows no `SELECT` at its depth.
+fn selected_columns(tokens: &[Tok]) -> Vec<&str> {
+    let Some(from) = tokens
+        .last()
+        .filter(|t| t.text.eq_ignore_ascii_case("FROM"))
+    else {
+        return Vec::new();
+    };
+    let depth = from.depth;
+    let Some(start) = tokens
+        .iter()
+        .rposition(|t| t.depth == depth && t.word && t.text.eq_ignore_ascii_case("SELECT"))
+    else {
+        return Vec::new();
+    };
+    let list = &tokens[start + 1..tokens.len() - 1];
+    let mut found = Vec::new();
+    for (i, tok) in list.iter().enumerate() {
+        let next = list.get(i + 1).map(|t| t.text.as_str());
+        let prev = i.checked_sub(1).map(|i| &list[i]);
+        let alias = prev.is_some_and(|p| {
+            p.text.eq_ignore_ascii_case("AS")
+                || p.text == ":"
+                || p.text == ")"
+                || (p.word && !SELECT_WORDS.iter().any(|w| p.text.eq_ignore_ascii_case(w)))
+        });
+        if !tok.word
+            || alias
+            || matches!(next, Some("(" | "."))
+            || tok.text.starts_with(|c: char| c.is_ascii_digit())
+            || SELECT_WORDS
+                .iter()
+                .any(|w| tok.text.eq_ignore_ascii_case(w))
+        {
+            continue;
+        }
+        found.push(tok.text.as_str());
+    }
+    found
+}
+
+/// Words of a select list that are no column, or after which a column may follow.
+const SELECT_WORDS: [&str; 22] = [
+    "SELECT", "DISTINCT", "ALL", "AS", "AND", "OR", "NOT", "IS", "NULL", "IN", "LIKE", "ILIKE",
+    "BETWEEN", "CASE", "WHEN", "THEN", "ELSE", "END", "TRUE", "FALSE", "ON", "FILTER",
+];
 
 /// `candidates` in the order completion lists them, at most `limit`.
 fn finish(mut candidates: Vec<Candidate>, replace: Range<usize>, limit: usize) -> Completions {
@@ -1091,6 +1183,8 @@ mod tests {
             ("SELECT * FROM users u JOIN t1|", 5),
             ("SELECT * FROM t7 x JOIN |", 5),
             ("SELECT no|", 5),
+            ("SELECT note, user_id FROM |", 5),
+            ("SELECT name, x.note FROM |", 5),
         ];
         let runs: Vec<Vec<(usize, Vec<String>)>> = [50, 540, 5000]
             .into_iter()
@@ -1133,6 +1227,8 @@ mod tests {
         );
         assert_eq!(runs[2][6].1[0], "users ON users.id = x.user_id");
         assert_eq!(runs[2][7].1, ["note", "note", "note", "note", "note"]);
+        assert_eq!(runs[2][8].1, ["t0", "t1", "t10", "t100", "t1000"]);
+        assert_eq!(runs[2][9].1[..2], ["t0", "t1"]);
         assert!(
             runs[2].iter().all(|(visited, _)| *visited <= 64),
             "{:?}",

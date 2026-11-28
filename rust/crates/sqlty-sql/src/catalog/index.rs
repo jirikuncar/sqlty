@@ -96,7 +96,7 @@ impl Catalog {
             .collect()
     }
 
-    fn relation_ref<'a>(&'a self, key: &'a str) -> RelationRef<'a> {
+    pub(super) fn relation_ref<'a>(&'a self, key: &'a str) -> RelationRef<'a> {
         RelationRef {
             kind: match self.relations[key] {
                 Relation::Table(_) => RelationKind::Table,

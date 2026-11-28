@@ -386,6 +386,84 @@ q = "--sql\nSELECT * FROM users <CURSOR>"
 # completions: None
 ```
 
+## Tables by the selected columns
+
+After `FROM`, the relations that have every column the select list names come first,
+then those with some of them, then the rest by name.
+
+```python
+q = "--sql\nSELECT id, name FROM <CURSOR>"
+# completions: user_names view public
+# completions: users table public
+# completions: orders table public
+# completions: pg_available_extension_versions table pg_catalog
+# completions: pg_available_extensions table pg_catalog
+# completions: pg_backend_memory_contexts table pg_catalog
+# completions: pg_config table pg_catalog
+# completions: pg_cursors table pg_catalog
+# completions: pg_file_settings table pg_catalog
+# completions: pg_prepared_statements table pg_catalog
+# completions: ...
+```
+
+A half-written select list is read from its tokens.
+
+```python
+q = "--sql\nSELECT o.user_id, total, FROM <CURSOR> WHERE"
+# completions: orders table public
+# completions: user_names view public
+# completions: users table public
+# completions: pg_attrdef table pg_catalog
+# completions: pg_attribute table pg_catalog
+# completions: pg_available_extension_versions table pg_catalog
+# completions: pg_available_extensions table pg_catalog
+# completions: pg_backend_memory_contexts table pg_catalog
+# completions: pg_class table pg_catalog
+# completions: pg_config table pg_catalog
+# completions: ...
+```
+
+### MySQL
+
+```toml
+[tool.sqlty]
+dialect = "mysql"
+```
+
+```python
+q = "-- sql\nSELECT Total FROM <CURSOR>"
+# completions: orders table -
+# completions: user_names view -
+# completions: users table -
+```
+
+### SQLite
+
+```toml
+[tool.sqlty]
+dialect = "sqlite"
+```
+
+```python
+q = "--sql\nSELECT email FROM <CURSOR>"
+# completions: users table -
+# completions: orders table -
+# completions: user_names view -
+```
+
+### DuckDB
+
+```toml
+[tool.sqlty]
+dialect = "duckdb"
+```
+
+```python
+q = "--sql\nSELECT id, name FROM u<CURSOR>"
+# completions: user_names view -
+# completions: users table -
+```
+
 ## MySQL and SQLite
 
 Names compare without case, and a table name qualifies its columns.
