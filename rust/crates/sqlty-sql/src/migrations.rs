@@ -2146,11 +2146,11 @@ fn is_dump(sql: &str) -> bool {
 fn parse(stmt: &Raw) -> Option<(Statement, Vec<String>)> {
     let (sql, likes) = stmt
         .is_create_table()
-        .then(|| stmt.without_like())
+        .then(|| stmt.without_like(false))
         .flatten()
         .unwrap_or_else(|| (stmt.sql(), Vec::new()));
     let parsed = parse_ddl(&sql, SqlDialect::Postgres)?.into_iter().next()?;
-    let likes = likes.iter().map(|parts| unqualified(parts)).collect();
+    let likes = likes.iter().map(|(_, parts)| unqualified(parts)).collect();
     Some((parsed, likes))
 }
 

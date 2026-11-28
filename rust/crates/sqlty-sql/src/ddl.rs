@@ -175,6 +175,13 @@ pub struct RowEvents {
     pub update: bool,
 }
 
+/// Name prefix of the placeholder column that stands for a `LIKE` item, see
+/// [`Statement::without_like`].
+const LIKE_COLUMN: &str = "sqlty_like_";
+
+/// A `LIKE` source's name parts, by the name of the placeholder column that stands for it.
+pub(crate) type Like = (String, Vec<String>);
+
 impl Statement<'_> {
     pub(crate) fn sql(&self) -> String {
         render(&self.0).trim().to_string()
@@ -601,18 +608,38 @@ impl Statement<'_> {
         .to_string()
     }
 
-    /// The statement without its `LIKE source [INCLUDING ...]` items, and the sources'
-    /// name parts; `None` when it has none. sqlparser cannot read the `INCLUDING` options.
-    pub(crate) fn without_like(&self) -> Option<(String, Vec<Vec<String>>)> {
+    /// The statement without its `LIKE source [INCLUDING ...]` items, and the sources' name
+    /// parts, each with the name of the column that stands for it; `None` when it has none.
+    /// sqlparser cannot read the `INCLUDING` options. With `placeholders`, those columns
+    /// (`sqlty_like_N int`, a name the statement does not use) keep where the copied columns go.
+    pub(crate) fn without_like(&self, placeholders: bool) -> Option<(String, Vec<Like>)> {
         let pieces = &self.0;
         let open = pieces.iter().position(|p| is_punct(p, "("))?;
         let close = matching_paren(pieces, open)?;
+        let items = split_top_level(&pieces[open + 1..close], ",");
+        let is_like = |item: &&[Piece]| {
+            item.iter()
+                .find(|p| significant(p))
+                .is_some_and(|p| is_word(p, "like"))
+        };
+        if !items.iter().any(is_like) {
+            return None;
+        }
+        let prefix = if placeholders {
+            unused_prefix(&render(pieces).to_lowercase())
+        } else {
+            LIKE_COLUMN.to_string()
+        };
         let mut kept = Vec::new();
         let mut sources = Vec::new();
-        for item in split_top_level(&pieces[open + 1..close], ",") {
+        for item in items {
             let sig: Vec<&Piece> = item.iter().filter(|p| significant(p)).collect();
             if sig.first().is_some_and(|p| is_word(p, "like")) {
-                sources.push(name_parts(&sig[1..]).0);
+                let column = format!("{prefix}{}", sources.len());
+                if placeholders {
+                    kept.push(format!("{column} int"));
+                }
+                sources.push((column, name_parts(&sig[1..]).0));
             } else {
                 kept.push(render(item));
             }
@@ -822,6 +849,22 @@ pub(crate) fn statement_ranges(sql: &str, mysql: bool) -> Vec<std::ops::Range<us
 }
 
 /// Split on `sep` outside parentheses.
+/// [`LIKE_COLUMN`] with more underscores than follow it anywhere in `text`, so no name in
+/// `text` starts with it. One pass over `text`.
+fn unused_prefix(text: &str) -> String {
+    let longest = text
+        .match_indices(LIKE_COLUMN)
+        .map(|(at, _)| {
+            text[at + LIKE_COLUMN.len()..]
+                .bytes()
+                .take_while(|&b| b == b'_')
+                .count()
+        })
+        .max();
+    let extra = longest.map_or(0, |run| run + 1);
+    format!("{LIKE_COLUMN}{}", "_".repeat(extra))
+}
+
 fn split_top_level<'a, 'b>(pieces: &'b [Piece<'a>], sep: &str) -> Vec<&'b [Piece<'a>]> {
     let (mut parts, mut depth, mut from) = (Vec::new(), 0usize, 0);
     for (at, piece) in pieces.iter().enumerate() {
@@ -1153,19 +1196,32 @@ mod tests {
     #[test]
     fn test_without_like() {
         let stmt = first("CREATE TABLE t (LIKE app.a INCLUDING ALL, x int, LIKE b)");
-        let (sql, likes) = stmt.without_like().unwrap();
+        let (sql, likes) = stmt.without_like(false).unwrap();
         assert_eq!(
             sql.split_whitespace().collect::<String>(),
             "CREATETABLEt(xint)"
         );
+        let (sql, _) = stmt.without_like(true).unwrap();
         assert_eq!(
-            likes,
+            sql.split_whitespace().collect::<String>(),
+            "CREATETABLEt(sqlty_like_0int,xint,sqlty_like_1int)"
+        );
+        let parts: Vec<Vec<String>> = likes.into_iter().map(|(_, parts)| parts).collect();
+        assert_eq!(
+            parts,
             vec![
                 vec!["app".to_string(), "a".to_string()],
                 vec!["b".to_string()]
             ]
         );
-        assert!(first("CREATE TABLE t (x int)").without_like().is_none());
+        let taken = first("CREATE TABLE t (LIKE a, sqlty_like_0 text)");
+        let (sql, likes) = taken.without_like(true).unwrap();
+        assert_eq!(
+            sql.split_whitespace().collect::<String>(),
+            "CREATETABLEt(sqlty_like__0int,sqlty_like_0text)"
+        );
+        assert_eq!(likes[0].0, "sqlty_like__0");
+        assert!(first("CREATE TABLE t (x int)").without_like(true).is_none());
     }
 
     #[test]
