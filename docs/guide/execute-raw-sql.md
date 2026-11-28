@@ -148,6 +148,30 @@ async def rename(user_id: int, name: str) -> None:
     await conn.execute("UPDATE users SET name = $1 WHERE id = $2", name)
 ```
 
+asyncpg takes only an exact `str` as a query, so an `SQL[T]` raises `TypeError` there.
+The `sqlty.drivers.asyncpg` helpers pass it as a `str` and build each row as `T`:
+
+```python
+from typing import NamedTuple
+
+import asyncpg
+from sqlty import SQL
+from sqlty.drivers.asyncpg import fetchrow
+
+
+class User(NamedTuple):
+    id: int
+    name: str
+
+
+# error:
+by_id = SQL[User]("--sql\nSELECT id, name FROM users WHERE id = $1")
+
+
+async def find(conn: asyncpg.Connection, user_id: int) -> User | None:
+    return await fetchrow(conn, by_id, user_id)
+```
+
 ## aiosqlite
 
 aiosqlite wraps `sqlite3` for `asyncio`. A connection passed to a function is
