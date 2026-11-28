@@ -2,7 +2,7 @@
 order: 220
 group: "names"
 severity: "warn"
-fixable: false
+fixable: true
 summary: "Function whose result sqlty cannot type"
 origin: "SQL"
 ---
@@ -13,7 +13,7 @@ Default severity: **warn**
 
 ## What it does
 
-Reports a function call whose result sqlty cannot type because it does not know the function. The column is left untyped. A call in `WHERE`, `JOIN ... ON`, `ORDER BY` or a subquery is reported too: it has no column to type, but the function still has to exist when the query runs.
+Reports a function call whose result sqlty cannot type because it does not know the function. The column is left untyped. A call in `WHERE`, `JOIN ... ON`, `ORDER BY` or a subquery is reported too: it has no column to type, but the function still has to exist when the query runs. A function in `FROM` that is neither one of the dialect's built-ins nor one the schema defines is reported with the table function it most likely misspells, which `--fix` writes.
 
 ```toml
 [tool.sqlty]
@@ -34,6 +34,13 @@ from sqlty import SQL
 
 # error: [unknown-function] "function `my_udf` is not known to sqlty"
 q = SQL[tuple[int]]("--sql\nSELECT my_udf(id) FROM users")
+```
+
+```python
+from sqlty import SQL
+
+# error: [unknown-function] "table function `generate_seriez` is not known to sqlty; did you mean `generate_series`?"
+q = SQL[tuple[int]]("--sql\nSELECT n FROM generate_seriez(1, 3) AS n")
 ```
 
 ## Why is this bad?

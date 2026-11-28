@@ -18,7 +18,7 @@ use crate::suppress;
 use crate::types::symbols::Source;
 
 /// The rules whose diagnostics carry a fix.
-const FIXABLE: [Rule; 9] = [
+const FIXABLE: [Rule; 10] = [
     Rule::InlineSqlComment,
     Rule::MysqlSqlMarker,
     Rule::StaleRewrite,
@@ -28,6 +28,7 @@ const FIXABLE: [Rule; 9] = [
     Rule::OptionalRow,
     Rule::UntypedQuery,
     Rule::UnknownColumn,
+    Rule::UnknownFunction,
 ];
 
 /// Fixing one problem can reveal another (a `"--sql SELECT"` fixed into a query is then

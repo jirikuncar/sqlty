@@ -20,6 +20,7 @@ g: int | INT | NonNull
 
 SELECT * FROM users, ST_Dump(NULL) AS d
 *: ? | ? | Unknown
+[unknown-function] table function `st_dump` is not known to sqlty
 [unsupported-syntax] `*` reads table function st_dump, which sqlty does not read the columns of
 
 SELECT nope.* FROM users

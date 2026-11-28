@@ -42,7 +42,7 @@ stale-type = "error"
 | [`deprecated-column`](rules/deprecated-column.md) | Names | warn | no | Query reads a column scheduled for removal |
 | [`ambiguous-column`](rules/ambiguous-column.md) | Names | error | no | Unqualified column that more than one table of the query has |
 | [`duplicate-alias`](rules/duplicate-alias.md) | Names | error | no | Two tables of a FROM clause read by the same name |
-| [`unknown-function`](rules/unknown-function.md) | Names | warn | no | Function whose result sqlty cannot type |
+| [`unknown-function`](rules/unknown-function.md) | Names | warn | yes | Function whose result sqlty cannot type |
 | [`unknown-type`](rules/unknown-type.md) | Names | warn | no | Cast or column type without a Python type |
 | [`unsupported-syntax`](rules/unsupported-syntax.md) | Names | warn | no | Construct that parses but is not typed |
 | [`insert-missing-column`](rules/insert-missing-column.md) | Names | error | no | INSERT that leaves out a NOT NULL column without a default |

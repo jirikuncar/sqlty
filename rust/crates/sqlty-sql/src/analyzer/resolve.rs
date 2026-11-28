@@ -10,10 +10,11 @@ use std::rc::Rc;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use sqlparser::ast::{Expr, Ident, TableFactor, TableWithJoins};
+use sqlparser::ast::{Expr, Ident, Spanned, TableFactor, TableWithJoins};
 
 use crate::catalog::{fold, folded, lowercase};
 use crate::diagnostics::{NameDiagnostic, Rule};
+use crate::signatures::{set_returning, signatures};
 
 use super::dialect::SqlDialect;
 use super::literals::value_set;
@@ -125,6 +126,51 @@ impl<'a> Analyzer<'a> {
         } else {
             self.diag.explain_silently();
         }
+    }
+
+    /// `unknown-function`: a function in `FROM` that is neither the dialect's nor one the
+    /// schema defines, with the table function it most likely misspells. `true` when it
+    /// names one: then the call is a typo, not a function sqlty does not read the rows of.
+    pub(super) fn check_table_function(&self, factor: &TableFactor) -> bool {
+        let (TableFactor::Table {
+            name,
+            args: Some(_),
+            ..
+        }
+        | TableFactor::Function { name, .. }) = factor
+        else {
+            return false;
+        };
+        let builtin = self.builtin_name(name);
+        if !self.diag.enabled()
+            || !self.judges_names()
+            || builtin.contains('.')
+            || !signatures(self.dialect, &builtin).is_empty()
+            || self.schema.defines_function(&table_key(name, self.dialect))
+        {
+            return false;
+        }
+        let Some(known) = set_returning(self.dialect) else {
+            return false;
+        };
+        let written = self.display_name(name);
+        let mut message = format!("table function `{written}` is not known to sqlty");
+        let replacement = suggest::closest(&written, &known).map(|closest| {
+            message.push_str(&format!("; did you mean `{closest}`?"));
+            closest.to_string()
+        });
+        let misspelled = replacement.is_some();
+        let _at = self.diag.at(name.span());
+        self.diag.push(NameDiagnostic {
+            rule: Rule::UnknownFunction,
+            message,
+            span: None,
+            replacement,
+            table: None,
+            column: None,
+            shadowed_by: None,
+        });
+        misspelled
     }
 
     /// `duplicate-alias`: two FROM items read by the same name, which PostgreSQL and MySQL

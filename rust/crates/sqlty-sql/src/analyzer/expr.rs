@@ -159,7 +159,7 @@ impl<'a> Analyzer<'a> {
 
     /// A function name for messages: lower case, except that a PostgreSQL name keeping its
     /// case is quoted.
-    fn display_name(&self, name: &ObjectName) -> String {
+    pub(super) fn display_name(&self, name: &ObjectName) -> String {
         if self.dialect != SqlDialect::Postgres {
             return name.to_string().to_lowercase();
         }

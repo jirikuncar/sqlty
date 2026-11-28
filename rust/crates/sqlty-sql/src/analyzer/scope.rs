@@ -779,6 +779,13 @@ impl<'a> Analyzer<'a> {
                         .unwrap_or_default();
                     scope.push(Source::named(reference, table));
                 }
+                // A misspelled function reads as a relation sqlty does not know, which nothing
+                // else reports.
+                other if analyzer.check_table_function(other) => {
+                    let reference = relation_name(other).unwrap_or_default();
+                    let table = format!("({reference})");
+                    scope.push(Source::named(reference, table));
+                }
                 other => {
                     let entries = match other {
                         TableFactor::Table {
