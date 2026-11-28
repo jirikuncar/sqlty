@@ -1,12 +1,12 @@
 # Extension types in other dialects
 
-Types that PostgreSQL extensions define (`hstore`, ...) map to a Python type in PostgreSQL
+Types that PostgreSQL extensions define (`hstore`, `ltree`, ...) map to a Python type in PostgreSQL
 only; elsewhere the name is an ordinary unknown type.
 
 `schema.sql`:
 
 ```sql
-CREATE TABLE items (id INTEGER PRIMARY KEY, tags HSTORE NOT NULL);
+CREATE TABLE items (id INTEGER PRIMARY KEY, tags HSTORE NOT NULL, path LTREE NOT NULL);
 ```
 
 ## SQLite
@@ -20,8 +20,9 @@ schema = "schema.sql"
 ```
 
 ```sql
-SELECT tags FROM items
+SELECT tags, path FROM items
 -- columns: tags: float (HSTORE)
+-- columns: path: float (LTREE)
 ```
 
 ## MySQL
@@ -33,6 +34,7 @@ schema = "schema.sql"
 ```
 
 ```sql
-SELECT tags FROM items
+SELECT tags, path FROM items
 -- columns: tags: None (HSTORE)
+-- columns: path: None (LTREE)
 ```
