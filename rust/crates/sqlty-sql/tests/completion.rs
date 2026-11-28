@@ -120,3 +120,82 @@ fn a_column_without_from_completes_from_every_relation() {
         "nothing typed"
     );
 }
+
+#[test]
+fn from_ranks_the_relations_that_have_the_selected_columns() {
+    let catalog = load(
+        "CREATE SCHEMA other;
+        CREATE TABLE accounts (id INT, email TEXT);
+        CREATE TABLE users (id INT, email TEXT, created_at DATE);
+        CREATE TABLE events (id INT, created_at DATE);
+        CREATE VIEW signups AS SELECT email, created_at FROM users;
+        CREATE TABLE other.people (email TEXT, created_at DATE);
+        CREATE TABLE zoo (n INT);",
+        "postgres",
+    );
+    let pg = |sql: &str| -> Vec<String> {
+        complete(sql, &catalog, "postgres")
+            .into_iter()
+            .filter(|c| !c.ends_with(":pg_catalog") && !c.contains(":Function:"))
+            .collect()
+    };
+    let ranked = [
+        "signups:View:public",
+        "users:Table:public",
+        "accounts:Table:public",
+        "events:Table:public",
+        "zoo:Table:public",
+    ];
+    assert_eq!(pg("SELECT email, created_at FROM |"), ranked);
+    assert_eq!(
+        pg("SELECT u.email, lower(created_at::text) AS e FROM |"),
+        ranked
+    );
+    assert_eq!(
+        pg("SELECT email, created_at, FROM |"),
+        ranked,
+        "half written"
+    );
+    assert_eq!(pg("SELECT DISTINCT email e, created_at FROM |"), ranked);
+    assert_eq!(
+        pg("SELECT email, created_at FROM u|"),
+        ["users:Table:public"]
+    );
+    assert_eq!(
+        pg("SELECT n FROM | WHERE"),
+        [
+            "zoo:Table:public",
+            "accounts:Table:public",
+            "events:Table:public",
+            "signups:View:public",
+            "users:Table:public"
+        ]
+    );
+    assert_eq!(
+        pg("SELECT nope, 1, * FROM |")[0],
+        "accounts:Table:public",
+        "no column known: by name"
+    );
+    assert_eq!(
+        pg("SELECT email FROM users JOIN |")[0],
+        "accounts:Table:public",
+        "JOIN keeps the prefix list"
+    );
+    let found = complete("SELECT email FROM |", &catalog, "postgres");
+    assert_eq!(found[..2], ["accounts:Table:public", "signups:View:public"]);
+    let found = pg("WITH recent AS (SELECT 1) SELECT id FROM |");
+    assert!(found.contains(&"recent:Cte:".to_string()), "{found:?}");
+    assert_eq!(
+        pg("SELECT (SELECT max(id) FROM zoo) AS m, n FROM |")[0],
+        "zoo:Table:public"
+    );
+    assert_eq!(
+        pg("SELECT EXTRACT(year FROM created_at) FROM |")[0],
+        "events:Table:public"
+    );
+    let functions = complete("SELECT id FROM generate_s|", &catalog, "postgres");
+    assert!(
+        functions[0].starts_with("generate_series:Function:"),
+        "{functions:?}"
+    );
+}

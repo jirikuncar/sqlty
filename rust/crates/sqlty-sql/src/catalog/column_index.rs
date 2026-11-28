@@ -10,7 +10,7 @@
 use std::borrow::Cow;
 use std::sync::Arc;
 
-use super::index::{shape, split, Columns, NameRef};
+use super::index::{shape, split, Columns, NameRef, RelationRef};
 use super::{Catalog, SchemaColumn};
 use crate::analyzer::Column;
 
@@ -88,6 +88,102 @@ pub struct NamedColumn<'a> {
 }
 
 impl Catalog {
+    /// The relations a bare name finds whose name starts with `prefix`, ranked by how many
+    /// of `columns` (names as a query writes them) they have, at most `limit`: those with
+    /// every one first, then by count, by name within a count, the system catalogs last. A
+    /// name no relation has counts for none; a relation with none is left out.
+    ///
+    /// The candidates are the first `limit` relations of each column's list, the rarest
+    /// column's included, and the first `limit` the prefix finds; each is counted by binary
+    /// search in every list. O(n² × limit × log C) for n columns: never a function of how
+    /// many tables there are.
+    pub fn relations_with_columns(
+        &self,
+        columns: &[&str],
+        prefix: &str,
+        limit: usize,
+    ) -> Vec<(RelationRef<'_>, usize)> {
+        let index = &self.index.columns;
+        let by_key = &self.index.relations.by_key;
+        let mut names: Vec<String> = columns.iter().map(|c| self.fold_typed(c)).collect();
+        names.sort_unstable();
+        names.dedup();
+        let having: Vec<[&[(u32, u32)]; 2]> = names
+            .iter()
+            .map(|name| [&index.schema, &index.system].map(|list| self.having(list, name)))
+            .filter(|lists| lists[0].len() + lists[1].len() > 0)
+            .collect();
+        if having.is_empty() {
+            return Vec::new();
+        }
+        let mut candidates: Vec<u32> = having
+            .iter()
+            .flatten()
+            .flat_map(|list| list.iter().take(limit).map(|&(r, _)| r))
+            .collect();
+        if !prefix.is_empty() {
+            candidates.extend(
+                self.visible_relations_with_prefix(prefix, limit)
+                    .iter()
+                    .filter_map(|relation| {
+                        let key = split(relation.name.key);
+                        by_key.binary_search_by(|k| split(k).cmp(&key)).ok()
+                    })
+                    .map(|r| r as u32),
+            );
+        }
+        candidates.sort_unstable();
+        candidates.dedup();
+        let prefix = self.fold_typed(prefix);
+        let mut found: Vec<(u32, usize)> = candidates
+            .into_iter()
+            .filter_map(|r| {
+                #[cfg(test)]
+                super::index::visit();
+                let (schema, name) = split(&by_key[r as usize]);
+                if !name.starts_with(prefix.as_str())
+                    || !self
+                        .index
+                        .relations
+                        .visible(schema, name, &self.search_path)
+                {
+                    return None;
+                }
+                let count = having
+                    .iter()
+                    .filter(|lists| {
+                        lists
+                            .iter()
+                            .any(|list| list.binary_search_by_key(&r, |&(at, _)| at).is_ok())
+                    })
+                    .count();
+                (count > 0).then_some((r, count))
+            })
+            .collect();
+        found.sort_unstable_by_key(|&(r, count)| {
+            let (schema, name) = split(&by_key[r as usize]);
+            (
+                std::cmp::Reverse(count),
+                self.postgres && is_system(schema),
+                name,
+            )
+        });
+        found.truncate(limit);
+        found
+            .into_iter()
+            .map(|(r, count)| (self.relation_ref(&by_key[r as usize]), count))
+            .collect()
+    }
+
+    /// The entries of `list` whose column is `name`, sorted by relation.
+    fn having<'a>(&self, list: &'a [(u32, u32)], name: &str) -> &'a [(u32, u32)] {
+        let start = list.partition_point(|&at| self.column_at(at).is_none_or(|c| *c.0 < *name));
+        let end = start
+            + list[start..]
+                .partition_point(|&at| self.column_at(at).is_some_and(|c| *c.0 == *name));
+        &list[start..end]
+    }
+
     /// The columns of any table or view whose name starts with `prefix`, at most `limit`:
     /// the schema's own relations first, then PostgreSQL's system catalogs, each by column
     /// name then relation.
