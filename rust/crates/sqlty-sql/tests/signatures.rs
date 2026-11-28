@@ -117,6 +117,7 @@ fn signature_help_cases() {
         ("SELECT no_such_function(|", None),
         ("INSERT INTO point (|", None),
         ("INSERT INTO public.point (|", None),
+        ("INSERT INTO point VALUES (1, |", None),
         ("CREATE TABLE IF NOT EXISTS point (|", None),
         ("SELECT 1 + upper(|", Some("upper(**text**) -> text")),
     ] {

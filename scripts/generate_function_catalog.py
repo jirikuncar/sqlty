@@ -29,8 +29,8 @@ The page is the documentation page of the function's first category, or of its k
 
 MySQL: the syntax that the help tables (`mysql.help_topic`) of a MySQL 8.4 server give for
 each function, which the documentation's pages are generated with too; it names parameters
-but no types and no result. A form with keywords (`CAST(expr AS type)`, `TRIM(BOTH ...)`) is
-left out, `[DISTINCT]` dropped.
+but no types and no result. A form with keywords (`CAST(expr AS type)`, `COUNT(DISTINCT ...)`)
+is left out, an optional part with keywords (`[USING charset_name]`) and `[DISTINCT]` dropped.
 """
 
 from __future__ import annotations
@@ -236,6 +236,8 @@ MYSQL_SYNTAX = {"exists"}
 MYSQL_CALL = re.compile(r"\s*([A-Za-z_]\w*)(\()?")
 MYSQL_MODIFIER = re.compile(r"\s*\[?(\w+)\]?")
 MYSQL_NEXT = re.compile(r"\s*(?:,|$)")
+# An optional part written with keywords or alternatives: `[USING charset_name]`.
+MYSQL_KEYWORD_OPTION = re.compile(r"\s*\[[^\[\]]*(?:[|{]|\b[A-Z]{2,}\b)[^\[\]]*\]")
 
 
 def mysql_calls(text: str) -> list[tuple[str, str]]:
@@ -267,7 +269,11 @@ def mysql_calls(text: str) -> list[tuple[str, str]]:
 
 def mysql_parameters(arguments: str) -> str | None:
     """`x[, y, ...]` of the arguments `x [,y] ...`; `None` for SQL syntax."""
-    arguments = re.sub(r"^\s*\[?DISTINCT\]?\s+", "", arguments)
+    if re.match(r"\s*DISTINCT\b", arguments):
+        return None
+    arguments = re.sub(r"^\s*\[DISTINCT\]\s+", "", arguments)
+    while (shorter := MYSQL_KEYWORD_OPTION.sub("", arguments)) != arguments:
+        arguments = shorter
     if re.search(r"[{|(]|\b[A-Z]{2,}\b", arguments):
         return None
     for pattern, replacement in (
@@ -278,6 +284,8 @@ def mysql_parameters(arguments: str) -> str | None:
         (r"\s*\]", "]"),
         (r"(\w)\s*\.\.\.", r"\1, ..."),
         (r",\s*\[(?!,)", "[, "),
+        # A part after a parameter without a comma is not one: `str [flags]`.
+        (r"(\w)\[(?!,)[^\[\]]*\]", r"\1"),
     ):
         arguments = re.sub(pattern, replacement, arguments)
     return arguments.strip()
@@ -303,6 +311,7 @@ def mysql_catalog(dsn: str) -> tuple[str, list[str]]:
             SELECT t.url, t.description FROM mysql.help_topic t JOIN mysql.help_category c
             USING (help_category_id)
             WHERE c.name LIKE '%Function%' OR c.name LIKE '%Operators%'
+                OR c.name IN ('Geometry Constructors', 'XML', 'GTID')
             ORDER BY t.help_topic_id
             """
         )
