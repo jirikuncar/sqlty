@@ -85,10 +85,12 @@ fn columns_by_prefix_fold_as_the_dialect_does() {
 fn a_column_without_from_completes_from_every_relation() {
     let catalog = load(
         "CREATE SCHEMA other; CREATE TABLE users (id INT, name TEXT NOT NULL);
-        CREATE TABLE orders (id INT, user_id INT); CREATE TABLE other.notes (nav INT);",
+        CREATE TABLE orders (id INT, user_id INT); CREATE TABLE other.notes (nav INT);
+        CREATE VIEW totals AS SELECT user_id AS owner_id, count(*) AS total FROM orders GROUP BY 1;",
         "postgres",
     );
     let pg = |sql: &str| complete(sql, &catalog, "postgres");
+    assert_eq!(pg("SELECT owner_|"), ["owner_id:Column:totals"]);
     let found = pg("SELECT na|");
     assert_eq!(found[..2], ["name:Column:users", "nav:Column:other.notes"]);
     assert!(found[2..].iter().all(|c| c.contains(":pg_catalog.")

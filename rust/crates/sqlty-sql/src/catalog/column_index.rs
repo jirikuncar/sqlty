@@ -101,15 +101,15 @@ impl Catalog {
         for list in [&names.schema, &names.system] {
             let start =
                 list.partition_point(|&at| self.column_at(at).is_none_or(|c| *c.0 < *prefix));
-            for &at in &list[start..] {
+            let walked = list[start..]
+                .iter()
+                .map_while(|&at| Some((at, self.column_at(at)?)));
+            for (at, (name, column)) in walked {
                 if found.len() == limit {
                     return found;
                 }
                 #[cfg(test)]
                 super::index::visit();
-                let Some((name, column)) = self.column_at(at) else {
-                    break;
-                };
                 if !name.starts_with(prefix.as_str()) {
                     break;
                 }
