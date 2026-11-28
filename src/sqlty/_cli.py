@@ -47,7 +47,7 @@ def issue_url(cause: str) -> str:
 
     from sqlty import __version__
 
-    title = cause.splitlines()[0] if cause else ""
+    title = cause.splitlines()[0]
     fields = {
         "title": f"Crash: {title[:80]}",
         "output": cause[:2000],
