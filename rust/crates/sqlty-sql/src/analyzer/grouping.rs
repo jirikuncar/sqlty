@@ -46,16 +46,23 @@ impl Analyzer<'_> {
         if keys.is_empty() && !items.iter().any(|expr| has_aggregate(expr)) {
             return;
         }
-        let keys: Vec<&Expr> = keys
-            .iter()
-            .flat_map(|key| match key {
-                Expr::Rollup(sets) | Expr::Cube(sets) | Expr::GroupingSets(sets) => {
-                    sets.iter().flatten().collect()
-                }
-                Expr::Tuple(exprs) => exprs.iter().collect(),
-                key => vec![key],
+        let keys = grouping_keys(keys);
+        // A position naming no select item is `position-out-of-range`.
+        let wildcard = select.projection.iter().any(|item| {
+            matches!(
+                item,
+                SelectItem::Wildcard(_) | SelectItem::QualifiedWildcard(..)
+            )
+        });
+        if !wildcard
+            && keys.iter().any(|key| {
+                super::query::position(key, self.dialect).is_some_and(|n| {
+                    !usize::try_from(n).is_ok_and(|n| (1..=select.projection.len()).contains(&n))
+                })
             })
-            .collect();
+        {
+            return;
+        }
         let mut grouped = Grouped::default();
         for key in &keys {
             match key {
@@ -308,4 +315,18 @@ pub(super) fn has_aggregate(expr: &Expr) -> bool {
         }
     }
     expr.visit(&mut Find { queries: 0 }).is_break()
+}
+
+/// The expressions of `GROUP BY` keys, those of `ROLLUP`, `CUBE`, `GROUPING SETS` and
+/// tuples included.
+pub(super) fn grouping_keys(keys: &[Expr]) -> Vec<&Expr> {
+    keys.iter()
+        .flat_map(|key| match key {
+            Expr::Rollup(sets) | Expr::Cube(sets) | Expr::GroupingSets(sets) => {
+                sets.iter().flatten().collect()
+            }
+            Expr::Tuple(exprs) => exprs.iter().collect(),
+            key => vec![key],
+        })
+        .collect()
 }

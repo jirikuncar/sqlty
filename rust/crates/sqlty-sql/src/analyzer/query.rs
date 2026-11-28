@@ -8,7 +8,7 @@ use std::sync::Arc;
 use sqlparser::ast::{
     AccessExpr, Expr, GroupByExpr, JoinConstraint, JoinOperator, OrderByKind, Query, Select,
     SelectItem, SelectItemQualifiedWildcardKind, SetExpr, SetOperator, Spanned, Statement,
-    TableAlias, TableWithJoins, Value,
+    TableAlias, TableWithJoins, UnaryOperator, Value,
 };
 
 use sqlparser::tokenizer::Location;
@@ -25,6 +25,7 @@ use super::dml::{
 };
 use super::explain::Explained;
 use super::expr::is_field_star;
+use super::grouping::grouping_keys;
 use super::literals::strip;
 use super::names::{alias_name, column_name, object_name};
 use super::nullability::{Facts, Nullability};
@@ -294,13 +295,23 @@ impl<'a> Analyzer<'a> {
             | SetExpr::Delete(stmt)
             | SetExpr::Merge(stmt) => self.statement_columns(stmt),
             body => {
-                if let (SetExpr::Select(select), Some(order_by)) = (body, &query.order_by) {
-                    if let OrderByKind::Expressions(keys) = &order_by.kind {
-                        let keys: Vec<&Expr> = keys.iter().map(|key| &key.expr).collect();
-                        self.check_clause_names(select, &keys)?;
-                    }
+                let keys = match &query.order_by {
+                    Some(order_by) => match &order_by.kind {
+                        OrderByKind::Expressions(keys) => {
+                            keys.iter().map(|key| &key.expr).collect()
+                        }
+                        OrderByKind::All(_) => Vec::new(),
+                    },
+                    None => Vec::new(),
+                };
+                if let (SetExpr::Select(select), false) = (body, keys.is_empty()) {
+                    self.check_clause_names(select, &keys)?;
                 }
-                self.set_columns(body)
+                let columns = self.set_columns(body)?;
+                if let Some(columns) = &columns {
+                    self.check_positions("ORDER BY", keys, columns);
+                }
+                Ok(columns)
             }
         }
     }
@@ -408,12 +419,47 @@ impl<'a> Analyzer<'a> {
         }
         analyzer.facts = analyzer.select_facts(select, &scope);
         let keyword = select.select_token.0.span.start;
-        analyzer.projection(
+        let columns = analyzer.projection(
             &select.projection,
             &scope,
             Some(&select.from),
             Some(keyword),
-        )
+        )?;
+        if let GroupByExpr::Expressions(keys, _) = &select.group_by {
+            self.check_positions("GROUP BY", grouping_keys(keys), &columns);
+        }
+        Ok(columns)
+    }
+
+    /// `position-out-of-range`: an integer `clause` key naming no result column, of the
+    /// `columns` of known width.
+    fn check_positions<'k>(
+        &self,
+        clause: &str,
+        keys: impl IntoIterator<Item = &'k Expr>,
+        columns: &[Column],
+    ) {
+        if !self.diag.enabled() || columns.iter().any(Column::is_unknown_star) {
+            return;
+        }
+        let negative = self.dialect != SqlDialect::MySql;
+        for key in keys {
+            let Some(n) = position(key, self.dialect) else {
+                continue;
+            };
+            let named = usize::try_from(n).is_ok_and(|n| (1..=columns.len()).contains(&n));
+            if named || (n < 0 && !negative) {
+                continue;
+            }
+            let _at = self.diag.at(key.span());
+            self.diag.record(
+                Rule::PositionOutOfRange,
+                format!(
+                    "{clause} position {n} is not in the select list ({})",
+                    plural(columns.len(), "column")
+                ),
+            );
+        }
     }
 
     /// Columns of a SELECT or set operation. Names come from the leftmost branch; each
@@ -910,6 +956,29 @@ fn set_operators<'b>(
         }
         SetExpr::Query(query) if query.with.is_none() => set_operators(&query.body, joined, into),
         branch => into.push((branch, joined.map_or_else(String::new, ToString::to_string))),
+    }
+}
+
+/// The column an `ORDER BY` or `GROUP BY` key names by position: an integer, negated or
+/// parenthesized; `+` only in SQLite. Outside DuckDB an integer wider than 32 bits is a
+/// constant, not a position.
+pub(super) fn position(key: &Expr, dialect: SqlDialect) -> Option<i64> {
+    match key {
+        Expr::Value(value) => match &value.value {
+            Value::Number(n, _) if dialect == SqlDialect::Other("duckdb") => n.parse().ok(),
+            Value::Number(n, _) => n.parse::<i32>().ok().map(i64::from),
+            _ => None,
+        },
+        Expr::Nested(expr) => position(expr, dialect),
+        Expr::UnaryOp {
+            op: UnaryOperator::Minus,
+            expr,
+        } => position(expr, dialect).map(|n| -n),
+        Expr::UnaryOp {
+            op: UnaryOperator::Plus,
+            expr,
+        } if dialect == SqlDialect::Sqlite => position(expr, dialect),
+        _ => None,
     }
 }
 

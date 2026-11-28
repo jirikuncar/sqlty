@@ -225,7 +225,7 @@ EXPRESSIONS = [
     ("postgres", "SELECT value FROM jsonb_array_elements('[1]')", "value: typing.Any", []),
     ("postgres", "SELECT key, value FROM json_each('{}')", "key: str, value: typing.Any", []),
     ("postgres", "SELECT * FROM jsonb_populate_record(NULL, '{}')", "*: None", ["unsupported-syntax"]),
-    ("postgres", "SELECT i FROM f GROUP BY 5", "i: int | None", ["ungrouped-column"]),
+    ("postgres", "SELECT i FROM f GROUP BY 5", "i: int | None", ["position-out-of-range"]),
     ("postgres", "SELECT * FROM (SELECT 1 AS a) s GROUP BY a", "a: int", []),
     ("postgres", "WITH w AS (SELECT 1 AS a) SELECT * FROM w GROUP BY a", "a: int", []),
     ("postgres", "SELECT w.* FROM (SELECT 1 AS a) w GROUP BY w.a", "a: int", []),

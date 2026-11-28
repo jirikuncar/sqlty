@@ -385,6 +385,7 @@ mod tests {
                 "insert-missing-column",
                 "insert-value-count",
                 "set-column-count",
+                "position-out-of-range",
                 "literal-write",
                 "unmatched-literal",
                 "ungrouped-column",
