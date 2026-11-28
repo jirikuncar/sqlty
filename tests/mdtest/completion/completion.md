@@ -229,6 +229,7 @@ overload). Editors insert `name(`.
 ```sql
 CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, email TEXT);
 CREATE FUNCTION normalize_email(email TEXT) RETURNS TEXT LANGUAGE sql AS $$ SELECT lower(email) $$;
+CREATE FUNCTION user_rows() RETURNS SETOF users LANGUAGE sql AS $$ SELECT * FROM users $$;
 ```
 
 ```python
@@ -244,6 +245,44 @@ q = "--sql\nSELECT id FROM users WHERE NOR<CURSOR>"
 ```python
 q = "--sql\nSELECT id FROM users ORDER BY na<CURSOR>"
 # completions: name column users
+```
+
+In `FROM`, after `JOIN` and after `LATERAL`, a typed word also completes to the functions that
+return rows, the schema's then the built-ins, after the relations.
+
+```python
+q = "--sql\nSELECT * FROM users, gen<CURSOR>"
+# completions: generate_series function generate_series(start: integer, stop: integer[, step: integer]) -> setof integer (+4 more)
+# completions: generate_subscripts function generate_subscripts(array: anyarray, dim: integer) -> setof integer (+1 more)
+```
+
+```python
+q = "--sql\nSELECT * FROM users u CROSS JOIN LATERAL jsonb_each<CURSOR>"
+# completions: jsonb_each function jsonb_each(jsonb) -> setof record(key text, value jsonb)
+# completions: jsonb_each_text function jsonb_each_text(jsonb) -> setof record(key text, value text)
+```
+
+```python
+q = "--sql\nSELECT * FROM jsonb_to_rec<CURSOR>"
+# completions: jsonb_to_record function jsonb_to_record(jsonb) -> record
+# completions: jsonb_to_recordset function jsonb_to_recordset(jsonb) -> setof record
+```
+
+```python
+q = "--sql\nSELECT * FROM user_r<CURSOR>"
+# completions: user_rows function public
+```
+
+A function cannot go after `UPDATE` or `DELETE FROM`.
+
+```python
+q = "--sql\nUPDATE gen<CURSOR>"
+# completions: None
+```
+
+```python
+q = "--sql\nDELETE FROM user_r<CURSOR>"
+# completions: None
 ```
 
 Nothing typed, or a qualified name, offers no function.
@@ -316,4 +355,17 @@ dialect = "sqlite"
 q = "--sql\nSELECT * FROM US<CURSOR>"
 # completions: user_names view -
 # completions: users table -
+```
+
+## DuckDB table functions
+
+```toml
+[tool.sqlty]
+dialect = "duckdb"
+```
+
+```python
+q = "--sql\nSELECT * FROM read_cs<CURSOR>"
+# completions: read_csv function read_csv(path: VARCHAR) -> TABLE (+2 more)
+# completions: read_csv_auto function read_csv_auto(path: VARCHAR) -> TABLE (+2 more)
 ```

@@ -841,7 +841,7 @@ fn a_reload_swaps_the_schema_completion_reads() {
     client.notification("textDocument/publishDiagnostics");
     assert_eq!(
         labels(&client.complete("file:///work/q.py", 0, 29)),
-        json!([])
+        json!(["generate_series", "generate_subscripts"])
     );
     client.notify(
         "workspace/didChangeWatchedFiles",
@@ -850,7 +850,7 @@ fn a_reload_swaps_the_schema_completion_reads() {
     client.notification("textDocument/publishDiagnostics");
     assert_eq!(
         labels(&client.complete("file:///work/q.py", 0, 29)),
-        json!(["gen2"])
+        json!(["gen2", "generate_series", "generate_subscripts"])
     );
     client.shutdown();
 }

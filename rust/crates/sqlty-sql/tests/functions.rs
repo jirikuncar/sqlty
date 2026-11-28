@@ -4,7 +4,8 @@ use sqlty_sql::analyzer::{complete, hover, load_schema_with_skipped, CandidateKi
 
 const SCHEMA: &str = "CREATE TABLE users (id INTEGER, name TEXT, email TEXT);
     CREATE FUNCTION normalize_email(email TEXT) RETURNS TEXT LANGUAGE sql AS $$ SELECT $1 $$;
-    CREATE FUNCTION lower(x INTEGER) RETURNS INTEGER LANGUAGE sql AS $$ SELECT x $$;";
+    CREATE FUNCTION lower(x INTEGER) RETURNS INTEGER LANGUAGE sql AS $$ SELECT x $$;
+    CREATE FUNCTION user_rows() RETURNS SETOF users LANGUAGE sql AS $$ SELECT * FROM users $$;";
 
 fn completed(sql: &str, dialect: &str) -> Vec<(String, CandidateKind, Option<String>)> {
     let cursor = sql.find('|').unwrap_or(sql.len());
@@ -118,4 +119,34 @@ fn a_function_name_hovers_outside_a_call_too() {
         "{item}"
     );
     assert!(hovered("SELECT up|per(1, 2, 3)").is_some_and(|text| text.contains("upper(text)")));
+}
+
+#[test]
+fn table_functions_complete_after_relations_in_from() {
+    let found = completed("SELECT * FROM users, generate_s|", "postgres");
+    assert_eq!(found[0].0, "generate_series");
+    assert_eq!(found[0].1, CandidateKind::Function);
+    assert!(completed("SELECT * FROM us|", "postgres")[0].1 == CandidateKind::Table);
+    assert!(
+        completed("SELECT * FROM low|", "postgres").is_empty(),
+        "lower returns no rows"
+    );
+    assert!(completed("UPDATE generate_s|", "postgres").is_empty());
+    assert!(completed("DELETE FROM user_r|", "postgres").is_empty());
+    assert_eq!(
+        completed("SELECT * FROM user_r|", "postgres")[0].0,
+        "user_rows"
+    );
+    assert_eq!(
+        completed("SELECT * FROM users u, LATERAL jsonb_each|", "postgres")[0].0,
+        "jsonb_each"
+    );
+    assert_eq!(
+        completed("SELECT * FROM jsonb_to_rec|", "postgres")[0].0,
+        "jsonb_to_record"
+    );
+    assert!(completed("SELECT * FROM public.generate_s|", "postgres").is_empty());
+    assert!(completed("SELECT * FROM |", "postgres")
+        .iter()
+        .all(|c| c.1 != CandidateKind::Function));
 }

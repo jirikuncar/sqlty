@@ -825,6 +825,16 @@ impl Catalog {
             .then_some(&first.returns)
     }
 
+    /// Whether an overload of the function `key` (a [`NameRef::key`]) returns rows, so a query
+    /// can read it in `FROM`.
+    pub(crate) fn returns_rows(&self, key: &str) -> bool {
+        self.functions.get(key).is_some_and(|overloads| {
+            overloads
+                .iter()
+                .any(|f| !matches!(f.returns, FunctionReturn::Scalar(_)))
+        })
+    }
+
     /// The argument types of the overloads of `name` a call with `args` arguments fits,
     /// when they agree: what a placeholder passed to it is bound as.
     pub(crate) fn function_args(&self, name: &str, args: usize) -> Option<&[Typed]> {

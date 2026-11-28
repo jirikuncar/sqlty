@@ -11,7 +11,8 @@
 //! key links to one already in scope come first, with their `ON` clause. An unqualified
 //! column with nothing typed is offered as `alias.column` when several relations are in scope.
 //! A typed word in an expression also completes to the functions the schema defines and the
-//! dialect's built-ins (see [`crate::signatures`]), after the columns.
+//! dialect's built-ins (see [`crate::signatures`]), after the columns; one in `FROM` or
+//! after `JOIN`, to the built-ins that return rows, after the relations.
 //!
 //! ```
 //! use sqlty_sql::analyzer::{complete, load_schema_with_skipped, CandidateKind};
@@ -35,6 +36,7 @@ use std::ops::Range;
 use super::nullability::Nullability;
 use super::{parse, SchemaData, SqlDialect};
 use crate::catalog::{Columns, RelationKind};
+use crate::signatures::Signature;
 
 /// The column name the cursor's word is replaced by, which no schema defines.
 pub(super) const PLACEHOLDER: &str = "__sqlty_cursor__";
@@ -132,7 +134,7 @@ pub fn complete(
     let typed = &query[prefix.clone()];
     let folded = schema.fold_typed(typed);
     let mut candidates = match context {
-        Context::Relation(qualifier, join) => {
+        Context::Relation(qualifier, join, rows) => {
             let relations = match &qualifier {
                 Some(qualifier) => schema.relations_with_prefix(typed, Some(qualifier), limit + 1),
                 None => schema.visible_relations_with_prefix(typed, limit + 1),
@@ -154,6 +156,9 @@ pub fn complete(
                 let scope = &before[..before.len() - usize::from(!prefix.is_empty())];
                 found.extend(joins(scope, typed, schema, dialect, limit + 1));
             }
+            if rows {
+                found.extend(table_functions(typed, schema, dialect, limit + 1));
+            }
             if qualifier.is_none() {
                 found.extend(
                     ctes(&before)
@@ -170,6 +175,7 @@ pub fn complete(
             }
             found
         }
+        Context::Function => table_functions(typed, schema, dialect, limit + 1).collect(),
         Context::Column(qualifier) => {
             let mut probe = query[..prefix.start].to_string();
             probe.push_str(PLACEHOLDER);
@@ -257,24 +263,67 @@ fn functions<'a>(
         });
     let builtin = crate::signatures::with_prefix(dialect, typed)
         .take(limit)
-        .map(|overloads| Candidate {
-            label: overloads[0].name.to_string(),
+        .map(|overloads| builtin(&overloads.iter().collect::<Vec<_>>()));
+    defined.chain(builtin)
+}
+
+/// The dialect's built-in functions whose name starts with `typed` and that return rows, at
+/// most `limit`, each with its first such overload. O(log n + m) in the function catalog,
+/// for the m names that start with `typed`.
+fn table_functions<'a>(
+    typed: &'a str,
+    schema: &'a SchemaData,
+    dialect: SqlDialect,
+    limit: usize,
+) -> impl Iterator<Item = Candidate> + 'a {
+    let rows = |s: &&Signature| {
+        ["setof ", "TABLE", "record"]
+            .iter()
+            .any(|kind| s.returns.starts_with(kind))
+    };
+    let defined = schema
+        .functions_with_prefix(typed, None, limit)
+        .into_iter()
+        .filter(|function| schema.returns_rows(function.key))
+        .map(move |function| Candidate {
+            label: spelled(function.name, dialect),
             kind: CandidateKind::Function,
-            detail: Some(match overloads.len() {
-                1 => overloads[0].label.to_string(),
-                n => format!("{} (+{} more)", overloads[0].label, n - 1),
-            }),
+            detail: function.schema.map(str::to_string),
             sql_type: None,
             nullable: None,
         });
-    defined.chain(builtin)
+    let builtin = crate::signatures::with_prefix(dialect, typed)
+        .filter(move |overloads| overloads.iter().any(|s| rows(&s)))
+        .take(limit)
+        .map(move |overloads| builtin(&overloads.iter().filter(rows).collect::<Vec<_>>()));
+    (!typed.is_empty())
+        .then(|| defined.chain(builtin))
+        .into_iter()
+        .flatten()
+}
+
+/// A built-in function, its first overload as detail.
+fn builtin(overloads: &[&Signature]) -> Candidate {
+    Candidate {
+        label: overloads[0].name.to_string(),
+        kind: CandidateKind::Function,
+        detail: Some(match overloads.len() {
+            1 => overloads[0].label.to_string(),
+            n => format!("{} (+{} more)", overloads[0].label, n - 1),
+        }),
+        sql_type: None,
+        nullable: None,
+    }
 }
 
 /// What the cursor stands for; the qualifier is the schema of a relation, the alias or
 /// table of a column.
 enum Context {
-    /// Also whether it follows `JOIN`.
-    Relation(Option<String>, bool),
+    /// Also whether it follows `JOIN`, and whether a table function can go there: in `FROM`
+    /// or after `JOIN`, unqualified.
+    Relation(Option<String>, bool, bool),
+    /// After `LATERAL`, where only a function or a subquery can go.
+    Function,
     Column(Option<String>),
 }
 
@@ -323,11 +372,21 @@ fn context(tokens: &[Tok], cursor: usize) -> Option<(Context, Range<usize>)> {
         .iter()
         .any(|w| clause.eq_ignore_ascii_case(w))
     {
+        let rows = qualifier.is_none()
+            && ["FROM", "JOIN"]
+                .iter()
+                .any(|w| clause.eq_ignore_ascii_case(w));
+        if !crossed && rows && is(prev, &["LATERAL"]) {
+            return Some((Context::Function, prefix));
+        }
         if crossed || !(is(prev, &RELATION_CLAUSES) || prev.is_some_and(|tok| tok.text == ",")) {
             return None;
         }
         let join = qualifier.is_none() && is(prev, &["JOIN"]);
-        Context::Relation(qualifier, join)
+        let deleted =
+            is(prev, &["FROM"]) && is(end.checked_sub(2).map(|i| &tokens[i]), &["DELETE"]);
+        let rows = rows && !deleted;
+        Context::Relation(qualifier, join, rows)
     } else {
         let after_name = prev.is_some_and(|tok| {
             (tok.word && !is(Some(tok), &COLUMN_CLAUSES) && !is(Some(tok), &OPERATOR_WORDS))
