@@ -76,6 +76,17 @@ b = SQL[tuple[int]]("--sql\nSELECT AVG(totl) FROM orders")
 c = SQL[tuple[int]]("--sql\nSELECT SUM(o.totl) FROM orders o")
 ```
 
+#### An unaliased subquery
+
+It has no name to show.
+
+```python
+from sqlty import SQL
+
+# error: [unknown-column] "column `x` does not exist in the subquery"
+q = SQL[tuple[int]]("--sql\nSELECT x FROM (SELECT 1)")
+```
+
 #### The closest column
 
 A name close to one column of the tables it can come from gets a hint, and
