@@ -16,7 +16,7 @@ const DIALECTS: [(&str, &str); 5] = [
 ];
 
 /// The PostgreSQL extensions a rule may require, which `CREATE EXTENSION` adds to a schema.
-const PG_EXTENSIONS: [&str; 1] = ["hstore"];
+const PG_EXTENSIONS: [&str; 4] = ["hstore", "pg_trgm", "fuzzystrmatch", "pgcrypto"];
 
 /// The directory of the extensions' rules, tried before the other PostgreSQL rules.
 const EXTENSIONS_DIR: &str = "rules/postgres/extensions/";

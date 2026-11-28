@@ -465,8 +465,10 @@ the statement, `unknown-function` names the extension the call needs. `DROP EXTE
 and `DROP SCHEMA ... CASCADE` remove it again. An `hstore` value is
 `dict[str, str | None]`, as psycopg's `register_hstore` loads it, and its operators
 (`->`, `?`, `@>`, `||`, ...) are typed whatever the schema says; `[tool.sqlty.types]`
-changes the Python type (`HSTORE = "str"` without the adapter). Other extensions keep
-their functions unknown.
+changes the Python type (`HSTORE = "str"` without the adapter). `pg_trgm` (`similarity`,
+`%`, `<->`), `fuzzystrmatch` (`levenshtein`, `soundex`, ...) and `pgcrypto` (`crypt`,
+`gen_salt`, `pgp_sym_encrypt`, ...) are known the same way. Other extensions keep their
+functions unknown.
 
 ```toml
 [tool.sqlty]

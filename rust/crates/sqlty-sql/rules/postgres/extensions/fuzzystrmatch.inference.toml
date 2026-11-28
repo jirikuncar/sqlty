@@ -1,0 +1,31 @@
+# The fuzzystrmatch extension: phonetic codes and edit distances.
+
+[[function]]
+id = "postgres.fuzzystrmatch.codes"
+functions = ["SOUNDEX", "TEXT_SOUNDEX", "METAPHONE", "DMETAPHONE", "DMETAPHONE_ALT"]
+dialects = ["postgres"]
+extension = "fuzzystrmatch"
+type = "TEXT"
+nullability = "strict"
+reference.postgres = "PostgreSQL 17 documentation, F.16.1 Soundex (soundex ( text ) → text); F.16.4 Metaphone (metaphone ( text, integer ) → text); F.16.5 Double Metaphone (dmetaphone ( text ) → text)"
+reasoning = "A phonetic code is text, NULL only for a NULL argument."
+
+[[function]]
+id = "postgres.fuzzystrmatch.distances"
+functions = ["DIFFERENCE", "LEVENSHTEIN", "LEVENSHTEIN_LESS_EQUAL"]
+dialects = ["postgres"]
+extension = "fuzzystrmatch"
+type = "INT"
+nullability = "strict"
+reference.postgres = "PostgreSQL 17 documentation, F.16.1 Soundex (difference ( text, text ) → integer); F.16.3 Levenshtein (levenshtein ( text, text ) → integer)"
+reasoning = "Matching code positions and edit distances are integers, NULL only for a NULL argument."
+
+[[function]]
+id = "postgres.fuzzystrmatch.daitch-mokotoff"
+function = "DAITCH_MOKOTOFF"
+dialects = ["postgres"]
+extension = "fuzzystrmatch"
+type = "ARRAY<TEXT>"
+nullability = "nullable"
+reference.postgres = "PostgreSQL 17 documentation, F.16.2 Daitch-Mokotoff Soundex (daitch_mokotoff ( source text ) → text[])"
+reasoning = "The codes of a name are a `text[]`, NULL for a string without letters."

@@ -1,0 +1,22 @@
+# The pgcrypto extension. `digest` and `gen_random_bytes` are typed without it, by
+# `postgres.extension.varbinary`.
+
+[[function]]
+id = "postgres.pgcrypto.text"
+functions = ["CRYPT", "GEN_SALT", "ARMOR", "PGP_KEY_ID", "PGP_SYM_DECRYPT", "PGP_PUB_DECRYPT"]
+dialects = ["postgres"]
+extension = "pgcrypto"
+type = "TEXT"
+nullability = "strict"
+reference.postgres = "PostgreSQL 17 documentation, F.26.2 Password Hashing Functions (crypt ( password text, salt text ) → text, gen_salt ( type text [, iter_count integer ] ) → text); F.26.3 PGP Encryption Functions (pgp_sym_decrypt, pgp_pub_decrypt → text, pgp_key_id ( bytea ) → text, armor ( data bytea ) → text)"
+reasoning = "Hashes, salts, key ids, armored and decrypted messages are text, NULL only for a NULL argument."
+
+[[function]]
+id = "postgres.pgcrypto.bytes"
+functions = ["HMAC", "DEARMOR", "ENCRYPT", "DECRYPT", "ENCRYPT_IV", "DECRYPT_IV", "PGP_SYM_ENCRYPT", "PGP_SYM_ENCRYPT_BYTEA", "PGP_SYM_DECRYPT_BYTEA", "PGP_PUB_ENCRYPT", "PGP_PUB_ENCRYPT_BYTEA", "PGP_PUB_DECRYPT_BYTEA"]
+dialects = ["postgres"]
+extension = "pgcrypto"
+type = "VARBINARY"
+nullability = "strict"
+reference.postgres = "PostgreSQL 17 documentation, F.26.1 General Hashing Functions (hmac → bytea); F.26.3 PGP Encryption Functions (pgp_sym_encrypt, pgp_pub_encrypt → bytea, dearmor ( data text ) → bytea); F.26.4 Raw Encryption Functions (encrypt, decrypt → bytea)"
+reasoning = "Hashes, encrypted and decrypted binary messages are `bytea`, NULL only for a NULL argument."

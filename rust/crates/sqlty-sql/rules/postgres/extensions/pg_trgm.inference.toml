@@ -1,0 +1,57 @@
+# The pg_trgm extension: trigram similarity of text.
+
+[[rule]]
+id = "postgres.pg_trgm.similar"
+operator = "Modulo"
+dialects = ["postgres"]
+extension = "pg_trgm"
+left = ["@text"]
+right = ["@text"]
+type = "BOOLEAN"
+left-parameter = "TEXT"
+right-parameter = "TEXT"
+reference.postgres = "PostgreSQL 17 documentation, F.33.2 pg_trgm Functions and Operators, pg_trgm Operators (text % text → boolean)"
+reasoning = "Two strings are similar or not; the result is NULL only for a NULL operand."
+
+[[rule]]
+id = "postgres.pg_trgm.distance"
+operator = "LtDashGt"
+dialects = ["postgres"]
+extension = "pg_trgm"
+left = ["@text"]
+right = ["@text"]
+type = "FLOAT"
+left-parameter = "TEXT"
+right-parameter = "TEXT"
+reference.postgres = "PostgreSQL 17 documentation, F.33.2 pg_trgm Functions and Operators, pg_trgm Operators (text <-> text → real)"
+reasoning = "The distance is one minus the similarity, a `real`."
+
+[[function]]
+id = "postgres.pg_trgm.similarity"
+functions = ["SIMILARITY", "WORD_SIMILARITY", "STRICT_WORD_SIMILARITY", "SIMILARITY_DIST", "WORD_SIMILARITY_DIST_OP", "WORD_SIMILARITY_DIST_COMMUTATOR_OP", "STRICT_WORD_SIMILARITY_DIST_OP", "STRICT_WORD_SIMILARITY_DIST_COMMUTATOR_OP", "SET_LIMIT", "SHOW_LIMIT"]
+dialects = ["postgres"]
+extension = "pg_trgm"
+type = "FLOAT"
+nullability = "strict"
+reference.postgres = "PostgreSQL 17 documentation, F.33.2 pg_trgm Functions and Operators, pg_trgm Functions (similarity ( text, text ) → real)"
+reasoning = "Similarities, distances and the similarity threshold are `real` numbers, NULL only for a NULL argument."
+
+[[function]]
+id = "postgres.pg_trgm.tests"
+functions = ["SIMILARITY_OP", "WORD_SIMILARITY_OP", "WORD_SIMILARITY_COMMUTATOR_OP", "STRICT_WORD_SIMILARITY_OP", "STRICT_WORD_SIMILARITY_COMMUTATOR_OP"]
+dialects = ["postgres"]
+extension = "pg_trgm"
+type = "BOOLEAN"
+nullability = "strict"
+reference.postgres = "PostgreSQL 17 documentation, F.33.2 pg_trgm Functions and Operators, pg_trgm Operators (text % text → boolean), which these functions implement"
+reasoning = "Each implements one of the similarity operators, a `boolean`."
+
+[[function]]
+id = "postgres.pg_trgm.trigrams"
+function = "SHOW_TRGM"
+dialects = ["postgres"]
+extension = "pg_trgm"
+type = "ARRAY<TEXT>"
+nullability = "strict"
+reference.postgres = "PostgreSQL 17 documentation, F.33.2 pg_trgm Functions and Operators, pg_trgm Functions (show_trgm ( text ) → text[])"
+reasoning = "The trigrams of a string as a `text[]`."
