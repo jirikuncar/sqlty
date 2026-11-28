@@ -1,5 +1,5 @@
 ---
-description: How to set up the sqlty language server in Neovim, Vim, Helix and Emacs for SQL diagnostics, quick fixes, completion, hover and signature help in Python strings.
+description: How to set up the sqlty language server in Neovim, Vim, Helix and Emacs for diagnostics, quick fixes, completion, hover and signature help in Python strings.
 ---
 
 # Neovim, Vim, Helix and Emacs
