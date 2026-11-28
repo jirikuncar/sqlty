@@ -16,13 +16,14 @@ const DIALECTS: [(&str, &str); 5] = [
 ];
 
 /// The PostgreSQL extensions a rule may require, which `CREATE EXTENSION` adds to a schema.
-const PG_EXTENSIONS: [&str; 6] = [
+const PG_EXTENSIONS: [&str; 7] = [
     "hstore",
     "pg_trgm",
     "fuzzystrmatch",
     "pgcrypto",
     "ltree",
     "intarray",
+    "vector",
 ];
 
 /// The directory of the extensions' rules, tried before the other PostgreSQL rules.
@@ -33,7 +34,7 @@ const DOCUMENTED: [&str; 5] = ["postgres", "mysql", "sqlite", "duckdb", "clickho
 
 /// Canonical SQL types the analyzer gives operands, which `left` and `right` may name.
 /// `ARRAY` is any array, `ARRAY<INT>` an integer array (which also matches `ARRAY`).
-const SQL_TYPES: [&str; 94] = [
+const SQL_TYPES: [&str; 97] = [
     "UDECIMAL",
     "UTINYINT",
     "USMALLINT",
@@ -77,6 +78,9 @@ const SQL_TYPES: [&str; 94] = [
     "HSTORE",
     "LTREE",
     "LQUERY",
+    "VECTOR",
+    "HALFVEC",
+    "SPARSEVEC",
     "TSVECTOR",
     "TSQUERY",
     "PATH",

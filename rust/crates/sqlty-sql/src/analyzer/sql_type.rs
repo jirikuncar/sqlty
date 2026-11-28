@@ -545,6 +545,10 @@ static SQL_TO_PYTHON_TYPE: LazyLock<HashMap<&'static str, &'static str>> = LazyL
         ("LQUERY", "str"),
         ("LTXTQUERY", "str"),
         ("QUERY_INT", "str"),
+        // psycopg returns pgvector's types as text unless `pgvector.psycopg.register_vector` runs.
+        ("VECTOR", "str"),
+        ("HALFVEC", "str"),
+        ("SPARSEVEC", "str"),
         ("BPCHAR", "str"),
         ("XML", "str"),
         ("MONEY", "str"),

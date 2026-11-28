@@ -1,0 +1,122 @@
+# The pgvector extension (`CREATE EXTENSION vector`): vectors and their distances.
+
+[[rule]]
+id = "postgres.vector.distance"
+operators = ["LtDashGt", "Spaceship"]
+dialects = ["postgres"]
+left = ["VECTOR"]
+type = "DOUBLE"
+right-parameter = "VECTOR"
+reference.postgres = "pgvector README, Reference, Vector Operators (<-> Euclidean distance, <=> cosine distance), as l2_distance ( vector, vector ) → double precision"
+reasoning = "A distance between two vectors is a `double precision`, NULL only for a NULL operand."
+
+[[rule]]
+id = "postgres.vector.distance-halfvec"
+operators = ["LtDashGt", "Spaceship"]
+dialects = ["postgres"]
+left = ["HALFVEC"]
+type = "DOUBLE"
+right-parameter = "HALFVEC"
+reference.postgres = "pgvector README, Reference, Halfvec Operators (halfvec: <-> Euclidean distance, <=> cosine distance), as l2_distance ( halfvec, halfvec ) → double precision"
+reasoning = "A distance between two vectors is a `double precision`, NULL only for a NULL operand."
+
+[[rule]]
+id = "postgres.vector.distance-sparsevec"
+operators = ["LtDashGt", "Spaceship"]
+dialects = ["postgres"]
+left = ["SPARSEVEC"]
+type = "DOUBLE"
+right-parameter = "SPARSEVEC"
+reference.postgres = "pgvector README, Reference, Sparsevec Operators (sparsevec: <-> Euclidean distance, <=> cosine distance), as l2_distance ( sparsevec, sparsevec ) → double precision"
+reasoning = "A distance between two vectors is a `double precision`, NULL only for a NULL operand."
+
+[[rule]]
+id = "postgres.vector.arithmetic"
+operators = ["Plus", "Minus", "Multiply"]
+dialects = ["postgres"]
+left = ["VECTOR", "HALFVEC"]
+right = ["VECTOR", "HALFVEC"]
+type = "@left"
+reference.postgres = "pgvector README, Reference, Vector Operators (+ element-wise addition)"
+reasoning = "Element-wise arithmetic gives a vector of the left operand's type and dimensions."
+
+[[rule]]
+id = "postgres.vector.concat"
+operator = "StringConcat"
+dialects = ["postgres"]
+left = ["VECTOR"]
+right = ["VECTOR"]
+type = "VECTOR"
+reference.postgres = "pgvector README, Reference, Vector Operators (|| concatenate)"
+reasoning = "Two vectors joined are a vector with the dimensions of both."
+
+[[rule]]
+id = "postgres.vector.concat-halfvec"
+operator = "StringConcat"
+dialects = ["postgres"]
+left = ["HALFVEC"]
+right = ["HALFVEC"]
+type = "HALFVEC"
+reference.postgres = "pgvector README, Reference, Halfvec Operators (|| concatenate)"
+reasoning = "Two half vectors joined are a half vector with the dimensions of both."
+
+[[function]]
+id = "postgres.vector.distances"
+functions = ["COSINE_DISTANCE", "INNER_PRODUCT", "L1_DISTANCE", "L2_DISTANCE", "VECTOR_NORM", "L2_NORM", "HAMMING_DISTANCE", "JACCARD_DISTANCE"]
+dialects = ["postgres"]
+extension = "vector"
+type = "DOUBLE"
+nullability = "strict"
+reference.postgres = "pgvector README, Reference, Vector Functions (cosine_distance ( vector, vector ) → double precision, vector_norm ( vector ) → double precision)"
+reasoning = "Distances and norms are `double precision`, NULL only for a NULL argument."
+
+[[function]]
+id = "postgres.vector.dimensions"
+function = "VECTOR_DIMS"
+dialects = ["postgres"]
+extension = "vector"
+type = "INT"
+nullability = "strict"
+reference.postgres = "pgvector README, Reference, Vector Functions (vector_dims ( vector ) → integer)"
+reasoning = "The number of dimensions is an `integer`."
+
+[[function]]
+id = "postgres.vector.normalized"
+function = "L2_NORMALIZE"
+dialects = ["postgres"]
+extension = "vector"
+type = "@argument"
+nullability = "strict"
+reference.postgres = "pgvector README, Reference, Vector Functions (l2_normalize ( vector ) → vector); Halfvec Functions (l2_normalize ( halfvec ) → halfvec)"
+reasoning = "A normalized vector keeps its type and dimensions."
+
+[[function]]
+id = "postgres.vector.subvector-halfvec"
+function = "SUBVECTOR"
+dialects = ["postgres"]
+extension = "vector"
+argument = ["HALFVEC"]
+type = "HALFVEC"
+nullability = "strict"
+reference.postgres = "pgvector README, Reference, Halfvec Functions (subvector ( halfvec, integer, integer ) → halfvec)"
+reasoning = "A part of a half vector is a half vector."
+
+[[function]]
+id = "postgres.vector.subvector"
+function = "SUBVECTOR"
+dialects = ["postgres"]
+extension = "vector"
+type = "VECTOR"
+nullability = "strict"
+reference.postgres = "pgvector README, Reference, Vector Functions (subvector ( vector, integer, integer ) → vector)"
+reasoning = "A part of a vector is a vector."
+
+[[function]]
+id = "postgres.vector.quantize"
+function = "BINARY_QUANTIZE"
+dialects = ["postgres"]
+extension = "vector"
+type = "BIT"
+nullability = "strict"
+reference.postgres = "pgvector README, Reference, Vector Functions (binary_quantize ( vector ) → bit)"
+reasoning = "A binary quantization is a `bit` string."
