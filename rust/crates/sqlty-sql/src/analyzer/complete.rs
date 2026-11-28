@@ -168,7 +168,7 @@ pub fn complete(
                 found.extend(
                     ctes(&before)
                         .into_iter()
-                        .filter(|name| matched(name, typed).is_some())
+                        .filter(|name| matched(name, typed, schema).is_some())
                         .map(|name| Candidate {
                             label: name.to_string(),
                             kind: CandidateKind::Cte,
@@ -196,6 +196,7 @@ pub fn complete(
                         .chain(functions(typed, schema, dialect, limit + 1))
                         .collect(),
                     typed,
+                    schema,
                     prefix,
                     limit,
                 );
@@ -206,7 +207,7 @@ pub fn complete(
                 .filter(|candidate| {
                     qualifier.is_none() || candidate.detail.as_deref() == qualifier.as_deref()
                 })
-                .filter(|candidate| matched(&candidate.label, typed).is_some())
+                .filter(|candidate| matched(&candidate.label, typed, schema).is_some())
                 .collect();
             // With nothing typed and several relations in scope, `alias.column` says whose it is.
             if blank && found.iter().any(|c| c.detail != found[0].detail) {
@@ -223,7 +224,7 @@ pub fn complete(
             found
         }
     };
-    finish_ranked(ranked, candidates, typed, prefix, limit)
+    finish_ranked(ranked, candidates, typed, schema, prefix, limit)
 }
 
 /// A relation as a candidate.
@@ -245,6 +246,7 @@ fn finish_ranked(
     ranked: Vec<Candidate>,
     candidates: Vec<Candidate>,
     typed: &str,
+    schema: &SchemaData,
     replace: Range<usize>,
     limit: usize,
 ) -> Completions {
@@ -256,7 +258,7 @@ fn finish_ranked(
         .into_iter()
         .filter(|c| !first.contains(&(c.label.as_str(), c.detail.as_deref())))
         .collect();
-    let rest = finish(rest, typed, replace, limit);
+    let rest = finish(rest, typed, schema, replace, limit);
     let mut candidates = ranked;
     candidates.extend(rest.candidates);
     Completions {
@@ -363,23 +365,23 @@ const SELECT_WORDS: [&str; 32] = [
     "EXISTS",
 ];
 
-/// How `typed` matches `label`, case and quotes aside: 0 when the label starts with it, 1
-/// when each typed character starts a word of the label (after `_`) or follows the one
-/// before (`u_i` and `uid` find `user_id`), 2 as a subsequence from the start of a word
-/// (`usd` finds `user_id`, `d` finds nothing); `None` for no match.
-fn matched(label: &str, typed: &str) -> Option<u8> {
-    let unquote = |text: &str| text.trim_matches(['"', '`', '[', ']']).to_lowercase();
-    let (label, typed) = (unquote(label), unquote(typed));
+/// How `typed` matches `label`, both folded as the catalog folds names: 0 when the label
+/// starts with it, 1 when each typed character starts a word of the label (after `_`),
+/// follows the one before or is a `_` (`uid` and `u_i` find `user_id`), 2 as a subsequence
+/// from the start of a word (`usd` finds `used_at`, `d` finds nothing); `None` for no
+/// match. A word ends at `_` only, not at a change of case.
+fn matched(label: &str, typed: &str, schema: &SchemaData) -> Option<u8> {
+    let (label, typed) = (schema.fold_typed(label), schema.fold_typed(typed));
     if label.starts_with(&typed) {
         return Some(0);
     }
     let label: Vec<char> = label.chars().collect();
+    let starts = |i: usize| i == 0 || label[i - 1] == '_';
     let mut at = 0;
     let mut prev = None;
     let words = typed.chars().all(|c| {
-        let found = (at..label.len()).find(|&i| {
-            label[i] == c && (prev == Some(i.wrapping_sub(1)) || i == 0 || label[i - 1] == '_')
-        });
+        let found = (at..label.len())
+            .find(|&i| label[i] == c && (c == '_' || prev == Some(i.wrapping_sub(1)) || starts(i)));
         prev = found;
         at = found.map_or(label.len(), |i| i + 1);
         found.is_some()
@@ -389,7 +391,7 @@ fn matched(label: &str, typed: &str) -> Option<u8> {
     }
     let mut chars = typed.chars();
     let first = chars.next()?;
-    let start = (0..label.len()).find(|&i| label[i] == first && (i == 0 || label[i - 1] == '_'))?;
+    let start = (0..label.len()).find(|&i| label[i] == first && starts(i))?;
     let mut rest = label[start + 1..].iter();
     chars.all(|c| rest.any(|&l| l == c)).then_some(2)
 }
@@ -398,6 +400,7 @@ fn matched(label: &str, typed: &str) -> Option<u8> {
 fn finish(
     mut candidates: Vec<Candidate>,
     typed: &str,
+    schema: &SchemaData,
     replace: Range<usize>,
     limit: usize,
 ) -> Completions {
@@ -418,7 +421,7 @@ fn finish(
             c.kind != CandidateKind::Join,
             c.kind == CandidateKind::Function,
             builtin(c) || signature(c),
-            matched(&c.label, typed).unwrap_or(0),
+            matched(&c.label, typed, schema).unwrap_or(0),
             c.label.to_lowercase(),
             c.detail.clone(),
             c.label.clone(),

@@ -137,8 +137,9 @@ nullability once selected. With nothing typed and several tables in scope, colum
 qualified, `o.user_id` and `u.id`, so the inserted name is never ambiguous. Before the
 query has a `FROM`, a typed column name completes from every table that has it, each
 naming its table, so a query can be written columns first; after `FROM`, the tables that
-have the selected columns come first. A column also matches by its words' first letters,
-`uid` for `user_id`. Typing `.`
+have the selected columns come first. A column of the tables in scope also matches when the
+typed letters appear in it in order from the start of a word, `uid` for `user_id` and `usd`
+for `used_at`, after those that start with them. Typing `.`
 opens the list. After `JOIN`, the tables a foreign
 key links to one in scope come first, with the `ON` clause that joins them:
 `orders ON orders.user_id = u.id`. A typed word in an expression also completes to the

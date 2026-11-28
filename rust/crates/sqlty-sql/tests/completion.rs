@@ -222,6 +222,10 @@ fn columns_and_ctes_match_by_subsequence() {
         "word starts before other subsequences"
     );
     assert_eq!(pg("SELECT UID| FROM orders")[1], "user_id:Column:orders");
+    assert_eq!(
+        pg("SELECT u_i| FROM orders, (SELECT 1 AS ua_xi) s"),
+        ["user_id:Column:orders", "ua_xi:Column:s"]
+    );
     assert!(
         pg("SELECT d| FROM orders").is_empty(),
         "the first letter starts a word"
@@ -231,6 +235,13 @@ fn columns_and_ctes_match_by_subsequence() {
         ["recent_orders:Cte:"]
     );
     assert!(pg("SELECT * FROM ur|").is_empty(), "tables match by prefix");
+    let quoted = load(r#"CREATE TABLE t ("Kind" TEXT, kin INT);"#, "postgres");
+    let labels: Vec<String> = complete(r#"SELECT "Ki| FROM t"#, &quoted, "postgres");
+    assert_eq!(
+        labels,
+        [r#""Kind":Column:t"#],
+        "a quoted word keeps its case"
+    );
 }
 
 #[test]
