@@ -727,11 +727,17 @@ fn scalar(dt: &DataType, dialect: SqlDialect) -> String {
 }
 
 /// Every Python type a SQL type maps to, one union member at a time (`int`,
-/// `ipaddress.IPv4Address`, ...): what the row-type checks must know.
+/// `ipaddress.IPv4Address`, ...), a generic type whole: what the row-type checks must know.
 pub fn python_types() -> std::collections::BTreeSet<&'static str> {
     SQL_TO_PYTHON_TYPE
         .values()
-        .flat_map(|python| python.split(" | "))
+        .flat_map(|python| {
+            if python.contains('[') {
+                vec![*python]
+            } else {
+                python.split(" | ").collect()
+            }
+        })
         .chain([DECIMAL, "float", "datetime.timedelta", "bytes", "str", ANY])
         .collect()
 }
