@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
-import logging
 import os
 from pathlib import Path
 
 import pytest
 
-from sqlty import _config, _core
-from sqlty._config import ConfigError, load_config
+from sqlty import _core
+
+
+def nearest_table(directory: Path) -> tuple[dict, Path | None]:
+    """The nearest table and the directory of its file, as the engine reads them (keys as written)."""
+    found = _core.find_config(directory.resolve())
+    return (found[0], found[2].parent) if found else ({}, None)
 
 
 def test_packaging_only_pyprojects_inherit_the_nearest_table(tmp_path):
@@ -25,7 +29,7 @@ def test_packaging_only_pyprojects_inherit_the_nearest_table(tmp_path):
             (leaf / "pyproject.toml").write_text('[project]\nname = "pkg"\n')
             leaves.append(leaf)
 
-    found = [load_config(leaf) for leaf in leaves]
+    found = [nearest_table(leaf) for leaf in leaves]
 
     assert all(config["dialect"] == "mysql" for config, _ in found)
     assert {root for _, root in found} == {tmp_path}
@@ -35,21 +39,21 @@ def test_edited_pyproject_is_reread(tmp_path):
     """An edited pyproject.toml is read again."""
     pyproject = tmp_path / "pyproject.toml"
     pyproject.write_text('[tool.sqlty]\ndialect = "mysql"\n')
-    assert load_config(tmp_path)[0]["dialect"] == "mysql"
+    assert nearest_table(tmp_path)[0]["dialect"] == "mysql"
 
     pyproject.write_text('[tool.sqlty]\ndialect = "sqlite"\n')
     stat = pyproject.stat()
     os.utime(pyproject, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000_000))
 
-    assert load_config(tmp_path)[0]["dialect"] == "sqlite"
+    assert nearest_table(tmp_path)[0]["dialect"] == "sqlite"
 
 
 def test_returned_config_is_not_shared(tmp_path):
     """Callers may mutate the returned config without affecting later lookups."""
     (tmp_path / "pyproject.toml").write_text('[tool.sqlty.rules]\nselect-star = "ignore"\n')
-    first, _ = load_config(tmp_path)
+    first, _ = nearest_table(tmp_path)
     first["rules"]["select-star"] = "error"
-    assert load_config(tmp_path)[0]["rules"] == {"select-star": "ignore"}
+    assert nearest_table(tmp_path)[0]["rules"] == {"select-star": "ignore"}
 
 
 @pytest.mark.parametrize("packaging_only", [True, False])
@@ -60,11 +64,11 @@ def test_nearest_sqlty_table_wins(tmp_path, packaging_only):
     pkg.mkdir()
     if packaging_only:
         (pkg / "pyproject.toml").write_text('[project]\nname = "pkg"\n')
-        config, config_dir = load_config(pkg)
+        config, config_dir = nearest_table(pkg)
         assert (config["dialect"], config_dir) == ("mysql", tmp_path.resolve())
     else:
         (pkg / "pyproject.toml").write_text('[tool.sqlty]\ndialect = "sqlite"\n')
-        config, config_dir = load_config(pkg)
+        config, config_dir = nearest_table(pkg)
         assert (config["dialect"], config_dir) == ("sqlite", pkg.resolve())
 
 
@@ -76,14 +80,14 @@ def test_sqlty_toml_wins_over_pyproject_in_its_directory(tmp_path: Path) -> None
     (pkg / "pyproject.toml").write_text('[tool.sqlty]\ndialect = "postgres"\n')
     (pkg / "sqlty.toml").write_text('dialect = "sqlite"\n[rules]\nselect-star = "ignore"\n')
 
-    config, config_dir = load_config(pkg)
+    config, config_dir = nearest_table(pkg)
     assert (config, config_dir) == (
         {"dialect": "sqlite", "rules": {"select-star": "ignore"}},
         pkg.resolve(),
     )
 
     (tmp_path / "sqlty.toml").write_text("")
-    assert load_config(tmp_path) == ({}, tmp_path.resolve())
+    assert nearest_table(tmp_path) == ({}, tmp_path.resolve())
 
 
 def test_cargo_toml_metadata_table_is_read(tmp_path: Path) -> None:
@@ -98,17 +102,17 @@ def test_cargo_toml_metadata_table_is_read(tmp_path: Path) -> None:
         '[package]\nname = "crate"\n[package.metadata.docs]\nall = true\n'
     )
 
-    assert load_config(crate) == (
+    assert nearest_table(crate) == (
         {"dialect": "sqlite", "rules": {"select-star": "ignore"}},
         tmp_path.resolve(),
     )
 
     (tmp_path / "pyproject.toml").write_text('[tool.sqlty]\ndialect = "mysql"\n')
-    assert load_config(crate)[0] == {"dialect": "mysql"}
+    assert nearest_table(crate)[0] == {"dialect": "mysql"}
 
     (crate / "Cargo.toml").write_text("[package.metadata.sqlty]\nbogus = 1\n")
-    with pytest.raises(ConfigError, match=r"Cargo\.toml: unknown key 'bogus'"):
-        load_config(crate)
+    with pytest.raises(ValueError, match=r"Cargo\.toml: unknown key 'bogus'"):
+        nearest_table(crate)
 
 
 def test_cargo_workspace_metadata_table_is_read(tmp_path: Path) -> None:
@@ -120,30 +124,30 @@ def test_cargo_workspace_metadata_table_is_read(tmp_path: Path) -> None:
     crate.mkdir()
     (crate / "Cargo.toml").write_text('[package]\nname = "crate"\n')
 
-    assert load_config(crate) == ({"dialect": "sqlite"}, tmp_path.resolve())
+    assert nearest_table(crate) == ({"dialect": "sqlite"}, tmp_path.resolve())
 
     (crate / "Cargo.toml").write_text('[package.metadata.sqlty]\ndialect = "mysql"\n')
-    assert load_config(crate) == ({"dialect": "mysql"}, crate.resolve())
+    assert nearest_table(crate) == ({"dialect": "mysql"}, crate.resolve())
 
     (tmp_path / "Cargo.toml").write_text(
         '[package.metadata.sqlty]\ndialect = "postgres"\n[workspace.metadata.sqlty]\ndialect = "sqlite"\n'
     )
-    assert load_config(tmp_path)[0] == {"dialect": "postgres"}
+    assert nearest_table(tmp_path)[0] == {"dialect": "postgres"}
 
 
 def test_unknown_key_in_sqlty_toml_names_the_file(tmp_path: Path) -> None:
     (tmp_path / "sqlty.toml").write_text("bogus = 1\n")
 
-    with pytest.raises(ConfigError, match=r"sqlty\.toml: unknown key 'bogus'"):
-        load_config(tmp_path)
+    with pytest.raises(ValueError, match=r"sqlty\.toml: unknown key 'bogus'"):
+        nearest_table(tmp_path)
 
 
 def test_unknown_keys_raise_config_error_naming_the_file(tmp_path):
     pyproject = tmp_path / "pyproject.toml"
     pyproject.write_text('[tool.sqlty]\ndialect = "mysql"\nbogus = 1\n')
 
-    with pytest.raises(_config.ConfigError, match=r"pyproject\.toml: unknown key 'bogus'"):
-        load_config(tmp_path)
+    with pytest.raises(ValueError, match=r"pyproject\.toml: unknown key 'bogus'"):
+        nearest_table(tmp_path)
 
 
 @pytest.mark.parametrize(
@@ -199,8 +203,8 @@ def test_unknown_keys_raise_config_error_naming_the_file(tmp_path):
 def test_invalid_settings(tmp_path, toml, message):
     (tmp_path / "pyproject.toml").write_text(toml)
 
-    with pytest.raises(_config.ConfigError, match=message):
-        load_config(tmp_path)
+    with pytest.raises(ValueError, match=message):
+        nearest_table(tmp_path)
 
 
 def test_exclude_settings_are_loaded(tmp_path):
@@ -208,15 +212,15 @@ def test_exclude_settings_are_loaded(tmp_path):
         '[tool.sqlty]\nexclude = ["a"]\nextend-exclude = ["b"]\n'
     )
 
-    config, _ = load_config(tmp_path)
+    config, _ = nearest_table(tmp_path)
 
-    assert (config["exclude"], config["extend_exclude"]) == (["a"], ["b"])
+    assert (config["exclude"], config["extend-exclude"]) == (["a"], ["b"])
 
 
 def test_values_only_the_cli_checks_are_loaded_as_written(tmp_path: Path) -> None:
     (tmp_path / "pyproject.toml").write_text("[tool.sqlty]\nuntyped = [1.5, 1979-05-27]\n")
 
-    config, _ = load_config(tmp_path)
+    config, _ = nearest_table(tmp_path)
 
     assert config["untyped"] == [1.5, "1979-05-27"]
 
@@ -226,23 +230,16 @@ def test_rules_must_be_a_table() -> None:
         _core.validate_config({"rules": ["select-star"]}, "pyproject.toml")
 
 
-def test_unreadable_pyproject_is_skipped_with_a_warning(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
-) -> None:
+def test_unreadable_pyproject_is_reported_as_a_syntax_error(tmp_path: Path) -> None:
     (tmp_path / "pyproject.toml").write_text("[tool.sqlty\n")
-    with caplog.at_level(logging.WARNING):
-        config, root = load_config(tmp_path)
-    assert (config, root) == ({}, None)
-    assert "Failed to parse" in caplog.text
+    with pytest.raises(_core.ConfigSyntaxError, match=r"pyproject\.toml"):
+        _core.find_config(tmp_path.resolve())
 
 
-def test_pyproject_that_is_not_utf8_is_skipped_with_a_warning(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
-) -> None:
+def test_pyproject_that_is_not_utf8_is_reported_as_a_syntax_error(tmp_path: Path) -> None:
     (tmp_path / "pyproject.toml").write_bytes(b"[tool.sqlty]\ndialect = '\xff'\n")
-    with caplog.at_level(logging.WARNING):
-        assert load_config(tmp_path) == ({}, None)
-    assert "pyproject.toml: invalid utf-8" in caplog.text
+    with pytest.raises(_core.ConfigSyntaxError, match=r"pyproject.toml: invalid utf-8"):
+        _core.find_config(tmp_path.resolve())
 
 
 def test_values_of_a_parsed_table_are_validated() -> None:
@@ -258,21 +255,18 @@ def test_tables_keep_their_value_types(tmp_path: Path) -> None:
     (tmp_path / "sqlty.toml").write_text(
         'preview = true\nmax-query-variants = 8\nrules = { select-star = "ignore" }\n'
     )
-    config, _ = load_config(tmp_path)
-    assert config == {"preview": True, "max_query_variants": 8, "rules": {"select-star": "ignore"}}
+    config, _ = nearest_table(tmp_path)
+    assert config == {"preview": True, "max-query-variants": 8, "rules": {"select-star": "ignore"}}
 
 
-def test_incomplete_function_entries_are_skipped(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
-) -> None:
+def test_incomplete_function_entries_are_skipped(tmp_path: Path) -> None:
     (tmp_path / "pyproject.toml").write_text(
         '[tool.sqlty]\nfunctions = ["junk", {import-path = "db.run"},'
         ' {import-path = "db.ok", query-param = "q"}]\n'
     )
-    with caplog.at_level(logging.WARNING):
-        config, _ = load_config(tmp_path)
-    assert config["functions"] == [{"import_path": "db.ok", "query_param": "q"}]
-    assert "missing required fields" in caplog.text
+    table, skipped, _ = _core.find_config(tmp_path.resolve())
+    assert table["functions"] == [{"import-path": "db.ok", "query-param": "q"}]
+    assert len(skipped) == 2
 
 
 def test_unknown_dialect_is_an_error_with_a_suggestion() -> None:
@@ -297,12 +291,12 @@ def test_extend_applies_a_package_config_on_top_of_another(tmp_path: Path) -> No
         '[rules]\nstale-type = "error"\n[types]\nUUID = "str"\n'
     )
 
-    assert load_config(pkg / "src") == (
+    assert nearest_table(pkg / "src") == (
         {
             "dialect": "mysql",
             "schema": ["../../db/*.sql"],
             "queries": ["../../sql"],
-            "functions": [{"import_path": "billing.run", "query_param": "sql"}],
+            "functions": [{"import-path": "billing.run", "query-param": "sql"}],
             "rules": {"select-star": "ignore", "stale-type": "error"},
             "types": {"DATE": "str", "UUID": "str"},
         },
@@ -310,7 +304,7 @@ def test_extend_applies_a_package_config_on_top_of_another(tmp_path: Path) -> No
     )
 
     (pkg / "sqlty.toml").write_text('extend = "../../pyproject.toml"\nschema = "local.sql"\n')
-    assert load_config(pkg)[0]["schema"] == "local.sql"
+    assert nearest_table(pkg)[0]["schema"] == "local.sql"
 
 
 def test_extend_merges_databases_by_name_and_rebases_their_paths(tmp_path: Path) -> None:
@@ -322,7 +316,7 @@ def test_extend_merges_databases_by_name_and_rebases_their_paths(tmp_path: Path)
         'extend = "../sqlty.toml"\n[databases.b]\nqueries = "sql"\n'
     )
 
-    assert load_config(tmp_path / "pkg")[0] == {
+    assert nearest_table(tmp_path / "pkg")[0] == {
         "databases": {
             "a": {"schema": ["../a.sql"], "include": ["x"], "exclude": []},
             "b": {"queries": "sql", "include": [], "exclude": []},
@@ -336,12 +330,12 @@ def test_extend_follows_a_chain_and_rereads_an_edited_base(tmp_path: Path) -> No
     (tmp_path / "mid.toml").write_text('extend = "base.toml"\nimport-style = "import sqlty"\n')
     (tmp_path / "sqlty.toml").write_text('extend = "mid.toml"\n')
 
-    assert load_config(tmp_path)[0] == {"dialect": "sqlite", "import_style": "import sqlty"}
+    assert nearest_table(tmp_path)[0] == {"dialect": "sqlite", "import-style": "import sqlty"}
 
     base.write_text('dialect = "mysql"\n')
     stat = base.stat()
     os.utime(base, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000_000))
-    assert load_config(tmp_path)[0]["dialect"] == "mysql"
+    assert nearest_table(tmp_path)[0]["dialect"] == "mysql"
 
 
 @pytest.mark.parametrize(
@@ -361,5 +355,5 @@ def test_invalid_extend_is_an_error(tmp_path: Path, files: dict[str, str], messa
     for name, content in files.items():
         (tmp_path / name).write_text(content)
 
-    with pytest.raises(ConfigError, match=message):
-        load_config(tmp_path)
+    with pytest.raises(ValueError, match=message):
+        nearest_table(tmp_path)

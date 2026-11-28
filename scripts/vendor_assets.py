@@ -49,13 +49,13 @@ PACKAGES = {
     ),
 }
 
-# Monaco's language services the playground never starts (it uses its python, sql, ini and
-# json modes), and its translations: two thirds of the package.
+# Monaco's language services the playground never starts (it uses its python, sql, ini, json
+# and typescript modes), its translations, and a copy of the TypeScript worker it never loads
+# (it loads vs/assets/ts.worker-*).
 UNUSED = (
     "vs/language/typescript/",
     "vs/language/css/",
     "vs/language/html/",
-    "vs/assets/ts.worker-",
     "vs/assets/css.worker-",
     "vs/assets/html.worker-",
     "vs/nls/",
@@ -78,7 +78,9 @@ def main() -> None:
     for name, (url, integrity, prefix) in PACKAGES.items():
         target = VENDOR / name
         stamp = target / ".integrity"
-        if stamp.exists() and stamp.read_text() == integrity:
+        # A change to what is kept vendors the package again.
+        version = f"{integrity} {UNUSED}"
+        if stamp.exists() and stamp.read_text() == version:
             continue
         data = urllib.request.urlopen(url, timeout=60).read()
         digest = "sha512-" + base64.b64encode(hashlib.sha512(data).digest()).decode()
@@ -97,7 +99,7 @@ def main() -> None:
                 out = target / path
                 out.parent.mkdir(parents=True, exist_ok=True)
                 out.write_bytes(archive.extractfile(member).read())
-        stamp.write_text(integrity)
+        stamp.write_text(version)
         print(f"{name}: {sum(1 for _ in target.rglob('*'))} files from {url}")
     (VENDOR / "fonts.css").write_text(
         "".join(
