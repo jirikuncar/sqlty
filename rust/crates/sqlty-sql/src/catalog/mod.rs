@@ -287,8 +287,8 @@ pub struct CatalogData {
     sources: FxHashMap<Arc<str>, Source>,
 }
 
-/// Where the schema last defined a relation and its columns: bytes of the schema text it
-/// was loaded from.
+/// Where the schema last defined a relation and its columns, and what `COMMENT` says of
+/// them: bytes of the schema text it was loaded from.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct Source {
     /// The statement that last defined or renamed it.
@@ -296,16 +296,44 @@ pub(crate) struct Source {
     /// The statement that last defined each column of a table, in the table's order; a
     /// view's columns are defined by its own statement.
     columns: Box<[Range<u32>]>,
+    /// Behind a pointer: most relations have none.
+    comments: Option<Box<Comments>>,
+}
+
+/// What `COMMENT` says of a relation and its columns.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct Comments {
+    pub(super) relation: Option<Box<str>>,
+    /// `(position, comment)` of the columns that have one, by position.
+    pub(super) columns: Box<[(u32, Box<str>)]>,
 }
 
 impl Source {
-    pub(super) fn new(at: Range<u32>, columns: Box<[Range<u32>]>) -> Self {
-        Self { at, columns }
+    pub(super) fn new(at: Range<u32>, columns: Box<[Range<u32>]>, comments: Comments) -> Self {
+        let described = comments.relation.is_some() || !comments.columns.is_empty();
+        Self {
+            at,
+            columns,
+            comments: described.then(|| Box::new(comments)),
+        }
     }
 
     /// The statement that defines the column at `position`.
     pub(crate) fn column_at(&self, position: usize) -> Range<u32> {
         self.columns.get(position).unwrap_or(&self.at).clone()
+    }
+
+    pub(crate) fn comment(&self) -> Option<&str> {
+        self.comments.as_ref()?.relation.as_deref()
+    }
+
+    pub(crate) fn column_comment(&self, position: usize) -> Option<&str> {
+        let columns = &self.comments.as_ref()?.columns;
+        let position = u32::try_from(position).ok()?;
+        let found = columns
+            .binary_search_by_key(&position, |(at, _)| *at)
+            .ok()?;
+        Some(&columns[found].1)
     }
 }
 

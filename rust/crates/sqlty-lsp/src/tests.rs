@@ -14,7 +14,7 @@ use crate::{run, CompletionContext, Diagnostic, Edit, Settings, Severity, Worksp
 /// Users and orders, and 540 tables `t0`..`t539`.
 static SCHEMA: LazyLock<Schema> = LazyLock::new(|| {
     let mut sql = String::from(
-        "CREATE TABLE users (id INT NOT NULL, name TEXT);\nCREATE TABLE orders (id INT, user_id INT);\n",
+        "CREATE TABLE users (id INT NOT NULL, name TEXT);\nCREATE TABLE orders (id INT, user_id INT);\nCOMMENT ON COLUMN users.name IS 'Shown on the profile';\n",
     );
     for i in 0..540 {
         sql += &format!("CREATE TABLE t{i} (id INT);\n");
@@ -752,6 +752,11 @@ fn completion_after_a_dot_lists_the_columns() {
     assert_eq!(
         resolved["documentation"]["value"],
         "Column of `u`: `INT NOT NULL`"
+    );
+    let resolved = client.request("completionItem/resolve", found["items"][1].clone());
+    assert_eq!(
+        resolved["documentation"]["value"],
+        "Column of `u`: `TEXT NULL`\n\nShown on the profile"
     );
     client.shutdown();
 }

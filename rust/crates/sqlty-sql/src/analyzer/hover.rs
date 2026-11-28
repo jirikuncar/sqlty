@@ -56,8 +56,22 @@ pub fn hover(
         qualifier(query, &tokens[at + 1], dialect, schema)
     } else {
         match select_item(&tokens, at) {
-            Some(item) if word.depth == item.depth => result_column(query, &item, dialect, schema)
-                .or_else(|| named(query, word, dialect, schema)),
+            Some(item) if word.depth == item.depth => {
+                match result_column(query, &item, dialect, schema) {
+                    Some(text) if reads_only(&tokens, at) => {
+                        Some(match candidate(query, word, dialect, schema) {
+                            Some(Candidate {
+                                kind: CandidateKind::Column,
+                                description: Some(description),
+                                ..
+                            }) => format!("{text}\n\n{description}"),
+                            _ => text,
+                        })
+                    }
+                    Some(text) => Some(text),
+                    None => named(query, word, dialect, schema),
+                }
+            }
             Some(item) => named(query, word, dialect, schema)
                 .or_else(|| result_column(query, &item, dialect, schema)),
             None => named(query, word, dialect, schema),
@@ -69,15 +83,38 @@ pub fn hover(
     })
 }
 
+/// Whether the select item of the word at `at` is that column alone: `name` or `t.name`,
+/// then an alias or nothing.
+fn reads_only(tokens: &[Tok], at: usize) -> bool {
+    let is = |at: usize, words: &[&str]| {
+        tokens
+            .get(at)
+            .is_some_and(|tok| words.iter().any(|w| tok.text.eq_ignore_ascii_case(w)))
+    };
+    let start = match at.checked_sub(2) {
+        Some(qualifier) if is(at - 1, &["."]) => qualifier,
+        _ => at,
+    };
+    let starts = start == 0 || is(start - 1, &[",", "SELECT", "DISTINCT", "ALL"]);
+    let ends =
+        at + 1 == tokens.len() || is(at + 1, &[",", "AS", ")", ";"]) || is(at + 1, &AFTER_SELECT);
+    starts && ends
+}
+
 /// The column, table, view or CTE completion offers for exactly `word`.
-fn named(query: &str, word: &Tok, dialect: &str, schema: &SchemaData) -> Option<String> {
+fn candidate(query: &str, word: &Tok, dialect: &str, schema: &SchemaData) -> Option<Candidate> {
     let found = complete(query, word.span.end, dialect, Some(schema), SHOWN);
     let typed = schema.fold_typed(&word.text);
-    let candidate = found
+    found
         .candidates
-        .iter()
-        .find(|c| schema.fold_typed(&c.label) == typed)?;
-    Some(match candidate.kind {
+        .into_iter()
+        .find(|c| schema.fold_typed(&c.label) == typed)
+}
+
+/// What [`candidate`] is, in Markdown.
+fn named(query: &str, word: &Tok, dialect: &str, schema: &SchemaData) -> Option<String> {
+    let candidate = &candidate(query, word, dialect, schema)?;
+    let mut text = match candidate.kind {
         CandidateKind::Column => {
             let source = candidate.detail.as_deref().unwrap_or("?");
             match &candidate.sql_type {
@@ -121,9 +158,18 @@ fn named(query: &str, word: &Tok, dialect: &str, schema: &SchemaData) -> Option<
                         })
                         .collect(),
                 };
-            listed(format!("{kind} `{name}`"), &columns, columns.len() > SHOWN)
+            let title = match &candidate.description {
+                Some(text) => format!("{kind} `{name}`\n\n{text}\n"),
+                None => format!("{kind} `{name}`"),
+            };
+            return Some(listed(title, &columns, columns.len() > SHOWN));
         }
-    })
+    };
+    if let Some(description) = &candidate.description {
+        text.push_str("\n\n");
+        text.push_str(description);
+    }
+    Some(text)
 }
 
 /// The columns of the relation a word before `dot` names: an alias, a table or a CTE.

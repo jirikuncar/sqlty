@@ -471,7 +471,7 @@ pub(super) fn alter_op(
                 AlterColumnOperation::DropDefault => {
                     table.columns[at].has_default = false;
                     table.columns[at].default = None;
-                    table.columns[at].generated = None;
+                    table.columns[at].set_rare(|rare| rare.generated = None);
                 }
                 AlterColumnOperation::GenericOptions { .. } => {}
             }

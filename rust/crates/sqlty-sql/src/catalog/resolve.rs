@@ -19,8 +19,8 @@ use super::index::NameIndex;
 use super::loader::{u32_range, Loader, RawFunction, RawReturn, Rel, TypeDef};
 use super::names::{lookup_key, type_key};
 use super::{
-    Catalog, CatalogData, Function, FunctionReturn, Relation, SchemaColumn, Source, TableRelation,
-    TypeOverrides, UserType, BUILTIN_SCHEMAS,
+    Catalog, CatalogData, Comments, Function, FunctionReturn, Relation, SchemaColumn, Source,
+    TableRelation, TypeOverrides, UserType, BUILTIN_SCHEMAS,
 };
 
 /// A catalog map, by `schema.name`.
@@ -43,11 +43,31 @@ impl Loader {
             Some((shared, defined, self.relations.get(key)?))
         });
         for (shared, defined, rel) in defined {
-            let columns = match rel {
-                Rel::Table(table) => table.columns.iter().map(|c| c.at.clone()).collect(),
-                Rel::View(_) => Box::default(),
+            let described = defined.comments.as_deref();
+            let (columns, mut comments): (Box<[_]>, Vec<_>) = match rel {
+                Rel::Table(table) => (
+                    table.columns.iter().map(|c| c.at.clone()).collect(),
+                    (0u32..)
+                        .zip(&table.columns)
+                        .filter_map(|(at, c)| Some((at, c.comment()?.into())))
+                        .collect(),
+                ),
+                Rel::View(columns) => (
+                    Box::default(),
+                    (described.iter().flat_map(|d| &d.view_columns))
+                        .filter_map(|(name, text)| {
+                            let at = columns.iter().position(|c| c.name == *name)?;
+                            Some((u32::try_from(at).ok()?, text.clone()))
+                        })
+                        .collect(),
+                ),
             };
-            let source = Source::new(u32_range(&defined.at), columns);
+            comments.sort_unstable_by_key(|(at, _)| *at);
+            let comments = Comments {
+                relation: described.and_then(|d| d.relation.clone()),
+                columns: comments.into(),
+            };
+            let source = Source::new(u32_range(&defined.at), columns, comments);
             found.insert(Arc::clone(shared), source);
         }
         found
@@ -463,9 +483,9 @@ impl<'a> Resolver<'a> {
                                 invisible: c.invisible,
                                 default: c.default.clone(),
                                 generated: c
-                                    .generated
-                                    .clone()
-                                    .filter(|expr| !reads_generated(expr, &table.columns)),
+                                    .generated()
+                                    .filter(|expr| !reads_generated(expr, &table.columns))
+                                    .map(|expr| Box::new(expr.clone())),
                                 ..self.column(
                                     &c.name,
                                     &c.ident,
@@ -542,7 +562,7 @@ fn reads_generated(expr: &Expr, columns: &[RawColumn]) -> bool {
     let generated = |ident: &Ident| {
         columns
             .iter()
-            .any(|c| c.generated.is_some() && c.name.eq_ignore_ascii_case(&ident.value))
+            .any(|c| c.generated().is_some() && c.name.eq_ignore_ascii_case(&ident.value))
     };
     visit_expressions(expr, |expr| match expr {
         Expr::Identifier(ident) if generated(ident) => ControlFlow::Break(()),

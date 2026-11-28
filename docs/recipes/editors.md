@@ -146,7 +146,7 @@ init_options = {
 | `breaking.against` | none | A baseline for `sqlty breaking`: a git revision, a `--save` snapshot or schema files |
 | `breaking.direction` | `both` | `both`, `forward` or `backward` |
 | `completion.enable` | `true` | Complete table and column names in query strings |
-| `hover.enable` | `true` | Say what a word of a query string is: a column's type, a table's columns, a result column's inference rule |
+| `hover.enable` | `true` | Say what a word of a query string is: a column's type, a table's columns, a result column's inference rule, and what the schema's `COMMENT` says of it |
 | `highlighting.enable` | `true` | Send the SQL of checked strings as semantic tokens |
 
 ## Vim

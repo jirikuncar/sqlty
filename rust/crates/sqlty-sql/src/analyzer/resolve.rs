@@ -678,27 +678,34 @@ impl<'a> Analyzer<'a> {
         for (source, table) in named {
             let reference = &source.reference;
             if let Some(columns) = self.virtual_columns(table) {
+                let view = (!self.virtuals.contains_key(table))
+                    .then(|| self.schema.source(table))
+                    .flatten();
                 found.extend(
                     columns
                         .iter()
-                        .filter(|col| !col.is_unknown_star())
-                        .map(|col| {
+                        .enumerate()
+                        .filter(|(_, col)| !col.is_unknown_star())
+                        .map(|(at, col)| {
                             Candidate::column(
                                 &col.name,
                                 reference,
                                 col.sql_type.as_deref(),
                                 col.nullability,
                             )
+                            .described(view.and_then(|view| view.column_comment(at)))
                         }),
                 );
             } else if let Some(columns) = self.schema.table(table) {
-                found.extend(columns.iter().map(|col| {
+                let source = self.schema.source(table);
+                found.extend(columns.iter().enumerate().map(|(at, col)| {
                     Candidate::column(
                         &col.ident,
                         reference,
                         Some(&col.sql_type),
                         Nullability::declared(col.not_null),
                     )
+                    .described(source.and_then(|source| source.column_comment(at)))
                 }));
             }
         }

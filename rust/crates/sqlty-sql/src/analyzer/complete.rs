@@ -65,9 +65,16 @@ pub struct Candidate {
     pub sql_type: Option<String>,
     /// Whether a column can be NULL, when known.
     pub nullable: Option<bool>,
+    /// What the schema's `COMMENT` says of a table, view or column.
+    pub description: Option<String>,
 }
 
 impl Candidate {
+    pub(super) fn described(mut self, description: Option<&str>) -> Self {
+        self.description = description.map(str::to_string);
+        self
+    }
+
     pub(super) fn column(
         label: &str,
         source: &str,
@@ -84,6 +91,7 @@ impl Candidate {
                 Nullability::NonNull => Some(false),
                 Nullability::Unknown => None,
             },
+            description: None,
         }
     }
 }
@@ -141,6 +149,9 @@ pub fn complete(
                     detail: relation.name.schema.map(str::to_string),
                     sql_type: None,
                     nullable: None,
+                    description: (schema.source(relation.name.key))
+                        .and_then(|(_, source)| source.comment())
+                        .map(str::to_string),
                 })
                 .collect();
             if join {
@@ -158,6 +169,7 @@ pub fn complete(
                             detail: None,
                             sql_type: None,
                             nullable: None,
+                            description: None,
                         }),
                 );
             }
@@ -385,6 +397,9 @@ fn joins(
                 detail: join.table.schema.map(str::to_string),
                 sql_type: None,
                 nullable: None,
+                description: (schema.source(join.table.key))
+                    .and_then(|(_, source)| source.comment())
+                    .map(str::to_string),
             });
         }
     }
@@ -403,18 +418,26 @@ fn scanned_columns(query: &str, before: &[Tok], schema: &SchemaData) -> Vec<Cand
             Some(alias) => alias.to_lowercase(),
             None => schema.fold_typed(written),
         };
+        let source = schema.source(&name).map(|(_, source)| source);
+        let described = |at: usize| source.and_then(|source| source.column_comment(at));
         match schema.columns_of(&name) {
-            Some(Columns::Table(columns)) => found.extend(columns.iter().map(|col| {
-                Candidate::column(
-                    &col.ident,
-                    &alias,
-                    Some(&col.sql_type),
-                    Nullability::declared(col.not_null),
-                )
-            })),
-            Some(Columns::View(columns)) => found.extend(columns.iter().map(|col| {
-                Candidate::column(&col.name, &alias, col.sql_type.as_deref(), col.nullability)
-            })),
+            Some(Columns::Table(columns)) => {
+                found.extend(columns.iter().enumerate().map(|(at, col)| {
+                    Candidate::column(
+                        &col.ident,
+                        &alias,
+                        Some(&col.sql_type),
+                        Nullability::declared(col.not_null),
+                    )
+                    .described(described(at))
+                }));
+            }
+            Some(Columns::View(columns)) => {
+                found.extend(columns.iter().enumerate().map(|(at, col)| {
+                    Candidate::column(&col.name, &alias, col.sql_type.as_deref(), col.nullability)
+                        .described(described(at))
+                }));
+            }
             None => {}
         }
     }

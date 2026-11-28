@@ -11,10 +11,10 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use sqlparser::ast::{
-    AlterTable, AlterType, ArgMode, ColumnOption, CreateFunction, CreateTable, CreateTableLikeKind,
-    CreateTableOptions, CreateView, DataType, Expr, ForeignKeyConstraint, FunctionCalledOnNull,
-    FunctionReturnType, Ident, ObjectName, ObjectType, Query, SqlOption, Statement,
-    TableConstraint, Visit, Visitor,
+    AlterTable, AlterType, ArgMode, ColumnOption, CommentDef, CreateFunction, CreateTable,
+    CreateTableLikeKind, CreateTableOptions, CreateView, DataType, Expr, ForeignKeyConstraint,
+    FunctionCalledOnNull, FunctionReturnType, Ident, ObjectName, ObjectType, Query, SqlOption,
+    Statement, TableConstraint, Visit, Visitor,
 };
 
 use crate::analyzer::{
@@ -148,6 +148,8 @@ pub(super) enum OpKind {
     /// A statement that changes the named relation, type or function in a way this
     /// module cannot follow.
     Taint(Taint, Vec<String>),
+    /// `COMMENT ON TABLE | VIEW | COLUMN ... IS text | NULL`.
+    Comment(Commented, Option<Box<str>>),
 }
 
 #[derive(Clone, Copy)]
@@ -157,10 +159,27 @@ pub(super) enum Taint {
     Function,
 }
 
-/// Where the schema last defined a relation.
+/// What `COMMENT ON` names, read from its object name.
+pub(super) enum Commented {
+    Relation(Vec<String>),
+    /// The table or view, then the column.
+    Column(Vec<String>, String),
+}
+
+/// Where the schema last defined a relation, and what `COMMENT` says of it.
 #[derive(Clone, Default)]
 pub(super) struct Defined {
     pub(super) at: Range<usize>,
+    /// Behind a pointer: most relations have none.
+    pub(super) comments: Option<Box<Described>>,
+}
+
+/// What `COMMENT` says of a relation, and of a view's columns; a table's are on its
+/// columns.
+#[derive(Clone, Default)]
+pub(super) struct Described {
+    pub(super) relation: Option<Box<str>>,
+    pub(super) view_columns: Vec<(String, Box<str>)>,
 }
 
 /// A statement and the `search_path` it ran under.
@@ -468,6 +487,7 @@ impl Loader {
                 false
             }
             OpKind::Taint(what, name) => !self.taint(*what, name, &path),
+            OpKind::Comment(target, text) => !self.comment(target, text.as_deref(), &path),
             OpKind::UniqueIndex(name, unique) => {
                 let Some(key) = self.table_key(name, &path) else {
                     return false;
@@ -540,7 +560,7 @@ impl Loader {
 
     fn give_up_as(&mut self, kind: &'static str, create: &CreateTable, path: &[String]) {
         let key = self.new_key(&create.name, path);
-        self.define(&key);
+        self.define(&key, table_comment(create), false);
         self.skipped.push((kind, create.name.to_string()));
         self.set_relation(
             key,
@@ -753,16 +773,65 @@ impl Loader {
             table.foreign_keys = declared;
         }
         if create.query.is_none() && !table.columns.is_empty() {
-            self.define(&key);
+            self.define(&key, table_comment(create), false);
             self.set_relation(key, Some(Rel::Table(table)));
         }
         true
     }
 
-    /// Record that the statement being applied defines the relation `key`.
-    pub(super) fn define(&mut self, key: &str) {
+    /// Record that the statement being applied defines the relation `key`, with `comment`.
+    /// With `keep`, as a view that replaces another, it keeps the comments of the one it
+    /// replaces.
+    pub(super) fn define(&mut self, key: &str, comment: Option<Box<str>>, keep: bool) {
         let at = self.at.clone();
-        self.defined.entry(key.to_string()).or_default().at = at;
+        let defined = self.defined.entry(key.to_string()).or_default();
+        defined.at = at;
+        if !keep {
+            defined.comments = None;
+        }
+        if comment.is_some() {
+            defined.comments.get_or_insert_default().relation = comment;
+        }
+    }
+
+    /// Set what `COMMENT ON` says of `target`; `false` while it is not defined.
+    pub(super) fn comment(
+        &mut self,
+        target: &Commented,
+        text: Option<&str>,
+        path: &[String],
+    ) -> bool {
+        let (name, column) = match target {
+            Commented::Relation(name) => (name, None),
+            Commented::Column(name, column) => (name, Some(column)),
+        };
+        let Some(key) = self.lookup(&self.relations, name, path) else {
+            return false;
+        };
+        let text: Option<Box<str>> = text.map(Into::into);
+        match (column, self.relations.get(&key)) {
+            (None, _) => match self.defined.get_mut(&key) {
+                Some(defined) => defined.comments.get_or_insert_default().relation = text,
+                None => return true,
+            },
+            (Some(column), Some(Rel::Table(table))) => {
+                if !table.columns.iter().any(|c| c.name == *column) {
+                    return false;
+                }
+                self.change_table(key, |table| {
+                    (table.columns.iter_mut())
+                        .filter(|c| c.name == *column)
+                        .for_each(|found| found.set_rare(|rare| rare.comment = text.clone()));
+                });
+            }
+            // A view's; a system catalog's are left out.
+            (Some(column), _) => self.defined.get_mut(&key).into_iter().for_each(|defined| {
+                let columns = &mut defined.comments.get_or_insert_default().view_columns;
+                columns.retain(|(name, _)| name != column);
+                columns.extend(text.clone().map(|text| (column.clone(), text)));
+            }),
+        }
+        true
     }
 
     /// A foreign key of the table `key`, which `table` is, over `columns`. One to a table
@@ -906,7 +975,7 @@ impl Loader {
         if !force && undefined_calls && columns.iter().any(|c| c.python_type.is_none()) {
             return false;
         }
-        self.define(&key);
+        self.define(&key, None, true);
         self.set_relation(key, Some(Rel::View(columns)));
         true
     }
@@ -1348,4 +1417,23 @@ fn forget_values(column: &mut Column, dialect: SqlDialect) {
 pub(super) fn u32_range(at: &Range<usize>) -> Range<u32> {
     let cut = |n: usize| u32::try_from(n).unwrap_or(u32::MAX);
     cut(at.start)..cut(at.end)
+}
+
+/// What `CREATE TABLE ... COMMENT '...'` (MySQL) says of the table.
+fn table_comment(create: &CreateTable) -> Option<Box<str>> {
+    let (CreateTableOptions::Plain(options) | CreateTableOptions::With(options)) =
+        &create.table_options
+    else {
+        return None;
+    };
+    options
+        .iter()
+        .find_map(|option| match option {
+            SqlOption::Comment(CommentDef::WithEq(text) | CommentDef::WithoutEq(text)) => {
+                Some(text)
+            }
+            _ => None,
+        })
+        .filter(|text| !text.is_empty())
+        .map(|text| text.as_str().into())
 }
