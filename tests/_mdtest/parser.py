@@ -177,7 +177,9 @@ class Section:
 
 def parse(path: Path, text: str | None = None) -> list[Section]:
     """Parse a Markdown file into sections that carry assertions."""
-    lines = (path.read_text() if text is None else text).splitlines()
+    # Lines end at `\n` only, as the updater and the Rust harness count them: `splitlines`
+    # also breaks at form feeds and other separators a code block may hold.
+    lines = (path.read_text() if text is None else text).removesuffix("\n").split("\n")
     root = Section(path=path, titles=[], level=0, line=0)
     stack = [root]
     sections: list[Section] = []

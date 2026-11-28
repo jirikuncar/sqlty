@@ -35,10 +35,13 @@ class Updater:
         return line + sum(d for _, e, d in self._edits if e <= line)
 
     def _splice(self, start: int, end: int, new: list[str]) -> None:
-        lines = self.path.read_text().splitlines(keepends=True)
+        # Untouched lines keep their bytes, and written ones the file's line ending.
+        text = self.path.read_text(newline="")
+        eol = "\r\n" if "\r\n" in text else "\n"
+        lines = text.split("\n")
         at = self._at(start)
-        lines[at : at + end - start] = [f"{line}\n" for line in new]
-        self.path.write_text("".join(lines))
+        lines[at : at + end - start] = [line + eol.removesuffix("\n") for line in new]
+        self.path.write_text("\n".join(lines), newline="")
         self._edits.append((start, end, len(new) - (end - start)))
 
 

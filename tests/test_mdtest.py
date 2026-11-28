@@ -94,6 +94,22 @@ def test_update_once_per_section(tmp_path: Path) -> None:
     assert path.read_text() == EXPECTED
 
 
+def test_update_keeps_bytes_and_line_endings(tmp_path: Path) -> None:
+    source = (
+        "# Bytes\r\n\r\n## CRLF\r\n\r\nA form feed \f and a vertical tab \v.\r\n\r\n```python\r\n"
+        'q = "--sql\\nSELECT name::TEXT FROM users"\r\n'
+        "# decoded: stale\r\n```\r\n"
+    )
+    path = tmp_path / "sample.md"
+    path.write_bytes(source.encode())
+    _run(path, update=True)
+    written = path.read_bytes().decode()
+    assert written == source.replace(
+        "# decoded: stale\r\n",
+        '# decoded: q = SQL[tuple[str]]("--sql\\nSELECT name::TEXT FROM users")\r\n',
+    )
+
+
 def test_failure_report(tmp_path: Path) -> None:
     path = _write(tmp_path, SOURCE)
     reports = []
