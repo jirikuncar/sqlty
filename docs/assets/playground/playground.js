@@ -4,7 +4,7 @@ import { decode, encode, MAX_LINK } from "./share.js";
 import { fold, unfold } from "./steps.js";
 
 const MONACO = new URL("../vendor/monaco/vs", import.meta.url).href;
-const LEGEND = ["keyword", "string", "number", "comment", "operator", "parameter"];
+const LEGEND = ["keyword", "string", "number", "comment", "operator", "parameter", "function"];
 
 const SCHEMA = `CREATE TABLE users (
     id INTEGER PRIMARY KEY,
@@ -84,6 +84,7 @@ for (const [name, base] of [["sqlty-light", "vs"], ["sqlty-dark", "vs-dark"]]) {
       { token: "comment", foreground: base === "vs" ? "008000" : "6a9955" },
       { token: "operator", foreground: base === "vs" ? "000000" : "d4d4d4" },
       { token: "parameter", foreground: base === "vs" ? "001080" : "9cdcfe" },
+      { token: "function", foreground: base === "vs" ? "795e26" : "dcdcaa" },
       { token: "string", foreground: base === "vs" ? "a31515" : "ce9178" },
     ],
     colors: {},

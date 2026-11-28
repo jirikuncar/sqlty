@@ -83,7 +83,7 @@ export type Query = {
 export type Analysis = {
   diagnostics: Diagnostic[];
   queries: Query[];
-  /** SQL tokens to color: start, end and `keyword`, `string`, `number`, `comment`, `operator` or `parameter`. */
+  /** SQL tokens to color: start, end and `keyword`, `function`, `string`, `number`, `comment`, `operator` or `parameter`. */
   highlights: [number, number, string][];
   /** What `sqlty rewrite`, `sqlty strip` and `sqlty check --fix` make of the source. */
   rewritten: string;

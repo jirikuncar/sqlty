@@ -99,10 +99,11 @@ suite("sqlty", () => {
       tokens.filter((token) => token.t.split(" ").includes(scope)).map((token) => token.c);
     const keywords = ["SELECT", "FROM", "WHERE", "SELECT", "AS", "FROM", "SELECT", "FROM", "WHERE"];
     const interpolated = ["SELECT", "FROM", "SELECT", "FROM", "WHERE", "LIMIT"];
-    interpolated.push("SELECT", "FROM", "SELECT", "FROM");
+    interpolated.push("SELECT", "FROM", "SELECT", "FROM", "SELECT", "FROM");
     assert.deepEqual(sql("keyword.other.sql"), [...keywords, "SELECT", "FROM", ...interpolated]);
+    assert.deepEqual(sql("support.function.sql"), ["count", "now"]);
     const comments = ["--sql", "-- note", "-- sql", "--sql", "--sql"];
-    comments.push("--sql", "--sql", "--sql", "--sql");
+    comments.push("--sql", "--sql", "--sql", "--sql", "--sql");
     assert.deepEqual(sql("comment.line.double-dash.sql"), comments);
     assert.deepEqual(sql("comment.block.sql"), ["/* the", "key */"]);
     assert.deepEqual(sql("string.quoted.single.sql").join(""), "'it''s''{{literal}}'");

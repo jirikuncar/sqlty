@@ -26,6 +26,7 @@ pub(crate) fn legend() -> SemanticTokensLegend {
             SemanticTokenType::COMMENT,
             SemanticTokenType::OPERATOR,
             SemanticTokenType::PARAMETER,
+            SemanticTokenType::FUNCTION,
         ],
         token_modifiers: Vec::new(),
     }
@@ -96,5 +97,6 @@ fn token_type(kind: Highlight) -> u32 {
         Highlight::Comment => 3,
         Highlight::Operator => 4,
         Highlight::Parameter => 5,
+        Highlight::Function => 6,
     }
 }

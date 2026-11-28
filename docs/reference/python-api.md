@@ -283,4 +283,4 @@ b'na'
 | `breaking_source(source, settings, *, against_sql)` | The diagnostics `source` gets against `against_sql` but not against `settings.schema_sql`, as `sqlty breaking` reports them |
 | `schema_skipped_objects(schema_sql, *, dialect="postgres")` | `(kind, name)` of schema tables, views and key or type statements that do not parse or pass the size limits |
 | `complete_source(source, line, column, settings=Settings(), *, limit=200)` | `Completions(start, end, incomplete, items)` of `Completion(label, kind, detail, sql_type, nullable)` at the cursor, or `None` outside a checked query |
-| `highlight_source(source, settings=Settings())` | `Highlight(start, end, kind)` per SQL token of the checked queries, `kind` one of `keyword`, `string`, `number`, `comment`, `operator`, `parameter` |
+| `highlight_source(source, settings=Settings())` | `Highlight(start, end, kind)` per SQL token of the checked queries, `kind` one of `keyword`, `function`, `string`, `number`, `comment`, `operator`, `parameter` |

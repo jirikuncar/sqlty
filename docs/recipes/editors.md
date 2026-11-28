@@ -45,8 +45,8 @@ vim.api.nvim_create_autocmd("FileType", {
 
 ### Highlighting
 
-The server sends the SQL of each checked string as semantic tokens: keywords, strings,
-numbers, comments, operators and placeholders. Neovim colors them with its default
+The server sends the SQL of each checked string as semantic tokens: keywords, function
+names, strings, numbers, comments, operators and placeholders. Neovim colors them with its default
 `@lsp.type.keyword`, `@lsp.type.string`, ... highlight groups, so a theme needs no change.
 
 ```python

@@ -22,3 +22,4 @@ leading = f"""
 --sql
 SELECT {limit} FROM users
 """
+functions = "--sql\nSELECT count(*), pg_catalog.now(), count FROM users"

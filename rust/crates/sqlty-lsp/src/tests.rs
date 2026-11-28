@@ -678,7 +678,8 @@ fn completion_hover_and_highlighting_are_advertised_unless_off() {
                     "number",
                     "comment",
                     "operator",
-                    "parameter"
+                    "parameter",
+                    "function"
                 ])
             );
         } else {
@@ -967,6 +968,18 @@ fn semantic_tokens_color_the_sql_of_checked_strings() {
     assert_eq!(client.tokens("file:///nowhere/q.py"), Value::Null);
     client.notification("textDocument/publishDiagnostics");
     assert!(client.asked.is_empty(), "the check found nothing new");
+    client.shutdown();
+}
+
+#[test]
+fn a_function_name_is_a_function_token() {
+    let mut client = Client::start(&json!({}));
+    client.open("file:///work/q.py", "q = \"--sql\\nSELECT now()\"\n");
+    let function = 6;
+    assert_eq!(
+        decoded(&client.tokens("file:///work/q.py"))[2],
+        (0, 19, 3, function)
+    );
     client.shutdown();
 }
 

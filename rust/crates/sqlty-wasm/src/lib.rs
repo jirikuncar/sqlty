@@ -546,6 +546,7 @@ fn byte_offset(source: &str, units: usize) -> usize {
 fn highlight(kind: Highlight) -> &'static str {
     match kind {
         Highlight::Keyword => "keyword",
+        Highlight::Function => "function",
         Highlight::String => "string",
         Highlight::Number => "number",
         Highlight::Comment => "comment",

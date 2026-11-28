@@ -1,10 +1,13 @@
-//! What to color in a query: keywords, literals, comments, operators and placeholders.
+//! What to color in a query: keywords, function names, literals, comments, operators and
+//! placeholders.
 //!
-//! Names stay uncolored. sqlparser knows 900 keywords, `name`, `status` and `type` among
+//! Other names stay uncolored. sqlparser knows 900 keywords, `name`, `status` and `type` among
 //! them, so a word is a keyword only when it is in [`KEYWORDS`]: the words PostgreSQL
 //! reserves (<https://www.postgresql.org/docs/17/sql-keywords-appendix.html>) and the
 //! verbs and clauses of a statement, which a query rarely uses as a name. A quoted word,
-//! or one after a `.`, is a name.
+//! or one after a `.`, is a name. Any other word directly followed by `(` is a function,
+//! unless it names a table, a CTE, an alias or a type: after `INTO`, `TABLE`, `REFERENCES`,
+//! `AS`, `WITH`, `RECURSIVE` or `::`.
 //!
 //! ```
 //! use sqlty_sql::highlight::{highlight, Highlight};
@@ -39,6 +42,8 @@ use crate::placeholders::percent_placeholders;
 pub enum Highlight {
     /// `SELECT`, `FROM`, `NULL`, ...
     Keyword,
+    /// `count` in `count(*)`, `now` in `pg_catalog.now()`.
+    Function,
     /// A quoted string.
     String,
     /// A number.
@@ -71,18 +76,31 @@ pub fn highlight(sql: &str, dialect: &str) -> Vec<(Range<usize>, Highlight)> {
         .map(|at| (at.clone(), Highlight::Parameter))
         .collect();
     let mut after_period = false;
-    for TokenWithSpan { token, span } in tokens {
-        let kind = match &token {
+    let mut names_relation = false;
+    for (at, TokenWithSpan { token, span }) in tokens.iter().enumerate() {
+        let called = || {
+            !names_relation
+                && tokens
+                    .get(at + 1)
+                    .is_some_and(|next| next.token == Token::LParen)
+        };
+        let kind = match token {
             Token::Whitespace(
                 Whitespace::SingleLineComment { .. } | Whitespace::MultiLineComment(_),
             ) => Some(Highlight::Comment),
             Token::Whitespace(_) => continue,
-            Token::Word(word) => (word.quote_style.is_none()
-                && !after_period
-                && KEYWORDS
-                    .binary_search(&word.value.to_ascii_uppercase().as_str())
-                    .is_ok())
-            .then_some(Highlight::Keyword),
+            Token::Word(word) => {
+                if word.quote_style.is_none()
+                    && !after_period
+                    && KEYWORDS
+                        .binary_search(&word.value.to_ascii_uppercase().as_str())
+                        .is_ok()
+                {
+                    Some(Highlight::Keyword)
+                } else {
+                    called().then_some(Highlight::Function)
+                }
+            }
             Token::Number(..) => Some(Highlight::Number),
             Token::Placeholder(_) | Token::Question => Some(Highlight::Parameter),
             Token::Comma
@@ -99,7 +117,23 @@ pub fn highlight(sql: &str, dialect: &str) -> Vec<(Range<usize>, Highlight)> {
             other if is_string(other) => Some(Highlight::String),
             _ => Some(Highlight::Operator),
         };
-        after_period = token == Token::Period;
+        after_period = *token == Token::Period;
+        let qualifies = || {
+            tokens
+                .get(at + 1)
+                .is_some_and(|next| next.token == Token::Period)
+        };
+        names_relation = match token {
+            Token::Word(_) if names_relation && qualifies() => true,
+            Token::Word(word) if word.quote_style.is_none() => {
+                ["INTO", "TABLE", "REFERENCES", "AS", "WITH", "RECURSIVE"]
+                    .iter()
+                    .any(|before| word.value.eq_ignore_ascii_case(before))
+            }
+            Token::DoubleColon => true,
+            Token::Period => names_relation,
+            _ => false,
+        };
         let (Some(kind), Some(start), Some(end)) =
             (kind, offsets.offset(span.start), offsets.offset(span.end))
         else {
@@ -391,6 +425,42 @@ mod tests {
                 ("?", Highlight::Parameter),
                 ("-- é", Highlight::Comment),
             ]
+        );
+    }
+
+    #[test]
+    fn a_word_called_is_a_function() {
+        fn functions<'a>(sql: &'a str, dialect: &str) -> Vec<&'a str> {
+            colored(sql, dialect)
+                .into_iter()
+                .filter(|(_, kind)| *kind == Highlight::Function)
+                .map(|(text, _)| text)
+                .collect()
+        }
+        for dialect in ["postgres", "mysql", "sqlite", "duckdb"] {
+            assert_eq!(
+                functions(
+                    "SELECT count(*), coalesce(name, ''), count FROM t WHERE created < now()",
+                    dialect
+                ),
+                ["count", "coalesce", "now"],
+                "{dialect}"
+            );
+        }
+        assert_eq!(
+            functions(
+                "SELECT pg_catalog.now(), \"my fn\"(1) FROM t WHERE id IN (1) AND EXISTS (SELECT 1)",
+                "postgres"
+            ),
+            ["now", "\"my fn\""]
+        );
+        assert_eq!(
+            functions(
+                "WITH c(a) AS (SELECT 1) INSERT INTO public.t(a) SELECT CAST(a AS numeric(10, 2)), \
+                 a::varchar(3), count (a) FROM c AS x(a) JOIN u USING (a) VALUES (1)",
+                "postgres"
+            ),
+            Vec::<&str>::new()
         );
     }
 
