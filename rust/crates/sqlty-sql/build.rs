@@ -45,7 +45,7 @@ fn main() {
 }
 
 /// The dialects with a `functions/<dialect>.txt`.
-const CATALOGS: &[&str] = &["postgres"];
+const CATALOGS: &[&str] = &["postgres", "duckdb"];
 
 /// `functions/<dialect>.txt`, compiled to a `Catalog` static per dialect.
 fn function_catalog(crate_dir: &Path) -> String {

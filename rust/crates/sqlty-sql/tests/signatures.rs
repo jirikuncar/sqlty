@@ -25,6 +25,15 @@ fn dialects() {
     let generic = signatures(Dialect::Other("generic"), "left");
     assert_eq!(generic, signatures(Dialect::Postgres, "left"));
     assert!(signatures(Dialect::ClickHouse, "left").is_empty());
+    let duckdb = &signatures(Dialect::Other("duckdb"), "left")[0];
+    assert_eq!(
+        duckdb.label,
+        "left(string: VARCHAR, count: BIGINT) -> VARCHAR"
+    );
+    assert_eq!(
+        duckdb.url(),
+        "https://duckdb.org/docs/2.0/sql/functions/text.html"
+    );
     assert!(signatures(Dialect::Postgres, "no_such_function").is_empty());
 }
 
@@ -89,6 +98,9 @@ fn signature_help_cases() {
         ("SELECT \"upper\"(|", Some("upper(**text**) -> text")),
         ("SELECT make_interval(days => |", Some("make_interval([years: int[, months: int[, weeks: int[, **days: int**[, hours: int[, mins: int[, secs: double precision]]]]]]]) -> interval")),
         ("SELECT make_interval(days => 1, |", Some("make_interval([years: int[, months: int[, weeks: int[, days: int[, hours: int[, mins: int[, secs: double precision]]]]]]]) -> interval")),
+        ("SELECT make_interval(days := |", Some("make_interval([years: int[, months: int[, weeks: int[, **days: int**[, hours: int[, mins: int[, secs: double precision]]]]]]]) -> interval")),
+        ("SELECT left(ARRAY['a', 'b'], |", Some("left(string: text, **n: integer**) -> text")),
+        ("SELECT upper(ARRAY[|", None),
         ("SELECT make_interval(nope => |", Some("make_interval([years: int[, months: int[, weeks: int[, days: int[, hours: int[, mins: int[, secs: double precision]]]]]]]) -> interval")),
         ("SELECT \"UPPER\"(|", None),
         ("SELECT (a + |", None),

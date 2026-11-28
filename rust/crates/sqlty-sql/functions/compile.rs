@@ -3,7 +3,8 @@
 //!
 //! A line is `name(parameters) -> result<TAB>page`. A parameter is `name: type` or
 //! `type`, `VARIADIC` before it when it repeats; `[, ...]` holds optional parameters, and
-//! `...` repeats the parameter before it. `# docs: URL` sets the base of the pages.
+//! `...` repeats the parameter before it. A type may hold `(...)` and `[...]` (`MAP(K, V)`,
+//! `FLOAT[3]`): a `[` right after a type is part of it unless a `,` follows. `# docs: URL` sets the base of the pages.
 
 use std::fmt::Write as _;
 
@@ -84,13 +85,27 @@ fn signature(line: &str) -> Result<Signature, String> {
     let mut start = open + 1;
     let bytes = label.as_bytes();
     let end = open + 1 + params.len();
+    let mut nested = 0usize;
     let mut i = start;
     while i <= end {
         let c = if i == end { b',' } else { bytes[i] };
-        let array = c == b'[' && bytes.get(i + 1) == Some(&b']');
-        if array {
-            i += 2;
+        let in_type = nested > 0
+            || c == b'('
+            || c == b'['
+                && (bytes[i - 1].is_ascii_alphanumeric()
+                    || matches!(bytes[i - 1], b']' | b')' | b'"'))
+                && bytes.get(i + 1) != Some(&b',');
+        if in_type {
+            match c {
+                b'(' | b'[' => nested += 1,
+                b')' | b']' => nested -= 1,
+                _ => {}
+            }
+            i += 1;
             continue;
+        }
+        if c == b')' {
+            return Err("unbalanced `)`".to_string());
         }
         if matches!(c, b'[' | b']' | b',') {
             let item = &label[start..i];
@@ -122,8 +137,8 @@ fn signature(line: &str) -> Result<Signature, String> {
         }
         i += 1;
     }
-    if depth != 0 {
-        return Err("unbalanced `[`".to_string());
+    if depth != 0 || nested != 0 {
+        return Err("unbalanced `[` or `(`".to_string());
     }
     if variadic && parameters.is_empty() {
         return Err("`...` repeats no parameter".to_string());

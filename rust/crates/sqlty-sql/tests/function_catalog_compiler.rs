@@ -37,6 +37,25 @@ fn parameters_options_and_repeats() {
 }
 
 #[test]
+fn types_hold_parentheses_and_brackets() {
+    let code = compile(
+        "t.txt",
+        "T",
+        "# docs: https://x/\nc(m: MAP(K, V), a: FLOAT[3][, b: STRUCT(x INT[])]) -> K\tc.html\n",
+    )
+    .expect("the catalog compiles");
+    assert!(
+        code.contains(
+            "required: 2, variadic: false, parameters: &[\
+         Parameter { name: Some(\"m\"), label: (2, 14), optional: false }, \
+         Parameter { name: Some(\"a\"), label: (16, 27), optional: false }, \
+         Parameter { name: Some(\"b\"), label: (30, 48), optional: true }, ]"
+        ),
+        "{code}"
+    );
+}
+
+#[test]
 fn errors_name_the_line() {
     assert_eq!(
         compile("t.txt", "T", "a() -> int\tp\n").expect_err("no docs"),
@@ -58,7 +77,8 @@ fn errors_name_the_line() {
     );
     assert_eq!(error("a(x)\tp"), "t.txt:2: no `) -> ` before the result");
     assert_eq!(error("a(x]) -> int\tp"), "t.txt:2: unbalanced `]`");
-    assert_eq!(error("a([x) -> int\tp"), "t.txt:2: unbalanced `[`");
+    assert_eq!(error("a([x) -> int\tp"), "t.txt:2: unbalanced `[` or `(`");
+    assert_eq!(error("a(x), b) -> int\tp"), "t.txt:2: unbalanced `)`");
     assert_eq!(
         error("a(...) -> int\tp"),
         "t.txt:2: `...` repeats no parameter"
