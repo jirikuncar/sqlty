@@ -580,9 +580,7 @@ def _typed(source: str, original: str, settings: Settings) -> str:
 
 def _helper_starts(parsed: ParsedSource, settings: Settings) -> list[int]:
     """The byte offsets of the string literals helper calls pass as their query."""
-    return [
-        start for _, _, _, start in _helper_sites(parsed, settings.helpers) if start is not None
-    ]
+    return [start for _, _, _, start in helper_sites(parsed, settings.helpers) if start is not None]
 
 
 type _Site = tuple[tuple[int, int] | None, list[str], str | None, int | None]
@@ -591,7 +589,8 @@ it can run that the lexer does not read by their marker, the rule of a call that
 checked, and the byte offset of the string literal it passes as its query."""
 
 
-def _helper_sites(parsed: ParsedSource, helpers: HelperIndex | None) -> list[_Site]:
+def helper_sites(parsed: ParsedSource, helpers: HelperIndex | None) -> list[_Site]:
+    """The helper calls of a module as the engine reads them (``_core.module_calls``)."""
     return _module_calls(
         parsed.text,
         version=sys.version_info[:2],
@@ -620,6 +619,7 @@ __all__ = [
     "expand_star",
     "fix_source",
     "format_source",
+    "helper_sites",
     "highlight_source",
     "infer_type",
     "load_schema",

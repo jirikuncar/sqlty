@@ -34,6 +34,13 @@ pub struct NameDiagnostic {
     pub shadowed_by: Option<Rule>,
 }
 
+impl NameDiagnostic {
+    /// A diagnostic of `rule` saying `message`, about no name.
+    pub(crate) fn new(rule: Rule, message: impl Into<String>) -> Self {
+        found(rule, message.into())
+    }
+}
+
 #[derive(Default)]
 struct Inner {
     /// Whether anything is collected; the analyzer skips the work of explaining otherwise.

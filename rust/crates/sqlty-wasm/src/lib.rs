@@ -22,6 +22,7 @@
 #![cfg_attr(coverage_nightly, feature(coverage_attribute), allow(unused_features))]
 
 use std::collections::{HashMap, HashSet};
+use std::ops::Range;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -38,11 +39,12 @@ use sqlty_python::params::add_param_types;
 use sqlty_python::project::{self, FindError, Read};
 use sqlty_python::rewriter::{rewrite_source_with, strip_source};
 use sqlty_python::rules::RuleConfig;
+use sqlty_python::rules::{Rule, Severity};
 use sqlty_python::types::symbols::Source;
 use sqlty_python::{check, rows, suppress};
 use sqlty_sql::analyzer::{
     explain_select, load_schema_with_overrides, load_schema_with_skipped, parse, route, row_type,
-    CandidateKind, Nullability, RuleRef, Schema, TypeOverrides,
+    CandidateKind, Nullability, RuleRef, Schema, SchemaData, TypeOverrides,
 };
 
 #[derive(Deserialize)]
@@ -62,6 +64,7 @@ enum SourceOp {
     Hover,
     Format,
     Breaking,
+    Query,
 }
 
 #[derive(Deserialize)]
@@ -69,8 +72,15 @@ struct Request {
     op: Op,
     #[serde(default)]
     source: String,
+    /// The bare SQL of `query`.
+    #[serde(default)]
+    sql: String,
     #[serde(default)]
     schema: String,
+    /// A name for `schema` that a later request may send in place of its text: one without
+    /// the text gets `{"need": "schema"}` once the engine no longer holds it.
+    #[serde(default)]
+    schema_key: Option<String>,
     /// The schema before a change to `schema`, for `breaking`.
     #[serde(default)]
     before: String,
@@ -128,6 +138,8 @@ fn postgres() -> String {
 /// - `hover`: what the word at `offset` is, in Markdown; `null` when nothing.
 /// - `format`: `formatted`, what `sqlty format` makes of the source. Not part of `analyze`,
 ///   which runs on every keystroke.
+/// - `query`: `columns`, `params` and `diagnostics` of the bare SQL `sql`, for a host in any
+///   language; offsets into `sql`. With `schema_key`, `schema` is sent once, not per query.
 /// - `breaking`: `diagnostics` the source gets against `schema` but not against `before`,
 ///   as `sqlty breaking` reports what a schema change breaks.
 /// - `config`: the sqlty table of `source`, the text of the file at `path`, validated as
@@ -211,15 +223,20 @@ pub fn run(request: &str) -> String {
         Ok(overrides) => overrides,
         Err(found) => return error(format!("[tool.sqlty.types]: {found}")),
     };
-    let load = |text: &str| {
-        (!text.trim().is_empty()).then(|| match overrides.is_empty() {
-            true => load_schema_with_skipped(text, dialect).0,
-            false => load_schema_with_overrides(text, dialect, overrides.clone()).0,
+    let load = |text: &str, key: Option<&str>| {
+        cached(key.unwrap_or(text), dialect, &settings.types, || {
+            (!text.trim().is_empty()).then(|| match overrides.is_empty() {
+                true => load_schema_with_skipped(text, dialect).0,
+                false => load_schema_with_overrides(text, dialect, overrides.clone()).0,
+            })
         })
     };
-    let schema = load(&request.schema);
+    let schema = load(&request.schema, request.schema_key.as_deref());
+    if request.schema_key.is_some() && schema.is_none() {
+        return json!({ "need": "schema" }).to_string();
+    }
     let before = matches!(op, SourceOp::Breaking)
-        .then(|| load(&request.before))
+        .then(|| load(&request.before, None))
         .flatten();
     let mut options = match Options::new(
         dialect,
@@ -304,6 +321,7 @@ pub fn run(request: &str) -> String {
         SourceOp::Format => {
             json!({ "formatted": sqlty_format::format_source(source, dialect, &options.style) })
         }
+        SourceOp::Query => query(&request.sql, dialect, options.schema, &rules),
         SourceOp::Breaking => {
             let against = check(&options, &schema);
             options.schema = before.as_deref();
@@ -528,6 +546,120 @@ fn described(line: usize, sql: &str, dialect: &str, options: &Options<'_>) -> Va
             },
         })).collect::<Vec<_>>(),
     })
+}
+
+type SchemaKey = (String, String, Vec<(String, String)>);
+
+thread_local! {
+    /// The schemas loaded last, so a host asking about query after query with one schema,
+    /// as a linter does, loads it once.
+    static SCHEMAS: std::cell::RefCell<Vec<(SchemaKey, Schema)>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// The schema `key` (its text, or the host's name for it) names in `dialect` with the `types`
+/// overrides: one of the last two loaded, else what `load` makes of it.
+fn cached(
+    key: &str,
+    dialect: &str,
+    types: &[(String, String)],
+    load: impl FnOnce() -> Option<Schema>,
+) -> Option<Schema> {
+    SCHEMAS.with_borrow_mut(|schemas| {
+        let hit = schemas
+            .iter()
+            .position(|((k, d, o), _)| k == key && d == dialect && o == types);
+        let entry = match hit {
+            Some(at) => schemas.remove(at),
+            None => (
+                (key.to_string(), dialect.to_string(), types.to_vec()),
+                load()?,
+            ),
+        };
+        let schema = entry.1.clone();
+        schemas.insert(0, entry);
+        schemas.truncate(2);
+        Some(schema)
+    })
+}
+
+/// The answer of `query`: what one parse of `sql` tells, as `check` reports it.
+fn query(sql: &str, dialect: &str, schema: Option<&SchemaData>, rules: &RuleConfig) -> Value {
+    let units = sqlty_python::utf16::Utf16::new(sql);
+    let (routed, schema) = route(sql, dialect, schema);
+    let parsed = parse(sql, routed);
+    let nullable = |nullability: Nullability| match nullability {
+        Nullability::Nullable => Some(true),
+        Nullability::NonNull => Some(false),
+        Nullability::Unknown => None,
+    };
+    let diagnostic = |rule: Rule, message: String, span: Range<usize>, fix: Option<String>| {
+        let severity = rules.severity(rule);
+        (severity != Severity::Ignore).then(|| {
+            let (start, end) = (units.at(span.start), units.at(span.end));
+            json!({
+                "rule": rule.name(),
+                "message": message,
+                "severity": severity.as_str(),
+                "start": start,
+                "end": end,
+                "fix": fix.map(|replacement| json!({"start": start, "end": end, "replacement": replacement})).into_iter().collect::<Vec<_>>(),
+            })
+        })
+    };
+    if let Some(error) = parsed.error() {
+        let found = diagnostic(
+            Rule::UnparsedQuery,
+            format!("query does not parse: {error}"),
+            0..sql.len(),
+            None,
+        );
+        return json!({"returns_rows": true, "columns": null, "params": [], "diagnostics": found.into_iter().collect::<Vec<_>>()});
+    }
+    let (columns, found) = parsed.analyze_with_diagnostics(schema);
+    let params = parsed.params(sql, schema).unwrap_or_default();
+    let diagnostics: Vec<Value> = found
+        .into_iter()
+        .filter(|found| !found.shadowed_by.is_some_and(|rule| rules.is_enabled(rule)))
+        .filter_map(|found| {
+            let span = found.span.unwrap_or(0..sql.len());
+            diagnostic(found.rule, found.message, span, found.replacement)
+        })
+        .collect();
+    json!({
+        "returns_rows": parsed.returns_rows(),
+        "columns": columns.map(|columns| columns.iter().map(|column| json!({
+            "name": column.name,
+            "sql_type": column.sql_type.as_deref().or_else(|| constant_sql_type(column.python_type.as_deref()?)),
+            "nullable": nullable(column.nullability),
+        })).collect::<Vec<_>>()),
+        "params": params.iter().map(|param| json!({
+            "index": param.index,
+            "name": param.name,
+            "sql_type": param.sql_type,
+            "nullable": nullable(param.nullability),
+        })).collect::<Vec<_>>(),
+        "diagnostics": diagnostics,
+    })
+}
+
+/// The SQL type of a constant, which the analyzer types in Python only: `1`, `'a'`, `1.5`.
+fn constant_sql_type(python_type: &str) -> Option<&'static str> {
+    let base = match python_type.strip_prefix("typing.Literal[") {
+        Some(values) if values.starts_with(['\'', '"']) => "str",
+        Some(_) => "int",
+        None => python_type,
+    };
+    const TYPES: [(&str, &str); 5] = [
+        ("int", "INT"),
+        ("str", "TEXT"),
+        ("bool", "BOOLEAN"),
+        ("float", "DOUBLE"),
+        ("decimal.Decimal", "DECIMAL"),
+    ];
+    TYPES
+        .iter()
+        .find(|(python, _)| *python == base)
+        .map(|(_, sql)| *sql)
 }
 
 /// The byte of `source` at `units` UTF-16 code units, clamped to its end.

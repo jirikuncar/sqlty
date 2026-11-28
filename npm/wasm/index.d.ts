@@ -24,6 +24,12 @@ export type CompleteRequest = Source & { op: "complete"; offset: number };
 export type HoverRequest = Source & { op: "hover"; offset: number };
 /** The diagnostics `source` gets against `schema` but not against `before`, as `sqlty breaking` reports. */
 export type BreakingRequest = Source & { op: "breaking"; before: string };
+/**
+ * Types one bare SQL query, for a host in any language: `schema` once with a `schema_key`,
+ * then the key alone until the answer is `{ need: "schema" }`. A cached key keeps its schema,
+ * so a new schema text needs a new key.
+ */
+export type QueryRequest = Omit<Source, "source"> & { op: "query"; sql: string; schema_key?: string };
 /** Validates the sqlty table of the file `path` holding `source`. */
 export type ConfigRequest = { op: "config"; source: string; path: string; required?: boolean };
 /** Finds the configuration of the directory `path` as `sqlty check` does, reading `files` (`null`: no such file). */
@@ -38,6 +44,7 @@ export type Request =
   | CompleteRequest
   | HoverRequest
   | BreakingRequest
+  | QueryRequest
   | ConfigRequest
   | ProjectRequest;
 
@@ -96,6 +103,14 @@ export type Analysis = {
   fixed: string;
 };
 
+/** What `query` answers: `columns` is `null` for a statement that returns no rows; offsets count UTF-16 code units of `sql`. */
+export type QueryAnswer = {
+  returns_rows: boolean;
+  columns: { name: string; sql_type: string | null; nullable: boolean | null }[] | null;
+  params: { index: number; name: string | null; sql_type: string | null; nullable: boolean | null }[];
+  diagnostics: Omit<Diagnostic, "line">[];
+};
+
 export type Completions = {
   start: number;
   end: number;
@@ -123,6 +138,8 @@ export type Answer =
   | Completions
   | Hover
   | { diagnostics: Diagnostic[] }
+  | QueryAnswer
+  | { need: "schema" }
   | { config: Settings }
   | ProjectAnswer
   | null;
@@ -134,6 +151,7 @@ export interface Engine {
   (request: CompleteRequest): Completions | null | Failure;
   (request: HoverRequest): Hover | null | Failure;
   (request: BreakingRequest): { diagnostics: Diagnostic[] } | Failure;
+  (request: QueryRequest): QueryAnswer | { need: "schema" } | Failure;
   (request: ConfigRequest): { config: Settings } | null | Failure;
   (request: ProjectRequest): ProjectAnswer | Failure;
   (request: Request): Answer | Failure;
