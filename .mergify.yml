@@ -4,6 +4,11 @@ queue_rules:
     queue_conditions:
       - base = main
       - -draft
+      - or:
+          - author = jirikuncar
+          - and:
+              - "#approved-reviews-by >= 1"
+              - "#changes-requested-reviews-by = 0"
     merge_method: squash
 
 pull_request_rules:
