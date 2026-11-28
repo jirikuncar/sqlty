@@ -1025,6 +1025,20 @@ fn names_are_colored_by_what_the_checked_schema_says_they_are() {
 }
 
 #[test]
+fn a_check_that_loads_the_schema_asks_for_the_tokens_again() {
+    let capabilities = json!({"workspace": {"semanticTokens": {"refreshSupport": true}}});
+    let mut client = Client::start(&capabilities);
+    client.open(
+        "file:///work/q.py",
+        "q = \"--sql\\nSELECT name FROM users\"\n",
+    );
+    client.notification("textDocument/publishDiagnostics");
+    client.asked("workspace/semanticTokens/refresh");
+    assert_eq!(client.asked, ["workspace/semanticTokens/refresh"]);
+    client.shutdown();
+}
+
+#[test]
 fn a_check_that_finds_helper_strings_asks_for_the_tokens_again() {
     let capabilities = json!({"workspace": {"semanticTokens": {"refreshSupport": true}}});
     let mut client = Client::start(&capabilities);
