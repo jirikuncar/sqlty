@@ -54,7 +54,6 @@ use sqlty_python::params;
 use sqlty_python::queries;
 use sqlty_python::rewriter;
 use sqlty_sql::analyzer;
-use sqlty_sql::highlight::Highlight;
 
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::Ordering;
@@ -2107,14 +2106,17 @@ fn hover_source(
     })
 }
 
-/// What to color in the queries `check` reads in Python source: `(start, end, kind)` byte
-/// ranges in order, `kind` one of `keyword`, `string`, `number`, `comment`, `operator`
-/// and `parameter`. `helper_starts` is as for `complete_source`.
+type HighlightOut = (usize, usize, &'static str, Vec<&'static str>);
+
+/// What to color in the queries `check` reads in Python source: `(start, end, kind,
+/// modifiers)` byte ranges in order, `kind` an LSP semantic token type (`keyword`,
+/// `function`, `class`, `property`, ...) and `modifiers` its modifiers. Names are resolved
+/// against `schema_sql`. `helper_starts` is as for `complete_source`.
 ///
 /// Raises:
 ///     ValueError: unsupported import_style
 #[pyfunction]
-#[pyo3(signature = (source, *, dialect = DialectArg::POSTGRES, import_style = None, helper_starts = vec![]))]
+#[pyo3(signature = (source, *, dialect = DialectArg::POSTGRES, schema_sql = None, import_style = None, helper_starts = vec![]))]
 #[expect(
     clippy::needless_pass_by_value,
     reason = "PyO3 extracts a Vec, not a slice"
@@ -2123,27 +2125,25 @@ fn highlight_source(
     py: Python<'_>,
     source: &str,
     dialect: DialectArg,
+    schema_sql: Option<SchemaArg>,
     import_style: Option<&str>,
     helper_starts: Vec<usize>,
-) -> Result<Vec<(usize, usize, &'static str)>, Error> {
+) -> Result<Vec<HighlightOut>, Error> {
     let dialect = dialect.0;
     detach(py, || {
         let style = ImportStyle::parse(import_style)?;
         let queries = locate::Queries::new(source, &style, &helper_starts);
+        let schema = schema(schema_sql, dialect);
         Ok(queries
-            .highlights(dialect)
+            .highlights(dialect, schema.as_deref())
             .into_iter()
             .map(|(range, kind)| {
-                let kind = match kind {
-                    Highlight::Keyword => "keyword",
-                    Highlight::Function => "function",
-                    Highlight::String => "string",
-                    Highlight::Number => "number",
-                    Highlight::Comment => "comment",
-                    Highlight::Operator => "operator",
-                    Highlight::Parameter => "parameter",
-                };
-                (range.start, range.end, kind)
+                (
+                    range.start,
+                    range.end,
+                    kind.token_type(),
+                    kind.modifiers().to_vec(),
+                )
             })
             .collect())
     })

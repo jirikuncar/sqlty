@@ -137,8 +137,13 @@ impl<'s> Queries<'s> {
     }
 
     /// What to color in every query, as source byte ranges in order: a token written
-    /// across string literals or escape sequences is split at them.
-    pub fn highlights(&self, dialect: &str) -> Vec<(Range<usize>, Highlight)> {
+    /// across string literals or escape sequences is split at them. Names are colored by
+    /// what they resolve to in `schema`.
+    pub fn highlights(
+        &self,
+        dialect: &str,
+        schema: Option<&SchemaData>,
+    ) -> Vec<(Range<usize>, Highlight)> {
         let mut found = Vec::new();
         for (strings, route) in &self.sites {
             let Some(decoded) = self.decode(strings) else {
@@ -156,7 +161,7 @@ impl<'s> Queries<'s> {
                     (Some((start..end, Highlight::Comment)), end)
                 }
             };
-            let tokens = highlight(&value[sql..], dialect)
+            let tokens = highlight(&value[sql..], dialect, schema)
                 .into_iter()
                 .map(|(range, kind)| (range.start + sql..range.end + sql, kind));
             for (range, kind) in marker.into_iter().chain(tokens) {
@@ -468,7 +473,7 @@ mod tests {
     fn colored(source: &str, helpers: &[&str]) -> Vec<(String, Highlight)> {
         let starts: Vec<usize> = helpers.iter().map(|h| source.find(h).unwrap()).collect();
         Queries::new(source, &ImportStyle::parse(None).unwrap(), &starts)
-            .highlights("postgres")
+            .highlights("postgres", None)
             .into_iter()
             .map(|(range, kind)| (source[range].to_string(), kind))
             .collect()

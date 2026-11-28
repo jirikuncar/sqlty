@@ -41,6 +41,12 @@ SQL_TOKENS: dict[str, _TokenType] = {
     "comment": Comment.Single,
     "operator": Operator,
     "parameter": Name.Variable,
+    "class": Name.Class,
+    "interface": Name.Class,
+    "namespace": Name.Namespace,
+    "variable": Name,
+    "property": Name.Attribute,
+    "type": Keyword.Type,
 }
 
 

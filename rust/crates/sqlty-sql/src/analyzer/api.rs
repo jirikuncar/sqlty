@@ -9,12 +9,14 @@ use sqlparser::parser::Parser;
 use sqlparser::tokenizer::{Location, Span};
 
 use crate::diagnostics::{Diagnostics, NameDiagnostic};
+use crate::highlight::{Highlight, Offsets};
 
 use super::dialect::SqlDialect;
 use super::dml::statement_returns_rows;
 use super::expr::from_sql_type;
 use super::input::{parser_input, Input, PSYCOPG};
 use super::names::alias_name;
+use super::naming;
 use super::params::{params_of, Param};
 use super::preprocess::{parse_input_as_written, parse_query, too_deep, MAX_DEPTH};
 use super::query::{Analyzer, Column};
@@ -401,6 +403,45 @@ impl Parsed {
             found
         });
         (columns, found.collect())
+    }
+
+    /// What the names of the query's first statement stand for, as byte ranges of the
+    /// query in order: tables, views, schemas, CTEs, aliases and the columns the analyzer
+    /// resolves. Empty when the query does not parse as written.
+    pub fn names(&self, schema: Option<&SchemaData>) -> Vec<(std::ops::Range<usize>, Highlight)> {
+        let Some(stmt) = self.first().filter(|_| self.as_written) else {
+            return Vec::new();
+        };
+        let mut analyzer = Analyzer::new(
+            schema.unwrap_or_else(|| crate::catalog::empty(self.dialect)),
+            self.dialect,
+        );
+        analyzer.diag = Diagnostics::naming();
+        analyzer.source = text_source(&self.input.source, self.dialect);
+        let _ = analyzer.statement_columns(stmt);
+        let mut names = analyzer.diag.names();
+        names.extend(naming::relation_names(stmt, &analyzer.schema, self.dialect));
+        names.sort_by_key(|(span, _)| (span.start.line, span.start.column));
+        names.dedup_by_key(|(span, _)| span.start);
+        let mut offsets = Offsets::new(self.input.text());
+        let (mut starts, mut ends) = (Vec::new(), Vec::new());
+        for (span, _) in &names {
+            let (start, end) = offsets
+                .offset(span.start)
+                .zip(offsets.offset(span.end))
+                .unwrap_or_default();
+            starts.push(start);
+            ends.push(end.max(start));
+        }
+        let lengths = starts.iter().zip(&ends).map(|(start, end)| end - start);
+        let (starts, ends) = (self.input.originals(&starts), self.input.originals(&ends));
+        names
+            .into_iter()
+            .zip(lengths)
+            .zip(starts.into_iter().zip(ends))
+            .filter(|((_, length), (start, end))| *length > 0 && end - start == *length)
+            .map(|((name, _), (start, end))| (start..end, name.1))
+            .collect()
     }
 
     /// The columns the analyzer finds in scope of the completion placeholder; `None` when

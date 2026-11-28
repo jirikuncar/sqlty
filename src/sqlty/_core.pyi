@@ -316,9 +316,10 @@ def highlight_source(
     source: str,
     *,
     dialect: str = "postgres",
+    schema_sql: str | Schema | None = None,
     import_style: str | None = None,
     helper_starts: list[int] = ...,
-) -> list[tuple[int, int, str]]: ...
+) -> list[tuple[int, int, str, list[str]]]: ...
 def skills() -> list[tuple[str, str]]: ...
 def cli(args: list[str]) -> int:
     """Run ``sqlty ARGS...`` (``args[0]`` is the program); the exit code."""

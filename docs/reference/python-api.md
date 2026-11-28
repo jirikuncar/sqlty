@@ -257,13 +257,17 @@ b'na'
 ```
 
 `highlight_source` lists the SQL tokens to color in those same strings, as byte ranges.
-`sqlty server` sends them as semantic tokens:
+`sqlty server` sends them as semantic tokens. A name is colored by what it resolves to in
+the schema:
 
 ```pycon
 >>> from sqlty.core import highlight_source
 >>> source = 'q = "--sql\\nSELECT name FROM users WHERE id = %s"'
 >>> [(source[h.start : h.end], h.kind) for h in highlight_source(source)]
 [('--sql', 'comment'), ('SELECT', 'keyword'), ('FROM', 'keyword'), ('WHERE', 'keyword'), ('=', 'operator'), ('%s', 'parameter')]
+>>> settings = Settings(schema_sql="CREATE TABLE users (id INT, name TEXT);")
+>>> [(source[h.start : h.end], h.kind) for h in highlight_source(source, settings)][1:4]
+[('SELECT', 'keyword'), ('name', 'property'), ('FROM', 'keyword')]
 ```
 
 | Function | Returns |
@@ -283,4 +287,4 @@ b'na'
 | `breaking_source(source, settings, *, against_sql)` | The diagnostics `source` gets against `against_sql` but not against `settings.schema_sql`, as `sqlty breaking` reports them |
 | `schema_skipped_objects(schema_sql, *, dialect="postgres")` | `(kind, name)` of schema tables, views and key or type statements that do not parse or pass the size limits |
 | `complete_source(source, line, column, settings=Settings(), *, limit=200)` | `Completions(start, end, incomplete, items)` of `Completion(label, kind, detail, sql_type, nullable)` at the cursor, or `None` outside a checked query |
-| `highlight_source(source, settings=Settings())` | `Highlight(start, end, kind)` per SQL token of the checked queries, `kind` one of `keyword`, `function`, `string`, `number`, `comment`, `operator`, `parameter` |
+| `highlight_source(source, settings=Settings())` | `Highlight(start, end, kind, modifiers)` per SQL token of the checked queries, `kind` an LSP semantic token type (`keyword`, `function`, `string`, `number`, `comment`, `operator`, `parameter`, `class`, `interface`, `namespace`, `variable`, `property`, `type`), `modifiers` among `declaration`, `defaultLibrary`, `deprecated` |

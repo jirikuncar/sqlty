@@ -6,29 +6,39 @@
 //! client to request the tokens again (`workspace/semanticTokens/refresh`).
 
 use lsp_types::{
-    PositionEncodingKind, SemanticToken, SemanticTokenType, SemanticTokens, SemanticTokensLegend,
+    PositionEncodingKind, SemanticToken, SemanticTokenModifier, SemanticTokenType, SemanticTokens,
+    SemanticTokensLegend,
 };
 use sqlty_python::locate::Queries;
 use sqlty_python::rewriter::ImportStyle;
-use sqlty_sql::highlight::Highlight;
 
 use crate::completion::moved;
 use crate::text::LineIndex;
 use crate::{CompletionContext, Document};
 
-/// The token types, in the order of [`Highlight`]'s index in the legend.
+/// The token types and modifiers [`Highlight`] names, in legend order: indices already
+/// sent never change.
+const TYPES: [&str; 13] = [
+    "keyword",
+    "string",
+    "number",
+    "comment",
+    "operator",
+    "parameter",
+    "function",
+    "class",
+    "interface",
+    "namespace",
+    "variable",
+    "property",
+    "type",
+];
+const MODIFIERS: [&str; 3] = ["declaration", "defaultLibrary", "deprecated"];
+
 pub(crate) fn legend() -> SemanticTokensLegend {
     SemanticTokensLegend {
-        token_types: vec![
-            SemanticTokenType::KEYWORD,
-            SemanticTokenType::STRING,
-            SemanticTokenType::NUMBER,
-            SemanticTokenType::COMMENT,
-            SemanticTokenType::OPERATOR,
-            SemanticTokenType::PARAMETER,
-            SemanticTokenType::FUNCTION,
-        ],
-        token_modifiers: Vec::new(),
+        token_types: TYPES.map(SemanticTokenType::new).to_vec(),
+        token_modifiers: MODIFIERS.map(SemanticTokenModifier::new).to_vec(),
     }
 }
 
@@ -36,13 +46,17 @@ pub(crate) fn legend() -> SemanticTokensLegend {
 pub(crate) fn tokens(document: &Document, encoding: &PositionEncodingKind) -> SemanticTokens {
     let text = &document.text;
     let (starts, dialect, style) = reading(document.completion.as_ref(), text);
+    let schema = document
+        .completion
+        .as_ref()
+        .and_then(|(_, context)| context.schema.as_deref());
     let Ok(style) = ImportStyle::parse(style.as_deref()) else {
         return SemanticTokens::default();
     };
     let index = LineIndex::new(text, encoding);
     let mut data = Vec::new();
     let mut previous = lsp_types::Position::new(0, 0);
-    for (range, kind) in Queries::new(text, &style, &starts).highlights(&dialect) {
+    for (range, kind) in Queries::new(text, &style, &starts).highlights(&dialect, schema) {
         let mut start = range.start;
         for line in text[range].split_inclusive('\n') {
             let end = start + line.trim_end_matches(['\n', '\r']).len();
@@ -60,8 +74,10 @@ pub(crate) fn tokens(document: &Document, encoding: &PositionEncodingKind) -> Se
                     from.character
                 },
                 length: to.character - from.character,
-                token_type: token_type(kind),
-                token_modifiers_bitset: 0,
+                token_type: position(&TYPES, kind.token_type()),
+                token_modifiers_bitset: kind.modifiers().iter().fold(0, |bits, modifier| {
+                    bits | 1 << position(&MODIFIERS, modifier)
+                }),
             });
             previous = from;
         }
@@ -89,14 +105,10 @@ pub(crate) fn reading(
     }
 }
 
-fn token_type(kind: Highlight) -> u32 {
-    match kind {
-        Highlight::Keyword => 0,
-        Highlight::String => 1,
-        Highlight::Number => 2,
-        Highlight::Comment => 3,
-        Highlight::Operator => 4,
-        Highlight::Parameter => 5,
-        Highlight::Function => 6,
-    }
+fn position(names: &[&str], name: &str) -> u32 {
+    names
+        .iter()
+        .position(|known| *known == name)
+        .and_then(|at| u32::try_from(at).ok())
+        .unwrap_or_default()
 }
