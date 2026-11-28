@@ -3,8 +3,9 @@
     python3 scripts/structured_data.py site
 
 - JSON-LD: ``BreadcrumbList`` on every inner page, ``TechArticle`` on guide and recipe pages,
-  ``FAQPage`` on the FAQ, whose ``h2``s are the questions and the text up to the next one
-  their answers, so the markup always says what the page shows.
+  ``FAQPage`` on the FAQ, whose ``h2``s are the questions and the text up to the next
+  heading their answers, so the markup always says what the page shows. A page in
+  ``PROBLEMS`` gets one from the ``h3``s of the named section: each problem it solves.
 - ``sitemap.xml``: ``lastmod`` of each URL.
 - ``llms.txt``: a note on each link, from the page's description, and the rule pages in a
   section per rule group.
@@ -33,6 +34,7 @@ GROUPS = {
     "migration": "Zero-downtime PostgreSQL migration rules",
 }
 ARTICLES = ("guide/", "recipes/")
+PROBLEMS = {"recipes/eslint/": "what-it-solves"}
 AUTHOR = {"@type": "Person", "name": "Jiri Kuncar", "url": "https://github.com/jirikuncar"}
 
 
@@ -44,7 +46,7 @@ class Page:
     source: str = ""
     title: str = ""
     headline: str = ""
-    questions: list[dict[str, str]] = field(default_factory=list)
+    sections: list[dict[str, str]] = field(default_factory=list)
 
 
 class Parser(HTMLParser):
@@ -56,6 +58,7 @@ class Parser(HTMLParser):
         self.title = False
         self.heading = False
         self.permalink = False
+        self.parent = ""
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         attr = dict(attrs)
@@ -76,9 +79,13 @@ class Parser(HTMLParser):
             self.article = True
         elif self.article and tag == "h1":
             self.title = True
-        elif self.article and tag == "h2":
+        elif self.article and tag in ("h2", "h3"):
             self.heading = True
-            self.page.questions.append({"id": attr.get("id") or "", "name": "", "text": ""})
+            anchor = attr.get("id") or ""
+            if tag == "h2":
+                self.parent = anchor
+            section = {"id": anchor, "tag": tag, "parent": self.parent, "name": "", "text": ""}
+            self.page.sections.append(section)
 
     def handle_endtag(self, tag: str) -> None:
         if tag == "title":
@@ -87,7 +94,7 @@ class Parser(HTMLParser):
             self.article = False
         elif tag == "h1":
             self.title = False
-        elif tag == "h2":
+        elif tag in ("h2", "h3"):
             self.heading = False
         elif tag == "a":
             self.permalink = False
@@ -99,8 +106,8 @@ class Parser(HTMLParser):
             return
         if self.title:
             self.page.title += data
-        elif self.page.questions:
-            self.page.questions[-1]["name" if self.heading else "text"] += data
+        elif self.page.sections:
+            self.page.sections[-1]["name" if self.heading else "text"] += data
 
 
 def parse(html: str) -> Page:
@@ -138,7 +145,7 @@ def modified() -> dict[str, str]:
     return dates
 
 
-def faq(page: Page) -> dict[str, object]:
+def faq(page: Page, questions: list[dict[str, str]]) -> dict[str, object]:
     return {
         "@context": "https://schema.org",
         "@type": "FAQPage",
@@ -153,9 +160,13 @@ def faq(page: Page) -> dict[str, object]:
                     "url": f"{page.canonical}#{q['id']}",
                 },
             }
-            for q in page.questions
+            for q in questions
         ],
     }
+
+
+def subsections(page: Page, parent: str) -> list[dict[str, str]]:
+    return [s for s in page.sections if s["parent"] == parent != s["id"]]
 
 
 def breadcrumbs(site: Path, url: str, page: Page, home: Page) -> dict[str, object]:
@@ -218,7 +229,9 @@ def json_ld(site: Path, dates: dict[str, str]) -> dict[str, Page]:
         if url.startswith(ARTICLES):
             blocks.append(article(page, dates.get(page.source), home))
         if url == "faq/":
-            blocks.append(faq(page))
+            blocks.append(faq(page, [s for s in page.sections if s["tag"] == "h2"]))
+        if url in PROBLEMS:
+            blocks.append(faq(page, subsections(page, PROBLEMS[url])))
         path.write_text(embed(html, *blocks))
     return pages
 

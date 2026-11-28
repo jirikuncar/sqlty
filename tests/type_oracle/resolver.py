@@ -7,7 +7,7 @@ import threading
 from collections.abc import Iterable
 from typing import Any
 
-from sqlty._source import ParsedSource
+from sqlty.core import ParsedSource
 from tests.type_oracle.ast_fields import _ast_type
 from tests.type_oracle.extract import extract_type_definitions
 from tests.type_oracle.info import TypeInfo

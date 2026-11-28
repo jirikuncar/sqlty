@@ -48,7 +48,7 @@ class Run:
             raise MDTestFailure("\n\n".join(failures))
 
     def compute(self, kind: Kind, unit: Unit) -> str:
-        from sqlty._decode import decode
+        from sqlty.magic import decode
 
         decoded = _without_imports(decode(unit.code.text.encode())[0], self._imports).strip()
         return _CODING.sub("", decoded, count=1).strip()

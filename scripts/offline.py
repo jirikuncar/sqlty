@@ -4,8 +4,8 @@
 
 It caches every page and asset when it installs, and the playground (its engine and Monaco,
 most of the bytes) once a page asks for it: the playground does on its first visit, and so
-does every page of the installed app. wllama, which only the playground's ask loads, is cached
-when it is fetched. A new build changes ``sw.js``, which replaces the cache and keeps what
+does every page of the installed app. wllama, which only the playground's ask loads, and
+Monaco's TypeScript service, which only queries.ts starts, are cached when they are fetched. A new build changes ``sw.js``, which replaces the cache and keeps what
 was cached of these.
 """
 
@@ -17,7 +17,11 @@ import sys
 from pathlib import Path
 
 PLAYGROUND = ("assets/playground/", "assets/vendor/monaco/")
-ON_USE = ("assets/vendor/wllama/", "assets/vendor/wllama-compat/")
+ON_USE = (
+    "assets/vendor/wllama/",
+    "assets/vendor/wllama-compat/",
+    "assets/vendor/monaco/vs/assets/ts.worker-",
+)
 SKIP = ("sw.js", ".integrity", ".md", ".txt")
 
 WORKER = """\
@@ -95,7 +99,9 @@ def main() -> None:
     digest = hashlib.sha256()
     for path in files:
         digest.update(path.encode() + b"\0" + (site / path).read_bytes())
-    playground = [url(path) for path in files if path.startswith(PLAYGROUND)]
+    playground = [
+        url(path) for path in files if path.startswith(PLAYGROUND) and not path.startswith(ON_USE)
+    ]
     rest = [url(path) for path in files if not path.startswith(PLAYGROUND + ON_USE)]
     (site / "sw.js").write_text(
         WORKER
