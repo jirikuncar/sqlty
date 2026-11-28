@@ -62,9 +62,13 @@ SELECT id FROM users WHERE name % $1 AND $2 <-> name < 0.5
 CREATE TABLE users (id int PRIMARY KEY, name text NOT NULL);
 ```
 
+Neither are its operators, which `unknown-function` does not report:
+
 ```sql
-SELECT similarity(name, 'jo') AS s FROM users
+SELECT similarity(name, 'jo') AS s, name % 'jo' AS similar, name <-> 'jo' AS distance FROM users
 -- columns: s: None (None)
+-- columns: similar: None (None)
+-- columns: distance: None (None)
 ```
 
 ```python
