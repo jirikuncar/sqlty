@@ -1,6 +1,6 @@
 ---
 name: sqlty-breaking
-description: Check that a schema change or migration doesn't break the queries running during a rolling deploy, with sqlty breaking, and plan an expand and contract migration. Use when adding, dropping, renaming or changing a table or column, writing a migration, making a column nullable or NOT NULL, reading a sqlty breaking finding (backward or forward), or splitting a schema change into safe pull requests.
+description: Check that a schema change or migration doesn't break the queries running during a rolling deploy, with sqlty breaking, and plan an expand and contract migration. Use when adding, dropping, renaming or changing a table or column, writing a migration, making a column nullable or NOT NULL, deprecating a column, reading a sqlty breaking finding (backward or forward), or splitting a schema change into safe pull requests.
 ---
 
 # sqlty breaking
@@ -133,7 +133,15 @@ Split a breaking change into pull requests that each pass `sqlty check` and
 - **Schema before the code that uses it.** Code that writes a column in the same
   pull request that adds it fails the forward check.
 - **Contract the code before the schema.** Stop reading and writing a column
-  before you drop it, or the running code fails.
+  before you drop it, or the running code fails. In pull request 5, after the
+  backfill that reads it, list it in `[tool.sqlty.deprecated-columns]`, so
+  `deprecated-column` reports a read added before the drop; remove the entry
+  with the column in 6:
+
+  ```toml
+  [tool.sqlty.deprecated-columns]
+  "users.name" = { use = "display_name", remove-after = "2027-02-20" }
+  ```
 
 Adding a column that nothing reads yet needs only steps 2 and 3. Dropping one
 needs steps 5 and 6.
@@ -178,8 +186,9 @@ COMMIT;
 Before you drop anything:
 
 - **Remove the last reader first.** Writes that keep the column consistent may
-  stay. Drop it once no deployed version reads it, self-hosted releases
-  included: check `--against` a directory with one snapshot per release.
+  stay, and `deprecated-column` reports only reads. Drop it once no deployed
+  version reads it, self-hosted releases included: check `--against` a
+  directory with one snapshot per release.
 - **Replace a foreign key's `ON DELETE` action** before you drop the column or
   constraint that carries it; `dropped-delete-action` reports the drop.
 - **Keep a SQL function that the previous release calls**, and drop it in the
