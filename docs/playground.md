@@ -26,12 +26,18 @@ queries as you type. It runs in your browser. The engine is compiled to
         <option value="sqlite">SQLite</option>
       </select>
     </label>
+    <label data-driver-label hidden><span class="sqlty-label">Driver</span>
+      <select data-driver>
+        <option value="postgres">postgres.js</option>
+        <option value="pg">node-postgres</option>
+      </select>
+    </label>
     <label><span class="sqlty-label">Version</span>
       <select data-version title="main runs the latest build; a release comes from npm"></select>
     </label>
     <span class="sqlty-actions" role="toolbar" aria-label="Actions">
       <button type="button" class="sqlty-button sqlty-button--primary" data-fix>Fix all</button>
-      <button type="button" class="sqlty-button sqlty-menu-button" data-commands popovertarget="sqlty-commands" aria-haspopup="menu">Commands</button>
+      <button type="button" class="sqlty-button sqlty-menu-button" data-python data-commands popovertarget="sqlty-commands" aria-haspopup="menu">Commands</button>
       <span class="sqlty-menu" id="sqlty-commands" role="menu" aria-label="Commands" popover>
         <button type="button" role="menuitem" data-rewrite>Rewrite<small>Wrap queries in SQL[T]</small></button>
         <button type="button" role="menuitem" data-strip>Strip<small>Remove the SQL[T] wrappers</small></button>
@@ -63,7 +69,7 @@ queries as you type. It runs in your browser. The engine is compiled to
   <div class="sqlty-tabs" role="tablist" aria-label="Files">
     <button type="button" role="tab" aria-selected="true" data-file="python">queries.py</button>
     <button type="button" role="tab" aria-selected="false" data-file="schema">schema.sql</button>
-    <button type="button" role="tab" aria-selected="false" data-file="before">before.sql</button>
+    <button type="button" role="tab" aria-selected="false" data-python data-file="before">before.sql</button>
     <button type="button" role="tab" aria-selected="false" data-file="config">sqlty.toml</button>
   </div>
   <div class="sqlty-editor" role="tabpanel" aria-label="Editor" data-source></div>
@@ -72,7 +78,7 @@ queries as you type. It runs in your browser. The engine is compiled to
     <button type="button" role="tab" aria-selected="false" data-tab="notes" hidden>Notes</button>
     <button type="button" role="tab" aria-selected="true" data-tab="problems">Problems</button>
     <button type="button" role="tab" aria-selected="false" data-tab="types">Types</button>
-    <button type="button" role="tab" aria-selected="false" data-tab="breaking">Breaking</button>
+    <button type="button" role="tab" aria-selected="false" data-python data-tab="breaking">Breaking</button>
     <button type="button" role="tab" aria-selected="false" data-tab="json">JSON</button>
   </div>
   <div class="sqlty-console" role="tabpanel" aria-label="Output">
