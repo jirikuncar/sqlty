@@ -17,8 +17,7 @@ from pathlib import Path
 
 import pytest
 
-from sqlty._cli import issue_url, main
-from sqlty._lint import RULES
+from tests._core_views import RULES, main
 
 
 def test_cli_rewrite_untyped(tmp_path, monkeypatch):
@@ -804,22 +803,28 @@ def test_check_exit_codes(tmp_path, monkeypatch, capsys) -> None:
     assert _run(["check", "wide.py"], capsys)[0] == 1
 
 
-def test_internal_error_exits_2(tmp_path, monkeypatch, capsys) -> None:
-    import sqlty._core
-    import sqlty.core
+class PanicException(BaseException):
+    """What a Rust panic raises: not an ``Exception``."""
 
-    def boom(*args, **kwargs):
-        raise RuntimeError("boom")
 
-    (tmp_path / "q.py").write_text("x = 1\n")
-    monkeypatch.setattr(sqlty.core, "strip_source", boom)
-    monkeypatch.setattr(sqlty._core, "cli", boom)
+def _crash(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], exc: BaseException):
+    """Run ``sqlty version`` with the engine's entry point raising ``exc``: (exit code, stderr)."""
+    from sqlty import _core
 
-    code, _, err = _run(["strip", str(tmp_path / "q.py")], capsys)
+    def crash(argv: list[str]) -> int:
+        raise exc
+
+    monkeypatch.setattr(_core, "cli", crash)
+    code, _, err = _run(["version"], capsys)
+    return code, err
+
+
+def test_internal_error_exits_2(monkeypatch, capsys) -> None:
+    code, err = _crash(monkeypatch, capsys, RuntimeError("boom"))
 
     assert code == 2
     assert "internal error" in err
-    assert issue_url("RuntimeError: boom") in err
+    assert _issue_url("RuntimeError%3A%20boom", "RuntimeError%3A%20boom") in err
 
 
 @pytest.mark.parametrize("files", [1, 5000])
@@ -841,50 +846,45 @@ def test_a_closed_pipe_is_not_an_internal_error(tmp_path, files) -> None:
 
 
 def test_a_panic_is_an_internal_error(monkeypatch, capsys) -> None:
-    from sqlty import _core
-
-    class PanicException(BaseException):
-        pass
-
-    def panic(*args, **kwargs):
-        raise PanicException("boom")
-
-    monkeypatch.setattr(_core, "cli", panic)
-
-    code, _, err = _run(["version"], capsys)
+    code, err = _crash(monkeypatch, capsys, PanicException("boom"))
 
     assert code == 2
-    assert issue_url("PanicException: boom") in err
+    assert _issue_url("PanicException%3A%20boom", "PanicException%3A%20boom") in err
 
 
 def test_an_interrupt_is_not_an_internal_error(monkeypatch, capsys) -> None:
-    from sqlty import _core
-
-    def interrupt(*args, **kwargs):
-        raise KeyboardInterrupt
-
-    monkeypatch.setattr(_core, "cli", interrupt)
-
     with pytest.raises(KeyboardInterrupt):
-        _run(["version"], capsys)
+        _crash(monkeypatch, capsys, KeyboardInterrupt())
+
+
+def _issue_url(title: str, output: str) -> str:
+    """The new-issue link of a crash: the form prefilled with the percent-encoded title and output."""
+    return (
+        "https://github.com/jirikuncar/sqlty/issues/new?template=bug_report.yml"
+        f"&title=Crash%3A%20{title}&output={output}&version="
+    )
 
 
 @pytest.mark.parametrize(
-    ("cause", "title", "output"),
+    ("message", "title", "output"),
     [
-        ("boom\nmore", "Crash%3A%20boom", "boom%0Amore"),
-        ("", "Crash%3A%20", ""),
-        ("é" * 3000, "Crash%3A%20" + "%C3%A9" * 80, "%C3%A9" * 2000),
+        ("boom\nmore", "RuntimeError%3A%20boom", "RuntimeError%3A%20boom%0Amore"),
+        # 14 characters of "RuntimeError: ", then é up to 80 in the title and 2000 in the output
+        (
+            "\u00e9" * 3000,
+            "RuntimeError%3A%20" + "%C3%A9" * 66,
+            "RuntimeError%3A%20" + "%C3%A9" * 1986,
+        ),
     ],
 )
-def test_issue_url_prefills_the_bug_report_form(cause: str, title: str, output: str) -> None:
-    url = issue_url(cause)
+def test_issue_url_prefills_the_bug_report_form(
+    monkeypatch, capsys, message: str, title: str, output: str
+) -> None:
+    _, err = _crash(monkeypatch, capsys, RuntimeError(message))
 
-    assert url.startswith(
-        "https://github.com/jirikuncar/sqlty/issues/new?template=bug_report.yml"
-        f"&title={title}&output={output}&version="
-    )
-    assert "&environment=" in url
+    url = _issue_url(title, output)
+    assert url in err
+    assert "&environment=" in err.partition(url)[2]
 
 
 def _run(argv: list[str], capsys: pytest.CaptureFixture[str]) -> tuple[int, str, str]:
