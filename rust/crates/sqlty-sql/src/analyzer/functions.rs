@@ -390,7 +390,7 @@ impl<'a> Analyzer<'a> {
         }
         let found = rules
             .iter()
-            .find(|rule| rule.applies(self.dialect, first, second, &all));
+            .find(|rule| rule.applies(self.dialect, self.schema.extensions(), first, second, &all));
         Ok(found.map(|rule| (rule, typed.clone())))
     }
 

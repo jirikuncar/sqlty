@@ -29,6 +29,7 @@ reasoning = "`->` on a json value gives json; a missing member gives NULL."
 | `type` | yes | The result: a canonical SQL type (`TEXT`, `JSONB`, ...) or one of the results below |
 | `nullability` | no | One of the nullabilities below; `operands` by default |
 | `shadows` | no | Ids of later rules of the same tier this one takes precedence over where both match |
+| `extension` | no | The PostgreSQL extension that defines the function or operator: the rule applies only to a schema that runs `CREATE EXTENSION` for it (see [Extensions](#extensions)) |
 | `left-parameter`, `right-parameter` | no | The SQL type (`TEXT`, `ARRAY<TEXT>`, ...) a placeholder on that side gets when the other operand matches its own `left` or `right` |
 | `reference.postgres`, `reference.mysql`, `reference.sqlite`, `reference.duckdb`, `reference.clickhouse` | one at least | The documentation of that database the rule follows: product, version, section. `--explain` and hover show the configured dialect's, or all of them for a dialect none documents |
 | `reasoning` | yes | Why, in one sentence |
@@ -164,6 +165,34 @@ operator with no matching rule is typed by the analyzer's code
 
 The operands are typed only when a rule of the operator lists operand types.
 
+## Extensions
+
+`rules/postgres/extensions/` types what PostgreSQL extensions add, one file per extension.
+Its rules are tried before the other PostgreSQL rules. A rule with `extension = "hstore"`
+applies once the schema runs `CREATE EXTENSION hstore` (with any `SCHEMA` or `VERSION`),
+until `DROP EXTENSION` or `DROP SCHEMA ... CASCADE` of its schema; a call qualified with
+that schema (`ext.akeys(tags)`) is the extension's function. Without the extension the
+call stays untyped, and `unknown-function` names the `CREATE EXTENSION` it lacks. An
+operator on a type only the extension defines, such as `hstore -> text`, needs no
+`extension`: the operand's type proves it. Neither hides nor conflicts with the rules
+after it, so it needs no `shadows` for them.
+
+```toml
+[[function]]
+id = "postgres.hstore.arrays"
+functions = ["AKEYS", "AVALS", "HSTORE_TO_ARRAY", "SLICE_ARRAY"]
+dialects = ["postgres"]
+extension = "hstore"
+type = "ARRAY<TEXT>"
+nullability = "strict"
+reference.postgres = "PostgreSQL 17 documentation, F.17.2 hstore Operators and Functions, hstore Functions (akeys, avals, hstore_to_array → text[])"
+reasoning = "Each returns the keys, values or pairs as a `text[]`, NULL only for a NULL argument."
+```
+
+`PG_EXTENSIONS` in `compile.rs` lists the extensions rules may name. The
+mdtest of each, `tests/mdtest/postgres/<extension>.md`, runs against a live server in
+`tests/test_pg_describe.py`.
+
 ## Dialects that read others' rules
 
 `rules/dialects.toml` lists the dialects with no rules of their own that read the rules
@@ -192,6 +221,8 @@ own, or an unknown dialect in `extends`, fails the build.
 - an operator that is not a variant name (`rustc` then checks the variant
   exists: the generated `match` names it as `BinaryOperator::<name> { .. }`);
 - a rule in `common/` with `dialects`, or a dialect rule without them;
+- an `extension` not in `PG_EXTENSIONS`, or on a rule outside
+  `rules/postgres/extensions/` or of another dialect than `postgres`;
 - a rule an earlier rule of the same tier and operator covers entirely: it
   would never apply;
 - a partial overlap with a different result or nullability: operands two rules

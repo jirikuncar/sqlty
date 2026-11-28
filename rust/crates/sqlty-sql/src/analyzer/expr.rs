@@ -12,7 +12,7 @@ use sqlparser::tokenizer::Span;
 
 use super::dialect::SqlDialect;
 use super::functions::{arg_list, extract_type, positional_args, Returns};
-use super::inference::FunctionType;
+use super::inference::{extension_name, function_rules, Extensions, FunctionType};
 use super::literals::{constant, python_kind, strip, value_set};
 use super::memo::{first_column, Reporting};
 use super::names::{split_access, table_key};
@@ -134,8 +134,9 @@ impl<'a> Analyzer<'a> {
     }
 
     /// The upper-case name the built-in function `name` is looked up by. In PostgreSQL a
-    /// `pg_catalog.` qualifier names the same built-in, and a quoted name that is not lower
-    /// case (`"LOWER"`) is no built-in at all. Elsewhere a quoted name is the built-in's.
+    /// `pg_catalog.` qualifier names the same built-in, the schema of a created extension
+    /// that extension's function, and a quoted name that is not lower case (`"LOWER"`) is no
+    /// built-in at all. Elsewhere a quoted name is the built-in's.
     pub(super) fn builtin_name(&self, name: &ObjectName) -> String {
         let idents: Vec<&Ident> = name.0.iter().filter_map(|part| part.as_ident()).collect();
         if self.dialect != SqlDialect::Postgres {
@@ -144,12 +145,24 @@ impl<'a> Analyzer<'a> {
                 _ => name.to_string().to_uppercase(),
             };
         }
-        let bare = match idents.as_slice() {
-            [only] => only,
-            [schema, last] if fold(schema, self.dialect) == "pg_catalog" => last,
+        let (bare, extension) = match idents.as_slice() {
+            [only] => (only, false),
+            [schema, last] => match fold(schema, self.dialect).as_str() {
+                "pg_catalog" => (last, false),
+                schema if self.schema.has_extension_schema(schema) => (last, true),
+                _ => return name.to_string().to_uppercase(),
+            },
             _ => return name.to_string().to_uppercase(),
         };
         let folded = fold(bare, self.dialect);
+        // A function qualified with an extension's schema is the extension's.
+        if extension
+            && !function_rules(&folded.to_uppercase())
+                .iter()
+                .any(|rule| rule.extension != 0)
+        {
+            return name.to_string().to_uppercase();
+        }
         if folded == folded.to_lowercase() {
             folded.to_uppercase()
         } else {
@@ -705,10 +718,17 @@ impl<'a> Analyzer<'a> {
             {
                 self.diag.explain_silently();
             } else {
+                let extension = function_rules(&self.builtin_name(&func.name))
+                    .iter()
+                    .filter(|rule| rule.available(self.dialect, Extensions(u32::MAX)))
+                    .find_map(|rule| extension_name(rule.extension));
+                let hint = extension.map_or(String::new(), |name| {
+                    format!("; it comes with `CREATE EXTENSION {name}`, which the schema lacks")
+                });
                 self.diag.record(
                     Rule::UnknownFunction,
                     format!(
-                        "function `{}` is not known to sqlty, so its result is untyped",
+                        "function `{}` is not known to sqlty, so its result is untyped{hint}",
                         self.display_name(&func.name)
                     ),
                 );

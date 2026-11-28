@@ -15,12 +15,18 @@ const DIALECTS: [(&str, &str); 5] = [
     ("duckdb", "SqlDialect::Other(\"duckdb\")"),
 ];
 
+/// The PostgreSQL extensions a rule may require, which `CREATE EXTENSION` adds to a schema.
+const PG_EXTENSIONS: [&str; 1] = ["hstore"];
+
+/// The directory of the extensions' rules, tried before the other PostgreSQL rules.
+const EXTENSIONS_DIR: &str = "rules/postgres/extensions/";
+
 /// The dialects a `reference` may cite the documentation of, in the order they are shown.
 const DOCUMENTED: [&str; 5] = ["postgres", "mysql", "sqlite", "duckdb", "clickhouse"];
 
 /// Canonical SQL types the analyzer gives operands, which `left` and `right` may name.
 /// `ARRAY` is any array.
-const SQL_TYPES: [&str; 90] = [
+const SQL_TYPES: [&str; 91] = [
     "UDECIMAL",
     "UTINYINT",
     "USMALLINT",
@@ -61,6 +67,7 @@ const SQL_TYPES: [&str; 90] = [
     "INET",
     "CIDR",
     "MACADDR",
+    "HSTORE",
     "TSVECTOR",
     "TSQUERY",
     "PATH",
@@ -316,6 +323,8 @@ struct FunctionDef {
     nullability: String,
     #[serde(default)]
     shadows: Vec<String>,
+    #[serde(default)]
+    extension: Option<String>,
 }
 
 impl FunctionDef {
@@ -348,6 +357,7 @@ impl FunctionDef {
             result: self.result,
             nullability: self.nullability,
             shadows: self.shadows,
+            extension: self.extension,
             left_parameter: None,
             right_parameter: None,
         })
@@ -380,6 +390,9 @@ struct RuleDef {
     /// Ids of later rules of the same tier this one takes precedence over where both match.
     #[serde(default)]
     shadows: Vec<String>,
+    /// The PostgreSQL extension that defines the function or operator.
+    #[serde(default)]
+    extension: Option<String>,
     /// The SQL type a placeholder on the left gets when the right operand matches `right`.
     #[serde(default, rename = "left-parameter")]
     left_parameter: Option<String>,
@@ -415,6 +428,8 @@ struct Rule {
     left: Types,
     right: Types,
     any: Types,
+    /// The bit of the extension the rule requires; 0 for none.
+    extension: u32,
 }
 
 impl Rule {
@@ -481,7 +496,8 @@ pub fn compile(files: &[(String, String)]) -> Result<String, String> {
             ));
         }
     }
-    rules.sort_by_key(|rule| rule.tier);
+    // An extension's rules come before the dialect's own, which they refine.
+    rules.sort_by_key(|rule| (rule.tier, !rule.file.contains(EXTENSIONS_DIR)));
     check_overlaps(&rules)?;
     check_inherited(&rules)?;
     Ok(generate(&rules, &extensions))
@@ -639,13 +655,25 @@ fn check(def: RuleDef, function: bool, file: &str, tier: u8) -> Result<Rule, Str
     if tier == 0 && dialects.is_empty() {
         return fail("a rule outside `common/` must name its `dialects`".to_string());
     }
+    let extension = match &def.extension {
+        None => 0,
+        Some(name) => match PG_EXTENSIONS.iter().position(|known| known == name) {
+            Some(at) if def.dialects == ["postgres"] && file.contains(EXTENSIONS_DIR) => 1 << at,
+            Some(_) => {
+                return fail(format!(
+                    "a rule of extension {name:?} goes in `{EXTENSIONS_DIR}` with `dialects = [\"postgres\"]`"
+                ))
+            }
+            None => return fail(format!("unknown extension {name:?}")),
+        },
+    };
     let left = operand_types(&def.left).map_err(|e| format!("rule {} ({file}): {e}", def.id))?;
     let right = operand_types(&def.right).map_err(|e| format!("rule {} ({file}): {e}", def.id))?;
     let any = operand_types(&def.any).map_err(|e| format!("rule {} ({file}): {e}", def.id))?;
     let known = if function {
         function_result(&def.result).is_some()
     } else {
-        RESULTS.iter().any(|(name, _)| *name == def.result) || is_sql_type(&def.result)
+        RESULTS.iter().any(|(name, _)| *name == def.result) || is_parameter_type(&def.result)
     };
     if !known {
         return fail(format!("unknown result type {:?}", def.result));
@@ -672,6 +700,7 @@ fn check(def: RuleDef, function: bool, file: &str, tier: u8) -> Result<Rule, Str
         left,
         right,
         any,
+        extension,
     })
 }
 
@@ -693,7 +722,7 @@ fn is_parameter_type(name: &str) -> bool {
         .strip_prefix("ARRAY<")
         .and_then(|rest| rest.strip_suffix('>'))
     {
-        Some(element) => is_sql_type(element),
+        Some(element) => is_parameter_type(element),
         None => is_sql_type(name),
     }
 }
@@ -791,7 +820,8 @@ fn check_overlaps(rules: &[Rule]) -> Result<(), String> {
         };
         for operator in &later.operators {
             let shadowing = rules[..i].iter().find(|earlier| {
-                earlier.function == later.function
+                !gates(earlier, later)
+                    && earlier.function == later.function
                     && earlier.tier == later.tier
                     && earlier.operators.contains(operator)
                     && covers(earlier, &whole)
@@ -805,7 +835,8 @@ fn check_overlaps(rules: &[Rule]) -> Result<(), String> {
             }
         }
         for (j, earlier) in rules[..i].iter().enumerate() {
-            if earlier.function != later.function
+            if gates(earlier, later)
+                || earlier.function != later.function
                 || earlier.tier != later.tier
                 || earlier.outcome() == later.outcome()
             {
@@ -820,7 +851,8 @@ fn check_overlaps(rules: &[Rule]) -> Result<(), String> {
                     continue;
                 };
                 let decided = rules[..j].iter().any(|first| {
-                    first.function == later.function
+                    !gates(first, later)
+                        && first.function == later.function
                         && first.tier == later.tier
                         && first.operators.contains(operator)
                         && covers(first, &region)
@@ -855,6 +887,12 @@ fn check_overlaps(rules: &[Rule]) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+/// Whether `earlier` requires an extension `later` does not: it applies only where the
+/// extension is created, so it neither hides `later` nor conflicts with it.
+fn gates(earlier: &Rule, later: &Rule) -> bool {
+    earlier.extension != 0 && earlier.extension != later.extension
 }
 
 /// A dialect rule that repeats a `common/` rule, with the same operands and outcome, is an
@@ -929,6 +967,18 @@ fn generate(rules: &[Rule], extensions: &[Extension]) -> String {
         "#[cfg(test)]\npub(crate) const EXTENDING_DIALECTS: &[&str] = &[{}];",
         names.join(", ")
     );
+    out.push_str(
+        "\n/// The bit of the extension `name` among those rules require; 0 for another.\n",
+    );
+    out.push_str("pub(crate) fn extension_bit(name: &str) -> u32 {\n    match name {\n");
+    for (at, name) in PG_EXTENSIONS.iter().enumerate() {
+        let _ = writeln!(out, "        {name:?} => {:#x},", 1u32 << at);
+    }
+    out.push_str("        _ => 0,\n    }\n}\n");
+    let _ = writeln!(
+        out,
+        "\n/// The extensions rules require, by bit.\npub(crate) const EXTENSION_NAMES: &[&str] = &{PG_EXTENSIONS:?};"
+    );
     out.push_str("\n/// The bit of the SQL type `sql` in an operand predicate; none for a type no rule can name.\n");
     out.push_str("fn type_bit(sql: &str) -> u128 {\n    match sql {\n");
     for name in SQL_TYPES {
@@ -969,7 +1019,7 @@ fn generate_functions(rules: &[&Rule], extensions: &[Extension]) -> String {
             "    // rule {} ({}), {name}\n    FunctionRule {{\n        id: {:?},\n        \
              references: {},\n        reasoning: {:?},\n        dialects: &[{}],\n        \
              argument: {},\n        second: {},\n        any: {},\n        result: {result},\n        \
-             nullability: {nullability},\n    }},",
+             nullability: {nullability},\n        extension: {:#x},\n    }},",
             def.id,
             rule.file,
             def.id,
@@ -979,6 +1029,7 @@ fn generate_functions(rules: &[&Rule], extensions: &[Extension]) -> String {
             operand(&rule.left),
             operand(&rule.right),
             operand(&rule.any),
+            rule.extension,
         );
     }
     out.push_str("];\n\n");
@@ -1029,7 +1080,7 @@ fn generate_binary(rules: &[&Rule], extensions: &[Extension]) -> String {
             "    // rule {} ({}), {op}\n    BinaryRule {{\n        id: {:?},\n        references: {},\n        \
              reasoning: {:?},\n        dialects: &[{}],\n        left: {},\n        right: {},\n        \
              result: {result},\n        nullability: {nullability},\n        left_parameter: {:?},\n        \
-             right_parameter: {:?},\n    }},",
+             right_parameter: {:?},\n        extension: {:#x},\n    }},",
             def.id,
             rule.file,
             def.id,
@@ -1040,6 +1091,7 @@ fn generate_binary(rules: &[&Rule], extensions: &[Extension]) -> String {
             operand(&rule.right),
             def.left_parameter,
             def.right_parameter,
+            rule.extension,
         );
     }
     out.push_str("];\n\n");

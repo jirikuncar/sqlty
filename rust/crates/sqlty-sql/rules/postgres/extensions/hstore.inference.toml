@@ -1,0 +1,164 @@
+# The hstore extension. Its operators read an `hstore` operand, which only a schema that
+# creates the extension has; its functions take text too, so they need the extension.
+
+[[rule]]
+id = "postgres.hstore.arrow-keys"
+operator = "Arrow"
+dialects = ["postgres"]
+left = ["HSTORE"]
+right = ["ARRAY"]
+type = "ARRAY<TEXT>"
+reference.postgres = "PostgreSQL 17 documentation, F.17.2 hstore Operators and Functions, hstore Operators (hstore -> text[] → text[])"
+reasoning = "Looking up an array of keys gives a `text[]` of their values."
+
+[[rule]]
+id = "postgres.hstore.arrow"
+operator = "Arrow"
+dialects = ["postgres"]
+left = ["HSTORE"]
+type = "TEXT"
+nullability = "nullable"
+right-parameter = "TEXT"
+reference.postgres = "PostgreSQL 17 documentation, F.17.2 hstore Operators and Functions, hstore Operators (hstore -> text → text)"
+reasoning = "Looking up a key gives its value, NULL when the key is missing or its value is NULL."
+
+[[rule]]
+id = "postgres.hstore.concat"
+operator = "StringConcat"
+dialects = ["postgres"]
+left = ["HSTORE"]
+right = ["HSTORE"]
+type = "HSTORE"
+left-parameter = "HSTORE"
+right-parameter = "HSTORE"
+reference.postgres = "PostgreSQL 17 documentation, F.17.2 hstore Operators and Functions, hstore Operators (hstore || hstore → hstore)"
+reasoning = "Concatenating two hstores gives an hstore."
+
+[[rule]]
+id = "postgres.hstore.delete"
+operator = "Minus"
+dialects = ["postgres"]
+left = ["HSTORE"]
+type = "HSTORE"
+reference.postgres = "PostgreSQL 17 documentation, F.17.2 hstore Operators and Functions, hstore Operators (hstore - text, hstore - text[], hstore - hstore → hstore)"
+reasoning = "Deleting keys or pairs from an hstore gives the hstore that remains."
+
+[[rule]]
+id = "postgres.hstore.has-key"
+operator = "Question"
+dialects = ["postgres"]
+left = ["HSTORE"]
+type = "BOOLEAN"
+right-parameter = "TEXT"
+reference.postgres = "PostgreSQL 17 documentation, F.17.2 hstore Operators and Functions, hstore Operators (hstore ? text → boolean)"
+reasoning = "Testing for a key gives a boolean."
+
+[[rule]]
+id = "postgres.hstore.has-keys"
+operators = ["QuestionAnd", "QuestionPipe"]
+dialects = ["postgres"]
+left = ["HSTORE"]
+type = "BOOLEAN"
+right-parameter = "ARRAY<TEXT>"
+reference.postgres = "PostgreSQL 17 documentation, F.17.2 hstore Operators and Functions, hstore Operators (hstore ?& text[], hstore ?| text[] → boolean)"
+reasoning = "Testing for all or any of an array of keys gives a boolean."
+
+[[rule]]
+id = "postgres.hstore.contains"
+operators = ["AtArrow", "ArrowAt"]
+dialects = ["postgres"]
+left = ["HSTORE"]
+type = "BOOLEAN"
+right-parameter = "HSTORE"
+reference.postgres = "PostgreSQL 17 documentation, F.17.2 hstore Operators and Functions, hstore Operators (hstore @> hstore, hstore <@ hstore → boolean)"
+reasoning = "Containment of one hstore in another gives a boolean."
+
+[[function]]
+id = "postgres.hstore.arrays"
+functions = ["AKEYS", "AVALS", "HSTORE_TO_ARRAY", "SLICE_ARRAY"]
+dialects = ["postgres"]
+extension = "hstore"
+type = "ARRAY<TEXT>"
+nullability = "strict"
+reference.postgres = "PostgreSQL 17 documentation, F.17.2 hstore Operators and Functions, hstore Functions (akeys, avals, hstore_to_array → text[])"
+reasoning = "Each returns keys, values or pairs as a `text[]`, NULL only for a NULL argument."
+
+[[function]]
+id = "postgres.hstore.matrix"
+function = "HSTORE_TO_MATRIX"
+dialects = ["postgres"]
+extension = "hstore"
+type = "ARRAY<ARRAY<TEXT>>"
+nullability = "strict"
+reference.postgres = "PostgreSQL 17 documentation, F.17.2 hstore Operators and Functions, hstore Functions (hstore_to_matrix ( hstore ) → text[])"
+reasoning = "The pairs come back as a two-dimensional `text[]`, a list of `[key, value]` lists."
+
+[[function]]
+id = "postgres.hstore.keys"
+function = "SKEYS"
+dialects = ["postgres"]
+extension = "hstore"
+type = "TEXT"
+nullability = "strict"
+reference.postgres = "PostgreSQL 17 documentation, F.17.2 hstore Operators and Functions, hstore Functions (skeys ( hstore ) → setof text)"
+reasoning = "Each row is one key, and a key is never NULL."
+
+[[function]]
+id = "postgres.hstore.values"
+functions = ["SVALS", "FETCHVAL"]
+dialects = ["postgres"]
+extension = "hstore"
+type = "TEXT"
+nullability = "nullable"
+reference.postgres = "PostgreSQL 17 documentation, F.17.2 hstore Operators and Functions, hstore Functions (svals ( hstore ) → setof text); hstore Operators (hstore -> text, which fetchval implements)"
+reasoning = "A value can be NULL, and `fetchval` is NULL for a missing key too."
+
+[[function]]
+id = "postgres.hstore.tests"
+functions = ["EXIST", "DEFINED", "ISEXISTS", "ISDEFINED", "EXISTS_ALL", "EXISTS_ANY", "HS_CONTAINS", "HS_CONTAINED"]
+dialects = ["postgres"]
+extension = "hstore"
+type = "BOOLEAN"
+nullability = "strict"
+reference.postgres = "PostgreSQL 17 documentation, F.17.2 hstore Operators and Functions, hstore Functions (exist, defined ( hstore, text ) → boolean)"
+reasoning = "Each tests for keys, values or containment, and is NULL only for a NULL argument."
+
+[[function]]
+id = "postgres.hstore.transform"
+functions = ["DELETE", "SLICE", "HS_CONCAT"]
+dialects = ["postgres"]
+extension = "hstore"
+type = "HSTORE"
+nullability = "strict"
+reference.postgres = "PostgreSQL 17 documentation, F.17.2 hstore Operators and Functions, hstore Functions (delete, slice → hstore)"
+reasoning = "Deleting from, slicing or concatenating hstores gives an hstore, NULL only for a NULL argument."
+
+[[function]]
+id = "postgres.hstore.construct"
+functions = ["HSTORE", "TCONVERT"]
+dialects = ["postgres"]
+extension = "hstore"
+type = "HSTORE"
+nullability = "leading(1)"
+reference.postgres = "PostgreSQL 17 documentation, F.17.2 hstore Operators and Functions, hstore Functions (hstore ( text, text ), hstore ( text[], text[] ) → hstore)"
+reasoning = "A NULL value makes a pair with a NULL value; only NULL keys make the result NULL."
+
+[[function]]
+id = "postgres.hstore.json"
+functions = ["HSTORE_TO_JSON", "HSTORE_TO_JSON_LOOSE"]
+dialects = ["postgres"]
+extension = "hstore"
+type = "JSON"
+nullability = "strict"
+reference.postgres = "PostgreSQL 17 documentation, F.17.2 hstore Operators and Functions, hstore Functions (hstore_to_json ( hstore ) → json)"
+reasoning = "The hstore converted to a json object."
+
+[[function]]
+id = "postgres.hstore.jsonb"
+functions = ["HSTORE_TO_JSONB", "HSTORE_TO_JSONB_LOOSE"]
+dialects = ["postgres"]
+extension = "hstore"
+type = "JSONB"
+nullability = "strict"
+reference.postgres = "PostgreSQL 17 documentation, F.17.2 hstore Operators and Functions, hstore Functions (hstore_to_jsonb ( hstore ) → jsonb)"
+reasoning = "The hstore converted to a jsonb object."

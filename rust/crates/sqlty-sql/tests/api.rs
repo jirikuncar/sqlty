@@ -68,9 +68,16 @@ fn type_overrides_name_their_modules() {
 #[test]
 fn python_types_are_those_columns_take() {
     let types = analyzer::python_types();
-    for python in ["int", "str", "decimal.Decimal", "typing.Any"] {
+    for python in [
+        "int",
+        "str",
+        "decimal.Decimal",
+        "typing.Any",
+        "dict[str, str | None]",
+    ] {
         assert!(types.contains(python), "{python}");
     }
+    assert!(!types.contains("None]"));
 }
 
 #[test]
