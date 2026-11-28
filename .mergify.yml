@@ -11,9 +11,3 @@ queue_rules:
               - "#changes-requested-reviews-by = 0"
     merge_method: squash
 
-pull_request_rules:
-  - name: Queue labelled pull requests
-    conditions:
-      - label = queue
-    actions:
-      queue:
