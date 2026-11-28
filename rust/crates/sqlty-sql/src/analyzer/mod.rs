@@ -8,6 +8,7 @@
 use std::rc::Rc;
 use std::sync::Arc;
 
+mod aliases;
 mod api;
 mod complete;
 mod ctes;

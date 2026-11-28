@@ -60,6 +60,7 @@ impl Analyzer<'_> {
                     | Rule::TenantScope
                     | Rule::SetColumnCount
                     | Rule::PositionOutOfRange
+                    | Rule::ColumnAliasCount
             )
         });
     }

@@ -16,6 +16,7 @@ DEFAULTS = {
     "set-column-count": Severity.ERROR,
     "position-out-of-range": Severity.ERROR,
     "unused-cte": Severity.WARN,
+    "column-alias-count": Severity.ERROR,
     "literal-write": Severity.ERROR,
     "unmatched-literal": Severity.WARN,
     "ungrouped-column": Severity.ERROR,

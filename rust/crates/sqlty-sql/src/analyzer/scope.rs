@@ -16,6 +16,7 @@ use crate::MAX_COLUMNS;
 use sqlparser::ast::Spanned;
 use sqlparser::tokenizer::Span;
 
+use super::aliases::Renamed;
 use super::dialect::SqlDialect;
 use super::memo::SubqueryMemo;
 use super::names::{alias_name, object_name, table_key};
@@ -705,6 +706,9 @@ impl<'a> Analyzer<'a> {
             };
             if let Some((function, alias, rows, ordinality)) = builtin {
                 let columns = rows.named(alias.as_ref(), ordinality, analyzer.dialect);
+                if let Some(alias) = alias {
+                    analyzer.check_alias_count(alias, &columns, Renamed::Function);
+                }
                 let reference = alias
                     .as_ref()
                     .map_or(function, |alias| alias.name.value.to_lowercase());
@@ -732,6 +736,7 @@ impl<'a> Analyzer<'a> {
             };
             if let Some((name, alias, mut columns)) = schema_function {
                 if let Some(alias) = alias {
+                    analyzer.check_alias_count(alias, &columns, Renamed::Function);
                     rename_columns(&mut columns, alias, analyzer.dialect);
                 }
                 let reference = alias.as_ref().map_or_else(
@@ -746,6 +751,10 @@ impl<'a> Analyzer<'a> {
             match factor {
                 TableFactor::Table { name, alias, .. } if analyzer.is_virtual(name) => {
                     let table = table_key(name, self.dialect);
+                    if let (Some(alias), Some(columns)) = (alias, analyzer.virtual_columns(&table))
+                    {
+                        analyzer.check_alias_count(alias, columns, Renamed::Table);
+                    }
                     let reference = alias.as_ref().map_or_else(
                         || object_name(name),
                         |alias| alias.name.value.to_lowercase(),
@@ -764,6 +773,7 @@ impl<'a> Analyzer<'a> {
                         .query_columns(subquery)?
                         .unwrap_or_else(|| vec![Column::unknown("*")]);
                     if let Some(alias) = alias {
+                        analyzer.check_alias_count(alias, &columns, Renamed::Derived);
                         rename_columns(&mut columns, alias, analyzer.dialect);
                     }
                     let carried = inner.carried(&columns);
@@ -793,6 +803,17 @@ impl<'a> Analyzer<'a> {
                     let _at = analyzer.diag.at(name);
                     for source in &entries {
                         analyzer.check_table(&source.table);
+                    }
+                    drop(_at);
+                    if let TableFactor::Table {
+                        alias: Some(alias),
+                        args: None,
+                        ..
+                    } = other
+                    {
+                        for source in &entries {
+                            analyzer.check_table_aliases(alias, &source.table);
+                        }
                     }
                     scope.extend(entries);
                 }

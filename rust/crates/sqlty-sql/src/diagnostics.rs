@@ -387,6 +387,7 @@ mod tests {
                 "set-column-count",
                 "position-out-of-range",
                 "unused-cte",
+                "column-alias-count",
                 "literal-write",
                 "unmatched-literal",
                 "ungrouped-column",

@@ -202,6 +202,7 @@ static FUNCTIONS: &[(&str, Columns)] = &[
         "pg_get_keywords",
         &[
             ("word", "TEXT"),
+            ("catcode", "\"CHAR\""),
             ("barelabel", "BOOLEAN"),
             ("catdesc", "TEXT"),
             ("baredesc", "TEXT"),
