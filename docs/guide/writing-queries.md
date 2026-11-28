@@ -274,6 +274,7 @@ Per dialect, with the driver each follows and why some types differ, see
 | `SERIAL`, `SMALLSERIAL`, `BIGSERIAL` | `int` |
 | `HSTORE` | `dict[str, str \| None]`, as psycopg's `register_hstore` loads it |
 | `LTREE`, `LQUERY`, `LTXTQUERY`, `QUERY_INT` | `str` |
+| `VECTOR`, `HALFVEC`, `SPARSEVEC` | `str`, as psycopg loads them without `pgvector.psycopg.register_vector` |
 | `ENUM` (MySQL), `CITEXT`, `NAME`, `BPCHAR`, `XML`, `MONEY`, `MACADDR`, `MACADDR8`, `TSVECTOR`, `TSQUERY` | `str` |
 | Arrays: `INT[]`, `INT[3]`, `INT ARRAY`, `INT ARRAY[3]`, `INT MULTISET` | `list[T]` with the element type mapped, `list[list[int]]` for `INT[][]` |
 | `POINT`, `POLYGON` and the other geometric types | `str` (psycopg); `bytes` in MySQL |

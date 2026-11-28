@@ -545,6 +545,10 @@ static SQL_TO_PYTHON_TYPE: LazyLock<HashMap<&'static str, &'static str>> = LazyL
         ("LQUERY", "str"),
         ("LTXTQUERY", "str"),
         ("QUERY_INT", "str"),
+        // psycopg returns pgvector's types as text unless `pgvector.psycopg.register_vector` runs.
+        ("VECTOR", "str"),
+        ("HALFVEC", "str"),
+        ("SPARSEVEC", "str"),
         ("BPCHAR", "str"),
         ("XML", "str"),
         ("MONEY", "str"),
@@ -756,7 +760,16 @@ pub(super) fn decimal_type(dialect: SqlDialect) -> &'static str {
 }
 
 /// Types that PostgreSQL extensions define, mapped in PostgreSQL only.
-const POSTGRES_EXTENSION_TYPES: [&str; 5] = ["HSTORE", "LTREE", "LQUERY", "LTXTQUERY", "QUERY_INT"];
+const POSTGRES_EXTENSION_TYPES: [&str; 8] = [
+    "HSTORE",
+    "LTREE",
+    "LQUERY",
+    "LTXTQUERY",
+    "QUERY_INT",
+    "VECTOR",
+    "HALFVEC",
+    "SPARSEVEC",
+];
 
 /// The Python type of a scalar type by its canonical spelling; unknown types are `None`.
 fn scalar_python(sql_type: &str, dialect: SqlDialect) -> Option<String> {
