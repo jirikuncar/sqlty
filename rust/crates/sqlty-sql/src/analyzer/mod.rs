@@ -91,8 +91,8 @@ pub use tables::{query_tables, TableRef};
 use typed::Typed;
 
 pub use crate::catalog::{
-    deprecated_type, tenancy_type, Catalog as SchemaData, Columns, Join, NameRef, RelationKind,
-    RelationRef, SchemaColumn, TypeOverrides,
+    deprecated_type, tenancy_type, Catalog as SchemaData, ColumnOf, Columns, Join, NameRef,
+    NamedColumn, RelationKind, RelationRef, SchemaColumn, TypeOverrides,
 };
 
 /// A loaded schema, shared so callers can cache it across queries.

@@ -7,8 +7,9 @@
 //! O(log N + k). It holds the catalog's own `Arc<str>` keys, so it adds pointers, not
 //! copies of the names. `load` builds it once.
 
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
+use super::column_index::ColumnNames;
 use super::joins::ReferencedBy;
 use super::{Catalog, Relation, SchemaColumn};
 use crate::analyzer::Column;
@@ -176,11 +177,7 @@ impl Catalog {
     /// The columns of the table or view `name` (a [`NameRef::key`], or a name as a query
     /// writes it); `None` for an unknown name or a relation of unknown shape. O(1).
     pub fn columns_of(&self, name: &str) -> Option<Columns<'_>> {
-        match self.find(name)? {
-            Relation::Table(table) => Some(Columns::Table(&table.columns)),
-            Relation::View(columns) => Some(Columns::View(columns)),
-            Relation::Unknown => None,
-        }
+        shape(self.find(name)?)
     }
 
     fn with_prefix<'a>(
@@ -219,7 +216,9 @@ impl Catalog {
 /// The names of each kind, sorted for prefix lookups.
 #[derive(Clone, Default)]
 pub(super) struct NameIndex {
-    relations: Sorted,
+    pub(super) relations: Sorted,
+    /// Built on the first lookup, which `check` never makes.
+    pub(super) columns: OnceLock<ColumnNames>,
     functions: Sorted,
     types: Sorted,
     pub(super) referenced_by: ReferencedBy,
@@ -230,6 +229,7 @@ impl NameIndex {
     pub(super) fn new(catalog: &Catalog) -> Self {
         NameIndex {
             relations: Sorted::new(catalog.relations.keys()),
+            columns: OnceLock::new(),
             functions: Sorted::new(
                 catalog
                     .functions
@@ -244,8 +244,8 @@ impl NameIndex {
 
 /// `schema.name` keys, sorted by `(schema, name)` and by `(name, key)`.
 #[derive(Clone, Default)]
-struct Sorted {
-    by_key: Vec<Arc<str>>,
+pub(super) struct Sorted {
+    pub(super) by_key: Vec<Arc<str>>,
     by_name: Vec<Arc<str>>,
 }
 
@@ -299,7 +299,7 @@ impl Sorted {
 
     /// Whether a bare `name` finds the one in `schema`: no schema before it on `path`
     /// defines the name. O(path length × log N).
-    fn visible(&self, schema: &str, name: &str, path: &[String]) -> bool {
+    pub(super) fn visible(&self, schema: &str, name: &str, path: &[String]) -> bool {
         std::iter::once("pg_catalog")
             .chain(path.iter().map(String::as_str))
             .find(|on_path| *on_path == schema || self.contains(on_path, name))
@@ -310,6 +310,15 @@ impl Sorted {
         self.by_key
             .binary_search_by(|key| split(key).cmp(&(schema, name)))
             .is_ok()
+    }
+}
+
+/// The columns of `relation`; `None` for one of unknown shape.
+pub(super) fn shape(relation: &Relation) -> Option<Columns<'_>> {
+    match relation {
+        Relation::Table(table) => Some(Columns::Table(&table.columns)),
+        Relation::View(columns) => Some(Columns::View(columns)),
+        Relation::Unknown => None,
     }
 }
 
@@ -521,13 +530,14 @@ mod tests {
                 let none = visited(|| assert!(c.relations_with_prefix("zz", None, 10).is_empty()));
                 let path_first =
                     visited(|| assert_eq!(c.visible_relations_with_prefix("t1", 5).len(), 5));
-                (user, capped, qualified, none, path_first)
+                let column = visited(|| assert_eq!(c.columns_with_prefix("i", 5).len(), 5));
+                (user, capped, qualified, none, path_first, column)
             })
             .collect();
         assert_eq!(counts[0], counts[1]);
         assert_eq!(counts[1], counts[2]);
         assert!(
-            counts[2].0 <= 3 && counts[2].1 <= 10 && counts[2].2 <= 5,
+            counts[2].0 <= 3 && counts[2].1 <= 10 && counts[2].2 <= 5 && counts[2].5 <= 5,
             "{counts:?}"
         );
     }

@@ -207,6 +207,42 @@ q = "--sql\nSELECT <CURSOR> FROM users, users"
 # completions: name column users
 ```
 
+## Columns before FROM
+
+With no relation in scope yet, a typed column name completes from every table and view
+that has it, each naming its relation, the schema's own before the system catalogs.
+
+```python
+q = "--sql\nSELECT na<CURSOR>"
+# completions: name column user_names
+# completions: name column users
+# completions: name column pg_catalog.pg_available_extension_versions
+# completions: name column pg_catalog.pg_available_extensions
+# completions: name column pg_catalog.pg_backend_memory_contexts
+# completions: name column pg_catalog.pg_config
+# completions: name column pg_catalog.pg_cursors
+# completions: name column pg_catalog.pg_file_settings
+# completions: name column pg_catalog.pg_prepared_statements
+# completions: name column pg_catalog.pg_settings
+# completions: ...
+```
+
+```python
+q = "--sql\nSELECT id, user_<CURSOR>"
+# completions: user_id column orders
+# completions: user_defined_type_catalog column information_schema.tables
+# completions: user_defined_type_name column information_schema.tables
+# completions: user_defined_type_schema column information_schema.tables
+# completions: user_name column pg_catalog.pg_hba_file_rules
+```
+
+Once the query has a `FROM`, only the columns in scope complete.
+
+```python
+q = "--sql\nSELECT user_<CURSOR> FROM users"
+# completions: None
+```
+
 ## CTE and subquery scope
 
 ```python
