@@ -3,7 +3,18 @@
 import sys
 from collections import namedtuple
 from collections.abc import AsyncIterator, Callable, Iterator, Mapping, Sequence
-from typing import Any, Final, LiteralString, cast, get_origin, is_protocol, is_typeddict, overload
+from functools import lru_cache
+from typing import (
+    Any,
+    Final,
+    LiteralString,
+    Self,
+    cast,
+    get_origin,
+    is_protocol,
+    is_typeddict,
+    overload,
+)
 
 if sys.version_info >= (3, 15):
     from typing import TypeForm
@@ -35,11 +46,16 @@ def _plan(form: object) -> tuple[bool, _Plan]:
     if origin is dict or is_typeddict(form):
         return True, lambda names: _itself
     if isinstance(form, type) and is_protocol(form):
-        return False, lambda names: cast(Any, namedtuple("Row", names, rename=True))._make
+        return False, lambda names: _named(tuple(names))._make
     if isinstance(form, type):
         cls = form
         return True, lambda names: lambda row: cls(**row)
     raise TypeError(f"no rustmy row type for {form!r}")
+
+
+@lru_cache(maxsize=512)
+def _named(names: tuple[str, ...]) -> Any:
+    return cast(Any, namedtuple("Row", names, rename=True))
 
 
 def _prepare(query: Any, params: Any) -> tuple[Any, Any, bool, _Plan]:
@@ -54,7 +70,10 @@ def _builder(cursor: Any, plan: _Plan) -> _Build:
 
 
 class Rows[T]:
-    """The rows of a query run with ``execute``, as ``T``; ``cursor`` is rustmy's."""
+    """The rows of a query run with ``execute``, as ``T``; ``cursor`` is rustmy's.
+
+    A context manager, closing the cursor on exit.
+    """
 
     def __init__(self, cursor: Cursor, plan: _Plan) -> None:
         self.cursor = cursor
@@ -72,6 +91,15 @@ class Rows[T]:
 
     def __iter__(self) -> Iterator[T]:
         return (self._build(row) for row in self.cursor)
+
+    def close(self) -> None:
+        self.cursor.close()
+
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self.close()
 
 
 class AsyncRows[T]:
@@ -95,6 +123,15 @@ class AsyncRows[T]:
     async def __aiter__(self) -> AsyncIterator[T]:
         async for row in self.cursor:
             yield self._build(row)
+
+    async def close(self) -> None:
+        await self.cursor.close()
+
+    async def __aenter__(self) -> Self:
+        return self
+
+    async def __aexit__(self, *exc: object) -> None:
+        await self.close()
 
 
 # mypy reads ``MYPY`` as true, pyright and ty as false. mypy cannot infer ``P`` from a
@@ -183,7 +220,7 @@ def scalar(conn: Connection, query: Any, /, *args: Any, **kwargs: Any) -> Any:
         >>> name = scalar(conn, name_by_id.bind((1,)))  # doctest: +SKIP
     """
     query, params = _scalar_args(query, args, kwargs)
-    with conn.cursor() as cursor:
+    with conn.cursor(Cursor) as cursor:
         cursor.execute(query, params)
         return _first(cursor.fetchone())
 
@@ -211,7 +248,7 @@ async def scalar_async(conn: aio.Connection, query: Any, /, *args: Any, **kwargs
         >>> name = await scalar_async(conn, name_by_id.bind((1,)))  # doctest: +SKIP
     """
     query, params = _scalar_args(query, args, kwargs)
-    async with conn.cursor() as cursor:
+    async with conn.cursor(aio.Cursor) as cursor:
         await cursor.execute(query, params)
         return _first(await cursor.fetchone())
 
@@ -234,7 +271,9 @@ def _scalar_args(query: Any, args: tuple[Any, ...], kwargs: dict[str, Any]) -> t
     params = kwargs.get("params")
     if isinstance(query, Bound):
         query, params = query
-    elif args and isinstance(args[-1], Sequence | Mapping) and not isinstance(args[-1], str):
+    elif len(args) == 2 or (
+        args and isinstance(args[-1], Sequence | Mapping) and not isinstance(args[-1], str)
+    ):
         params = args[-1]
     return query, params
 

@@ -152,6 +152,7 @@ class _Cursor:
         names = [column[0] for column in self.description]
         self.rows = [dict(zip(names, row, strict=True)) if as_dict else row for row in rows]
         self.executed: list[tuple[str, Any]] = []
+        self.closed = False
 
     def execute(self, query: str, params: Any = None) -> int:
         self.executed.append((query, params))
@@ -175,7 +176,10 @@ class _Cursor:
         return self
 
     def __exit__(self, *exc: object) -> None:
-        pass
+        self.close()
+
+    def close(self) -> None:
+        self.closed = True
 
 
 class _AsyncCursor:
@@ -203,7 +207,10 @@ class _AsyncCursor:
         return self
 
     async def __aexit__(self, *exc: object) -> None:
-        pass
+        await self.close()
+
+    async def close(self) -> None:
+        self.sync.close()
 
 
 class _Connection:
@@ -266,6 +273,12 @@ def test_execute_bound() -> None:
     assert conn.cursors[0].executed == [(query, (1,))]
 
 
+def test_rows_close_their_cursor() -> None:
+    with execute(_sync([(1, "ada")]), SQL[Named](QUERY)) as rows:
+        assert [row.name for row in rows] == ["ada"]
+    assert rows.cursor.closed
+
+
 def test_execute_rejects_a_row_type_it_cannot_build() -> None:
     with pytest.raises(TypeError, match="no rustmy row type"):
         execute(_sync([]), SQL[list[int]](QUERY))
@@ -277,6 +290,10 @@ def test_scalar() -> None:
     assert scalar(_sync([(2,)]), query, (1,)) == 2
     assert scalar(_sync([(2,)]), query.bind((1,))) == 2
     assert scalar(_sync([(3,)]), "-- sql\nSELECT 3 AS n", int, params=None) == 3
+    conn = _sync([(4,)])
+    assert scalar(conn, "-- sql\nSELECT %s + 3 AS n", int, 1) == 4
+    assert conn.cursors[0].executed == [("-- sql\nSELECT %s + 3 AS n", 1)]
+    assert conn.cursors[0].closed
     with pytest.raises(LookupError, match="no rows"):
         scalar(_sync([]), query, (1,))
 
@@ -288,6 +305,9 @@ def test_async_helpers() -> None:
         assert await rows.fetchmany() == [UserDC(2, "bob")]
         assert [row async for row in rows] == [UserDC(3, "cy")]
         assert await rows.fetchall() == []
+        async with await execute_async(_async([]), QUERY) as empty:
+            assert await empty.fetchone() is None
+        assert empty.cursor.sync.closed
         assert await scalar_async(_async([(4,)]), "-- sql\nSELECT 4 AS n", int) == 4
         with pytest.raises(LookupError):
             await scalar_async(_async([]), "-- sql\nSELECT 4 AS n", int)
@@ -299,6 +319,12 @@ def test_async_helpers() -> None:
 def test_execute_on_mysql(conn: rustmy.Connection, form: Any, expected: Any) -> None:
     assert execute(conn, SQL[form](QUERY)).fetchall() == [expected]
     assert scalar(conn, "-- sql\nSELECT %s + 1", int, (1,)) == 2
+    assert scalar(conn, "-- sql\nSELECT %s + 1", int, 1) == 2
+
+
+def test_scalar_on_a_dict_cursor_connection(mysql_connect_args: dict[str, Any]) -> None:
+    with closing(rustmy.connect(**mysql_connect_args, cursorclass=DictCursor)) as conn:
+        assert scalar(conn, SQL[tuple[int]]("-- sql\nSELECT 5 AS n")) == 5
 
 
 def test_async_helpers_on_mysql(mysql_connect_args: dict[str, Any]) -> None:
@@ -307,5 +333,7 @@ def test_async_helpers_on_mysql(mysql_connect_args: dict[str, Any]) -> None:
             rows = await execute_async(conn, SQL[Named](QUERY))
             assert [(row.id, row.name) async for row in rows] == [(1, "ada")]
             assert await scalar_async(conn, SQL[tuple[int]]("-- sql\nSELECT %s + 1"), (1,)) == 2
+        async with aio.connect(**mysql_connect_args, cursorclass=aio.DictCursor) as conn:
+            assert await scalar_async(conn, "-- sql\nSELECT 5 AS n", int) == 5
 
     asyncio.run(run())

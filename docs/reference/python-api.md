@@ -137,7 +137,10 @@ async def execute_async[T](conn: rustmy.aio.Connection, query: SQL[T], params: P
 
 Runs `query` on a new cursor, a `DictCursor` when `T` is a `TypedDict`, a `dict` or a
 class other than a `tuple` or `Protocol`, and returns its rows as `T`: `fetchone`,
-`fetchmany`, `fetchall` and iteration. `cursor` is the rustmy cursor.
+`fetchmany`, `fetchall` and iteration, as `Rows[T]` (`AsyncRows[T]`, awaited). `cursor`
+is the rustmy cursor, and the rows close it on `close()` or at the end of a `with`
+(`async with`) block. Both helpers pick `Cursor` or `DictCursor` themselves, whatever
+`cursorclass` the connection was opened with, so the rows are read in full.
 
 ### `scalar(conn, query, [form,] params=None)`
 
