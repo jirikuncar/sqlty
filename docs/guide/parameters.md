@@ -136,12 +136,13 @@ run("DELETE FROM users WHERE age = %(age)s", age=b"1")
 ## Driver calls
 
 `cursor.execute(query, params)`, `executemany` (each row), and
-`connection.execute(...)` are checked on psycopg, sqlite3 and aiosqlite
+`connection.execute(...)` are checked on psycopg, sqlite3, aiosqlite and rustmy
 receivers, `execute_fetchall` and `execute_insert` on aiosqlite ones, and
 `execute`, `fetch`, `fetchrow`, `fetchval`, `executemany` and `fetchmany` (each
 row) on asyncpg ones. The receiver must be evident in the file: bound to
 `psycopg.connect(...)`, `sqlite3.connect(...)`, `aiosqlite.connect(...)`,
-`asyncpg.connect(...)`, `<connection>.cursor()` (also as `with ... as name` and
+`asyncpg.connect(...)`, `rustmy.connect(...)`, `rustmy.aio.connect(...)`,
+`<connection>.cursor()` or `<pool>.acquire()` (also as `with ... as name` and
 awaited), or annotated with a driver class, directly or through an alias or a
 `NewType` the file binds once. The `execute` and `scalar` helpers
 of `sqlty.drivers.psycopg` are checked the same way, with no receiver to see.
@@ -149,7 +150,8 @@ The query is a literal, `SQL[T]("...")` of one, or a name assigned once to one.
 A call with no parameters is a `param-count-mismatch` when the query has
 placeholders, and a single value passed as the parameters,
 `execute(query, user_id)`, is a `param-type-mismatch`: the driver wants a
-sequence, `(user_id,)`.
+sequence, `(user_id,)`. rustmy is the exception: it binds a single value to the
+query's one placeholder.
 
 ```python
 import sqlite3

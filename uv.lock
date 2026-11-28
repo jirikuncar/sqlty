@@ -909,6 +909,46 @@ wheels = [
 ]
 
 [[package]]
+name = "rustmy"
+version = "1.5.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/0a/0e/ee0af30145e7b7e9bc75526938e144e5cad805b54acbf5ff83ebba649f07/rustmy-1.5.1.tar.gz", hash = "sha256:cb485480c2088424d255e931f1bfa33f28c837d4acda5c86aff2724579b3b82b", size = 321049, upload-time = "2026-11-27T18:58:55.012Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/62/3e/c31092c44d702fa0990d2f2bac017c6810c618295eb13e3893dbfa2af7f3/rustmy-1.5.1-cp314-cp314-macosx_10_12_x86_64.whl", hash = "sha256:e7c0dd627b188faeac6a9d911ee07b0fb811eeeadc928c1d859cfb3fe92e7a02", size = 2006905, upload-time = "2026-11-27T18:58:08.757Z" },
+    { url = "https://files.pythonhosted.org/packages/9a/e0/47a780f721ab1b3bed4fba1265de9516369f42a83774bc30ee79dbe82b50/rustmy-1.5.1-cp314-cp314-macosx_11_0_arm64.whl", hash = "sha256:ef7b75a2d76ea74475c7fe9e9dfb16ed84a8941e5c90ea1de478738b66a553f2", size = 1835611, upload-time = "2026-11-27T18:58:10.145Z" },
+    { url = "https://files.pythonhosted.org/packages/c8/46/02d0021bf9b2acb7a67b64fff415507fb6d73007f40cb88baf6939cd8902/rustmy-1.5.1-cp314-cp314-manylinux_2_28_aarch64.whl", hash = "sha256:e2f5f9f4eab442c02de3721284516e39ab3e3983a3908c629e914f18a0016a93", size = 2069264, upload-time = "2026-11-27T18:58:11.53Z" },
+    { url = "https://files.pythonhosted.org/packages/67/80/031c9b2227fa27a4cb7108a800c33f3741f84e096ee6615473c266afb4ca/rustmy-1.5.1-cp314-cp314-manylinux_2_28_x86_64.whl", hash = "sha256:a51f3947e1d867297b3099ba652c340871cc2ecff8a258e143ff668b57c6754e", size = 2126431, upload-time = "2026-11-27T18:58:12.756Z" },
+    { url = "https://files.pythonhosted.org/packages/3e/42/bd2dfae0e037062663e6ec6665b1a9317572e8677b0ae50aed9396baabda/rustmy-1.5.1-cp314-cp314-musllinux_1_2_aarch64.whl", hash = "sha256:20a81ef0bf6a1750e1ec72b1907844121e6df48c50e8f8fbf4ae3eb132d406e3", size = 2238905, upload-time = "2026-11-27T18:58:14.082Z" },
+    { url = "https://files.pythonhosted.org/packages/89/c2/000c0958417fcf221f875cc3c867848acbda6582037190a90b8749823486/rustmy-1.5.1-cp314-cp314-musllinux_1_2_x86_64.whl", hash = "sha256:24b271e3f6620433ee61d47810640ac491246fae3eb6f44f1f8bb64044569157", size = 2340580, upload-time = "2026-11-27T18:58:15.448Z" },
+    { url = "https://files.pythonhosted.org/packages/26/4f/a72e910d851f2ecabe485a9367ba05658c454487f4c943f74b493d2f9a43/rustmy-1.5.1-cp314-cp314-win_amd64.whl", hash = "sha256:9b9b4b73e0672a61b694a933b771b14e23e6f8b9e2de835c42f14e00a53817db", size = 1848881, upload-time = "2026-11-27T18:58:16.756Z" },
+    { url = "https://files.pythonhosted.org/packages/bc/c9/e5b0b4b9bb0ada408be576e224ee1cb23b7a7ef2328573bc293e8347e990/rustmy-1.5.1-cp314-cp314-win_arm64.whl", hash = "sha256:5e184398d8e43e641f9b1cdbd5d88765a8591757711224e67d40b2d37aa6d98d", size = 1760272, upload-time = "2026-11-27T18:58:18.068Z" },
+    { url = "https://files.pythonhosted.org/packages/50/16/8a1da3256eca88edd5f5147a7f86cce758163de8cf4c76fa22c604abee91/rustmy-1.5.1-cp314-cp314t-macosx_10_12_x86_64.whl", hash = "sha256:926e4f7602ba89b9ca3778d9d662c5b2b976de8135d789086207e9e77b091120", size = 2002549, upload-time = "2026-11-27T18:58:19.439Z" },
+    { url = "https://files.pythonhosted.org/packages/21/96/38a0dc4b346143ccfbb72e59622ef8d8505bacc38d3103c025b785935903/rustmy-1.5.1-cp314-cp314t-macosx_11_0_arm64.whl", hash = "sha256:30a1e5670b26bb4106e0d1c3b064b3a9ea9bde88521087f026f9f5d363600744", size = 1829647, upload-time = "2026-11-27T18:58:20.902Z" },
+    { url = "https://files.pythonhosted.org/packages/05/76/cc0a07717ffda83ad74cfc6480070afa5e848928576b253932fbc0ee3b6a/rustmy-1.5.1-cp314-cp314t-manylinux_2_28_aarch64.whl", hash = "sha256:49d985560eca834f495ef2216a4c56e7fe3a77235c9c4df0ab633c33a88634ce", size = 2065284, upload-time = "2026-11-27T18:58:22.854Z" },
+    { url = "https://files.pythonhosted.org/packages/ea/8e/05c6d818c58e71df01d8a5acf4a4d1cb8a85d8a248172471b6d46221293c/rustmy-1.5.1-cp314-cp314t-manylinux_2_28_x86_64.whl", hash = "sha256:3791d808215255cd51738c549608d315de9122f9536516bd9260284bddb09a39", size = 2123865, upload-time = "2026-11-27T18:58:24.167Z" },
+    { url = "https://files.pythonhosted.org/packages/73/b2/7fe418d42a2f922dcc1b6fd3b1a6b300bf530dc83f681ccecaed574479f2/rustmy-1.5.1-cp314-cp314t-musllinux_1_2_aarch64.whl", hash = "sha256:d5f82e3eabd20f7e00ae3cda3e093117b9dc51aa63f26ec0e2ec390b95360fde", size = 2236476, upload-time = "2026-11-27T18:58:25.465Z" },
+    { url = "https://files.pythonhosted.org/packages/71/5b/72cb835511e86c308cd958fcbb8b3f2e77a47b08595fe03cb56344f95417/rustmy-1.5.1-cp314-cp314t-musllinux_1_2_x86_64.whl", hash = "sha256:04153be1af4f505a8e5c24dd7531816276cd6e196794e2166e1d861c17a6de6f", size = 2338687, upload-time = "2026-11-27T18:58:26.98Z" },
+    { url = "https://files.pythonhosted.org/packages/34/3a/6c4bcfeee078bae9f00d98cae1af34e9d7ebe4711a132043f088c73aee24/rustmy-1.5.1-cp314-cp314t-win_amd64.whl", hash = "sha256:28e7b04f1a70f0f48ccf91a535c2c0c00b08cbf50d25c6dd0b27ed3d4fdc3dc3", size = 1847333, upload-time = "2026-11-27T18:58:28.291Z" },
+    { url = "https://files.pythonhosted.org/packages/15/99/98f2b73e7245f5dda468aeefddd6d1e19ca2ce6be8d64110849418b5ecaf/rustmy-1.5.1-cp314-cp314t-win_arm64.whl", hash = "sha256:0b3436639f31bb0051d359f6eef89a4ab9f5384968e3283d1894391c99060467", size = 1758674, upload-time = "2026-11-27T18:58:29.64Z" },
+    { url = "https://files.pythonhosted.org/packages/7a/3d/87ae7ff2775eb44af936f52c55458cb082fb45f29d9b675fab8d461c249e/rustmy-1.5.1-cp315-cp315-macosx_10_12_x86_64.whl", hash = "sha256:aec264b3ba10a98962396fbe23d9b38c74df53700f7d75a8537641bfc8ec430d", size = 2007170, upload-time = "2026-11-27T18:58:30.909Z" },
+    { url = "https://files.pythonhosted.org/packages/ec/8d/1bad89d239fc62b0e5cbeefa4e8627f6126f84da8ffa0f3be46ac9315a92/rustmy-1.5.1-cp315-cp315-macosx_11_0_arm64.whl", hash = "sha256:c285f2bc1f6115ac525b50b427ad582774cb75e40fbffb8a5c076cfd2dcd825e", size = 1835401, upload-time = "2026-11-27T18:58:32.179Z" },
+    { url = "https://files.pythonhosted.org/packages/4f/e6/3e665faa57682e431f539696b369a970011ff498334f2731dbee0173e9d6/rustmy-1.5.1-cp315-cp315-manylinux_2_28_aarch64.whl", hash = "sha256:002b509099889b90f0ab794d40adc5b23ae870be6b291f3b97a2c22bfd362676", size = 2069656, upload-time = "2026-11-27T18:58:33.659Z" },
+    { url = "https://files.pythonhosted.org/packages/68/dc/0b9a53b551d2f90b522a159c8212d692ba07bafe6b9d2a9539106769c9fa/rustmy-1.5.1-cp315-cp315-manylinux_2_28_x86_64.whl", hash = "sha256:0cf7001824c0062977bca37e297075f50eca163bc6c3d81372190819c13dbef6", size = 2126529, upload-time = "2026-11-27T18:58:34.967Z" },
+    { url = "https://files.pythonhosted.org/packages/44/1e/89504808730bd31dd1f90b96a6c9351908421636d35d7a6cb9e5b287b28c/rustmy-1.5.1-cp315-cp315-musllinux_1_2_aarch64.whl", hash = "sha256:7cfbaa509818a04af1eb126681d042a5954099ee375f7f86acd57c899c9f1089", size = 2238863, upload-time = "2026-11-27T18:58:36.374Z" },
+    { url = "https://files.pythonhosted.org/packages/4f/02/47a6bac5af2866d16fd3e8506d95b1fafb6d50349a6ae87c4e5757e2b15e/rustmy-1.5.1-cp315-cp315-musllinux_1_2_x86_64.whl", hash = "sha256:356919d15c927d7bfe8402aa6315723a001ec4b51d74bdd240d27aaef2871807", size = 2340676, upload-time = "2026-11-27T18:58:38.02Z" },
+    { url = "https://files.pythonhosted.org/packages/db/4f/d69ef1fc0ea44f48cb06a1a731f2e9b1ffb5b73fa0b2d54977a3f9341276/rustmy-1.5.1-cp315-cp315-win_amd64.whl", hash = "sha256:124e4416f05ff0b33d3e5341aa99c2eb7b6ed88625aab9455bd167bfcaffcd11", size = 1848960, upload-time = "2026-11-27T18:58:39.239Z" },
+    { url = "https://files.pythonhosted.org/packages/58/d5/836c948e843f1f28c0764321a936f09af4c88aad80eb03107cc5c40cb0bb/rustmy-1.5.1-cp315-cp315-win_arm64.whl", hash = "sha256:ada44124528496a81e67593b885ace6a2ea563aa889991c1dcbe4b1558b2d959", size = 1760537, upload-time = "2026-11-27T18:58:40.919Z" },
+    { url = "https://files.pythonhosted.org/packages/36/50/ed130e58d77a37a5c19e179f496a247ea6ddfdbbb11691236057f41fc113/rustmy-1.5.1-cp315-cp315t-macosx_10_12_x86_64.whl", hash = "sha256:bf29d0f9f256b02dc909a94ad52dc808864f5866b8d2a4ddb1fac3f0565fab83", size = 2002853, upload-time = "2026-11-27T18:58:42.235Z" },
+    { url = "https://files.pythonhosted.org/packages/9c/30/5f4df662a6b0e04ef989663413048e5b7d3f3e0d839fb0433de5c34ee1df/rustmy-1.5.1-cp315-cp315t-macosx_11_0_arm64.whl", hash = "sha256:7cfc23b5dd5d7c95939bd5e1b04b340583a7c188896f1ef905f7b22f1bd6d51d", size = 1829630, upload-time = "2026-11-27T18:58:43.527Z" },
+    { url = "https://files.pythonhosted.org/packages/be/68/b691c883db7de3c8e49135699e98e49b74da38fa683edc352391d2d462c4/rustmy-1.5.1-cp315-cp315t-manylinux_2_28_aarch64.whl", hash = "sha256:d25f545ed0cc510bf5197146a8d25d775dffaf742910c0c47e3eab61d7b8971a", size = 2065446, upload-time = "2026-11-27T18:58:44.859Z" },
+    { url = "https://files.pythonhosted.org/packages/98/20/8fa3ca6db7c7b40ba444c2fa77cd10d4db926e8d779150f9bdb88f955cb5/rustmy-1.5.1-cp315-cp315t-manylinux_2_28_x86_64.whl", hash = "sha256:548e537f7417bdc7f5d587c9f8dd818bb258cf1d600eca233bbab29a218e53a3", size = 2124189, upload-time = "2026-11-27T18:58:46.551Z" },
+    { url = "https://files.pythonhosted.org/packages/a4/7b/bc38ac1c3cd6d607cba8ee08165bf823035f7260f48ce44efc882a15c164/rustmy-1.5.1-cp315-cp315t-musllinux_1_2_aarch64.whl", hash = "sha256:4a0495137f6745d907e3c429c141c8e27991b4f499a83eae254fc52a28cdc3fd", size = 2236120, upload-time = "2026-11-27T18:58:48.305Z" },
+    { url = "https://files.pythonhosted.org/packages/b9/7a/4e5857d0e4c703c2180071b045a4bca7fb1e1276f391ded897fb67499519/rustmy-1.5.1-cp315-cp315t-musllinux_1_2_x86_64.whl", hash = "sha256:ca99d6364f055001f05127bc84046625c7a3a0db6c8210578b4ca24de10932ca", size = 2338782, upload-time = "2026-11-27T18:58:49.698Z" },
+    { url = "https://files.pythonhosted.org/packages/39/f7/4fe8434fe41455c7a62890b2af27562990547ad9e188d406a25147a3da88/rustmy-1.5.1-cp315-cp315t-win_amd64.whl", hash = "sha256:12a44c1aeab38f2563b5fb9aeb4e9ae971fea5dada9287ac048cda6f0d2366c8", size = 1847392, upload-time = "2026-11-27T18:58:51.71Z" },
+    { url = "https://files.pythonhosted.org/packages/23/86/6bfbdd4a099ca8d5fd97928601ff46374c71781c70a4979e52a6180ac0b5/rustmy-1.5.1-cp315-cp315t-win_arm64.whl", hash = "sha256:f24d5cd66f81aba4b6d85cc946438153f22574d5b4234f30a45dabe7a2da4f6f", size = 1758814, upload-time = "2026-11-27T18:58:53.504Z" },
+]
+
+[[package]]
 name = "sortedcontainers"
 version = "2.4.0"
 source = { registry = "https://pypi.org/simple" }
@@ -965,6 +1005,9 @@ fuzz = [
 psycopg = [
     { name = "psycopg" },
 ]
+rustmy = [
+    { name = "rustmy" },
+]
 
 [package.metadata]
 requires-dist = [
@@ -999,6 +1042,7 @@ dev = [
 duckdb = [{ name = "duckdb", specifier = ">=1.4.0" }]
 fuzz = [{ name = "hypothesis", specifier = ">=6.140" }]
 psycopg = [{ name = "psycopg", specifier = ">=3.2.12" }]
+rustmy = [{ name = "rustmy", specifier = ">=1.5.1" }]
 
 [[package]]
 name = "ty"

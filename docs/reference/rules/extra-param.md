@@ -20,7 +20,7 @@ without placeholders. It checks the calls
 
 ## Why is this bad?
 
-psycopg, sqlite3 and aiosqlite ignore such a key, so the value never reaches
+psycopg, sqlite3, aiosqlite and rustmy ignore such a key, so the value never reaches
 the query: often a misspelled name, or a query that lost its placeholder.
 
 ## Example

@@ -108,6 +108,8 @@ duckdb = ["duckdb>=1.4.0"]
 psycopg = ["psycopg>=3.2.12"]
 # The aiosqlite calls sqlty checks, run against aiosqlite (tests/test_aiosqlite.py).
 aiosqlite = ["aiosqlite>=0.22.1"]
+# The rustmy calls sqlty checks and the values it returns, run with SQLTY_MYSQL_DSN.
+rustmy = ["rustmy>=1.5.1"]
 fuzz = [
     "hypothesis>=6.140",
 ]

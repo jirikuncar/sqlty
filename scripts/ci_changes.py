@@ -95,6 +95,8 @@ PACKAGES: dict[str, tuple[list[str], list[str]]] = {
             *CORPUS,
             "tests/test_server_describe.py",
             "tests/test_driver_values.py",
+            "tests/test_rustmy.py",
+            "tests/conftest.py",
             "tests/_value_types.py",
             "tests/fixtures/driver_values.toml",
         ],

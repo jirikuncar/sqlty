@@ -60,10 +60,12 @@ separately, in its own placeholder style:
 | psycopg 3 | `%s`, `%(name)s` | a tuple, or a dict for `%(name)s` | yes |
 | psycopg2 | `%s`, `%(name)s` | a tuple, or a dict for `%(name)s` | no |
 | asyncpg | `$1`, `$2` | positional arguments after the query | yes |
+| rustmy | `%s`, `%(name)s` | a tuple, a dict for `%(name)s`, or a single value | yes |
 | SQLAlchemy `text()` | `:name` | a dict | no |
 | Django `connection.cursor()` | `%s` | a list or tuple | no |
 
-A single value still goes in a sequence: `(user_id,)`, not `(user_id)`.
+A single value still goes in a sequence, `(user_id,)` and not `(user_id)`, except
+with rustmy, which binds it to the query's one placeholder.
 `sqlty check` compares the parameters a call passes with the query where the
 driver is checked: see [Driver calls](parameters.md#driver-calls). Elsewhere it
 checks the SQL and the row type.
@@ -166,6 +168,28 @@ async def rename(db: aiosqlite.Connection, name: str) -> None:
     await db.execute("UPDATE users SET name = ? WHERE id = ?", (name, 1))
     # error: [param-count-mismatch] "query has 2 parameters, the call passes 1"
     await db.execute("UPDATE users SET name = ? WHERE id = ?", (name,))
+```
+
+## rustmy
+
+[rustmy](https://github.com/M4RC0Sx/rustmy) is a MySQL and MariaDB driver with
+PyMySQL's placeholders, for threads and, as `rustmy.aio`, for `asyncio`. The
+cursors of its connections and pools are checked, prepared ones too:
+
+```toml
+[tool.sqlty]
+dialect = "mysql"
+```
+
+```python
+from rustmy import aio
+
+
+async def rename(pool: aio.Pool, user_id: int, name: str) -> None:
+    async with pool.acquire() as conn, conn.cursor() as cur:
+        await cur.execute("SELECT id, name FROM users WHERE id = %s", user_id)
+        # error: [param-count-mismatch] "query has 2 parameters, the call passes 1"
+        await cur.execute("UPDATE users SET name = %s WHERE id = %s", (name,))
 ```
 
 ## SQLAlchemy `text()`

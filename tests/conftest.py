@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import contextlib
 import os
+from typing import Any
+from urllib.parse import parse_qs, urlparse
 
 import pytest
 
@@ -44,3 +46,22 @@ def pytest_configure(config: pytest.Config) -> None:
 def pytest_unconfigure(config: pytest.Config) -> None:
     if WORKER and (dsn := os.environ.get("SQLTY_PG_SERVER_DSN")):
         _worker_database(dsn, create=False)
+
+
+@pytest.fixture(scope="session")
+def mysql_connect_args() -> dict[str, Any]:
+    """PyMySQL's and rustmy's ``connect`` arguments for ``SQLTY_MYSQL_DSN``
+    (``mysql://user:password@host:port/database`` or ``unix_socket=...``)."""
+    dsn = os.environ.get("SQLTY_MYSQL_DSN")
+    if not dsn:
+        pytest.skip("SQLTY_MYSQL_DSN not set")
+    url = urlparse(dsn)
+    return {
+        "host": url.hostname or "localhost",
+        "port": url.port or 3306,
+        "user": url.username or "root",
+        "password": url.password or "",
+        "database": url.path.lstrip("/"),
+        "autocommit": True,
+        **{key: values[0] for key, values in parse_qs(url.query).items()},
+    }

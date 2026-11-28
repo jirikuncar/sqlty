@@ -5,7 +5,7 @@ Each is stored in a one-column table, read back through the dialect's usual driv
 checked against the Python type sqlty infers for ``SELECT c FROM t``; a NULL read back
 must come from a column sqlty says can be NULL. SQLite runs in every test run; PostgreSQL
 with ``SQLTY_PG_DSN`` (the pg-fidelity job), MySQL with ``SQLTY_MYSQL_DSN``
-(``mysql://user:password@host:port/database`` or ``unix_socket=...``, read by PyMySQL).
+(``mysql://user:password@host:port/database`` or ``unix_socket=...``), read by PyMySQL and rustmy.
 
 A column sqlty leaves untyped is not checked; ``KNOWN_GAPS`` lists understood mismatches.
 """
@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import rustmy
 
 from sqlty import core
 from tests._value_types import matches
@@ -94,25 +95,15 @@ def test_psycopg(pg: Any, sql_type: str, value_sql: str) -> None:
 
 
 @pytest.fixture(scope="module")
-def mysql() -> Iterator[Any]:
-    dsn = os.environ.get("SQLTY_MYSQL_DSN")
-    if not dsn:
-        pytest.skip("SQLTY_MYSQL_DSN not set")
+def mysql(mysql_connect_args: dict[str, Any]) -> Iterator[Any]:
     pymysql = pytest.importorskip("pymysql")
-    from urllib.parse import parse_qs, urlparse
+    with closing(pymysql.connect(**mysql_connect_args)) as conn:
+        yield conn
 
-    url = urlparse(dsn)
-    options = {key: values[0] for key, values in parse_qs(url.query).items()}
-    conn = pymysql.connect(
-        host=url.hostname or "localhost",
-        port=url.port or 3306,
-        user=url.username or "root",
-        password=url.password or "",
-        database=url.path.lstrip("/"),
-        autocommit=True,
-        **options,
-    )
-    with closing(conn):
+
+@pytest.fixture(scope="module")
+def mysql_rustmy(mysql_connect_args: dict[str, Any]) -> Iterator[rustmy.Connection]:
+    with closing(rustmy.connect(**mysql_connect_args)) as conn:
         yield conn
 
 
@@ -120,6 +111,19 @@ def mysql() -> Iterator[Any]:
 def test_pymysql(mysql: Any, sql_type: str, value_sql: str) -> None:
     def fetch(schema: str, value: str) -> list[Any]:
         with mysql.cursor() as cursor:
+            cursor.execute("DROP TEMPORARY TABLE IF EXISTS t")
+            cursor.execute(schema.replace("CREATE TABLE", "CREATE TEMPORARY TABLE"))
+            cursor.execute(f"INSERT INTO t VALUES ({value}), (NULL)")
+            cursor.execute("SELECT c FROM t")
+            return [row[0] for row in cursor.fetchall()]
+
+    _check("mysql", sql_type, value_sql, fetch)
+
+
+@pytest.mark.parametrize(("sql_type", "value_sql"), CASES["mysql"].items())
+def test_rustmy(mysql_rustmy: rustmy.Connection, sql_type: str, value_sql: str) -> None:
+    def fetch(schema: str, value: str) -> list[Any]:
+        with mysql_rustmy.cursor() as cursor:
             cursor.execute("DROP TEMPORARY TABLE IF EXISTS t")
             cursor.execute(schema.replace("CREATE TABLE", "CREATE TEMPORARY TABLE"))
             cursor.execute(f"INSERT INTO t VALUES ({value}), (NULL)")

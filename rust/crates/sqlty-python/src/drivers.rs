@@ -1,5 +1,5 @@
 //! Driver calls that pass a query and its parameters: `cursor.execute(query, params)` on a receiver the file shows is a
-//! psycopg, sqlite3, aiosqlite or asyncpg connection or cursor, and the
+//! psycopg, sqlite3, aiosqlite, asyncpg or rustmy connection or cursor, and the
 //! `sqlty.drivers.psycopg` helpers.
 
 use std::collections::{HashMap, HashSet};
@@ -30,6 +30,18 @@ const CONNECTIONS: [(&str, &str); 13] = [
     ("asyncpg.create_pool", "asyncpg"),
     ("asyncpg.Pool", "asyncpg"),
 ];
+/// rustmy's classes, by the names its modules export them under: `rustmy.aio.Pool`,
+/// `rustmy.cursors.DictCursor`.
+const RUSTMY: [&str; 8] = [
+    "Connection",
+    "Pool",
+    "Cursor",
+    "DictCursor",
+    "SSCursor",
+    "SSDictCursor",
+    "PreparedCursor",
+    "PreparedDictCursor",
+];
 const CURSORS: [(&str, &str); 4] = [
     ("psycopg.Cursor", "psycopg"),
     ("psycopg.AsyncCursor", "psycopg"),
@@ -39,7 +51,7 @@ const CURSORS: [(&str, &str); 4] = [
 const BUNDLED_MODULE: &str = "sqlty.drivers.psycopg.";
 fn methods(driver: &str) -> &'static [&'static str] {
     match driver {
-        "psycopg" | "sqlite3" => &["execute", "executemany"],
+        "psycopg" | "sqlite3" | "rustmy" => &["execute", "executemany"],
         "aiosqlite" => &[
             "execute",
             "executemany",
@@ -72,7 +84,7 @@ pub struct DriverCall {
     pub query: String,
     /// The arguments for the placeholders, empty when none are passed, `None` when not spelled out.
     pub params: Option<Vec<Param>>,
-    /// `psycopg`, `sqlite3`, `aiosqlite` or `asyncpg`.
+    /// `psycopg`, `sqlite3`, `aiosqlite`, `asyncpg` or `rustmy`.
     pub driver: &'static str,
     /// The type of a single value passed where the driver takes a sequence or mapping.
     pub single: Option<String>,
@@ -80,9 +92,27 @@ pub struct DriverCall {
     pub query_span: (usize, usize),
 }
 
+/// The driver of the connection, cursor or pool class `name`.
+fn class_driver(name: &str) -> Option<&'static str> {
+    if let Some((_, driver)) = CONNECTIONS
+        .iter()
+        .chain(&CURSORS)
+        .find(|(known, _)| *known == name)
+    {
+        return Some(driver);
+    }
+    let name = name.strip_prefix("rustmy.")?;
+    let name = name.strip_prefix("aio.").unwrap_or(name);
+    let name = ["connections.", "cursors.", "pool."]
+        .iter()
+        .find_map(|module| name.strip_prefix(module))
+        .unwrap_or(name);
+    RUSTMY.contains(&name).then_some("rustmy")
+}
+
 /// Whether `text` can hold a driver call at all, checked before parsing.
 pub fn may_hold(text: &str) -> bool {
-    ["psycopg", "sqlite3", "aiosqlite", "asyncpg"]
+    ["psycopg", "sqlite3", "aiosqlite", "asyncpg", "rustmy"]
         .iter()
         .any(|driver| text.contains(driver))
         && ["execute", "fetch", "scalar"]
@@ -223,10 +253,11 @@ impl<'a> Finder<'a, '_> {
             }
             return;
         }
-        let name = if driver == "psycopg" {
-            "params"
-        } else {
-            "parameters"
+        let name = match driver {
+            "psycopg" => "params",
+            "rustmy" if attr == "executemany" => "seq_of_args",
+            "rustmy" => "args",
+            _ => "parameters",
         };
         let mut arg = args.get(1);
         if arg.is_none() {
@@ -273,14 +304,24 @@ impl<'a> Finder<'a, '_> {
         let Some(query) = query else {
             return;
         };
-        let params = match arg {
+        let mut params = match arg {
             None => Some(Vec::new()),
+            Some(Expr::NoneLiteral(_)) if driver == "rustmy" && !many => Some(Vec::new()),
             Some(arg) => self.types.literal_params(arg, stack),
         };
-        let kind = match (arg, &params) {
+        let mut kind = match (arg, &params) {
             (Some(arg), None) => self.types.arg_type(arg, stack),
             _ => None,
         };
+        // rustmy binds a single value to the one placeholder: `execute(query, 1)`.
+        if driver == "rustmy" {
+            if let Some(single) = kind.take().filter(|kind| is_scalar(kind)) {
+                params = Some(vec![Param {
+                    key: Key::Index(1),
+                    kind: Some(single),
+                }]);
+            }
+        }
         let sequence = matches!(driver, "sqlite3" | "aiosqlite");
         let single = kind.filter(|kind| {
             is_scalar(kind) && !(sequence && matches!(kind.as_str(), "str" | "bytes"))
@@ -463,14 +504,12 @@ impl<'a> Finder<'a, '_> {
         chain: &[Scope],
     ) -> Option<&'static str> {
         if let Some(annotation) = annotation {
-            if let Some(name) = self.class_of(annotation, chain) {
-                if let Some((_, driver)) = CONNECTIONS
-                    .iter()
-                    .chain(&CURSORS)
-                    .find(|(known, _)| *known == name)
-                {
-                    return Some(driver);
-                }
+            if let Some(driver) = self
+                .class_of(annotation, chain)
+                .as_deref()
+                .and_then(class_driver)
+            {
+                return Some(driver);
             }
         }
         let mut value = value?;
@@ -484,12 +523,17 @@ impl<'a> Finder<'a, '_> {
             if let Some((_, driver)) = CONNECTIONS.iter().find(|(known, _)| *known == name) {
                 return Some(driver);
             }
+            if let Some(driver) = rustmy_connect(&name) {
+                return Some(driver);
+            }
         }
         match call.func.as_ref() {
-            Expr::Attribute(attr) if attr.attr.as_str() == "cursor" => match attr.value.as_ref() {
-                Expr::Name(base) => self.driver(base.id.as_str(), chain),
-                _ => None,
-            },
+            Expr::Attribute(attr) if matches!(attr.attr.as_str(), "cursor" | "acquire") => {
+                match attr.value.as_ref() {
+                    Expr::Name(base) => self.driver(base.id.as_str(), chain),
+                    _ => None,
+                }
+            }
             _ => None,
         }
     }
@@ -501,6 +545,16 @@ impl<'a> Finder<'a, '_> {
             _ => None,
         }
     }
+}
+
+/// The driver of a call opening a rustmy connection or pool: `rustmy.connect(...)`,
+/// `rustmy.aio.create_pool(...)`.
+fn rustmy_connect(name: &str) -> Option<&'static str> {
+    let call = name.strip_prefix("rustmy.")?;
+    let call = call.strip_prefix("aio.").unwrap_or(call);
+    matches!(call, "connect" | "create_pool")
+        .then_some("rustmy")
+        .or_else(|| class_driver(name))
 }
 
 fn keyword<'a>(call: &'a ExprCall, name: &str) -> Option<&'a Expr> {
