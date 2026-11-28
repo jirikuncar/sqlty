@@ -35,6 +35,7 @@ from sqlty.core import Settings, highlight_source
 
 SQL_TOKENS: dict[str, _TokenType] = {
     "keyword": Keyword,
+    "function": Name.Function,
     "string": String.Single,
     "number": Number,
     "comment": Comment.Single,

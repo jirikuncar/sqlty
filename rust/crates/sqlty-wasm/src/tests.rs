@@ -508,7 +508,7 @@ fn an_offset_past_the_end_is_the_end() {
 
 #[test]
 fn every_highlight_and_candidate_kind_has_a_name() {
-    let source = "q = \"--sql\\nWITH c AS (SELECT 1) SELECT 'a', 1 + $1 FROM \"";
+    let source = "q = \"--sql\\nWITH c AS (SELECT 1) SELECT 'a', 1 + $1, now() FROM \"";
     let answer = ask(&json!({
         "op": "analyze", "source": source,
         "schema": format!("{SCHEMA}\nCREATE VIEW v AS SELECT id FROM users;"), "dialect": "postgres",
@@ -523,6 +523,7 @@ fn every_highlight_and_candidate_kind_has_a_name() {
         kinds,
         [
             "comment",
+            "function",
             "keyword",
             "number",
             "operator",

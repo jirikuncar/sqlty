@@ -510,8 +510,8 @@ def complete_source(
 class Highlight(NamedTuple):
     """A token to color: the bytes ``start`` to ``end`` of the source.
 
-    ``kind`` is ``keyword``, ``string``, ``number``, ``comment``, ``operator`` or
-    ``parameter``.
+    ``kind`` is ``keyword``, ``function``, ``string``, ``number``, ``comment``, ``operator``
+    or ``parameter``.
     """
 
     start: int
@@ -524,7 +524,7 @@ def highlight_source(source: str | ParsedSource, settings: Settings = DEFAULT) -
 
     The strings are those of ``complete_source``; every other string stays a Python string. Names
     are not colored: a word is a keyword only when it is a reserved word or a clause, so
-    ``name`` and ``status`` stay names. A token written across string literals or escape
+    ``name`` and ``status`` stay names, and a function only when ``(`` follows it. A token written across string literals or escape
     sequences gets one range per piece. ``sqlty server`` sends these as semantic tokens.
 
     Example:

@@ -22,3 +22,5 @@ leading = f"""
 --sql
 SELECT {limit} FROM users
 """
+functions = "--sql\nSELECT count(*), pg_catalog.now(), count FROM users"
+names = "--sql\nINSERT INTO users(id) SELECT CAST(1 AS numeric(10, 2))"

@@ -138,3 +138,118 @@ c = b"--sql\nSELECT 1"
 run("SELECT 1")
 # highlighted: None
 ```
+
+## Function names
+
+A word directly followed by `(` is a function, also when qualified or quoted. A keyword that
+takes parentheses stays a keyword, and so does a column named like a function.
+
+### PostgreSQL
+
+```python
+q = "--sql\nSELECT count(*), coalesce(name, ''), count FROM users WHERE created < pg_catalog.now() AND id IN (1) AND EXISTS (SELECT 1)"
+# highlighted: comment --sql
+# highlighted: keyword SELECT
+# highlighted: function count
+# highlighted: operator *
+# highlighted: function coalesce
+# highlighted: string ''
+# highlighted: keyword FROM
+# highlighted: keyword WHERE
+# highlighted: operator <
+# highlighted: function now
+# highlighted: keyword AND
+# highlighted: keyword IN
+# highlighted: number 1
+# highlighted: keyword AND
+# highlighted: keyword EXISTS
+# highlighted: keyword SELECT
+# highlighted: number 1
+```
+
+A table, a CTE, an alias or a type followed by `(` is not a function.
+
+```python
+q = "--sql\nWITH c(a) AS (SELECT CAST(1 AS numeric(10, 2))) INSERT INTO users(id) SELECT a::varchar(3) FROM c AS x(a)"
+# highlighted: comment --sql
+# highlighted: keyword WITH
+# highlighted: keyword AS
+# highlighted: keyword SELECT
+# highlighted: keyword CAST
+# highlighted: number 1
+# highlighted: keyword AS
+# highlighted: number 10
+# highlighted: number 2
+# highlighted: keyword INSERT
+# highlighted: keyword INTO
+# highlighted: keyword SELECT
+# highlighted: operator ::
+# highlighted: number 3
+# highlighted: keyword FROM
+# highlighted: keyword AS
+```
+
+An alias without `AS`, and a later CTE, are not functions either.
+
+```python
+q = "--sql\nWITH a AS (SELECT 1), b(x) AS (SELECT 2) SELECT n FROM b, generate_series(1, 3) g(n)"
+# highlighted: comment --sql
+# highlighted: keyword WITH
+# highlighted: keyword AS
+# highlighted: keyword SELECT
+# highlighted: number 1
+# highlighted: keyword AS
+# highlighted: keyword SELECT
+# highlighted: number 2
+# highlighted: keyword SELECT
+# highlighted: keyword FROM
+# highlighted: function generate_series
+# highlighted: number 1
+# highlighted: number 3
+```
+
+### MySQL
+
+```toml
+[tool.sqlty]
+dialect = "mysql"
+```
+
+```python
+q = "--sql\nSELECT count(*), `my fn`(1), count FROM users WHERE created < now() AND id IN (1)"
+# highlighted: comment --sql
+# highlighted: keyword SELECT
+# highlighted: function count
+# highlighted: operator *
+# highlighted: function `my fn`
+# highlighted: number 1
+# highlighted: keyword FROM
+# highlighted: keyword WHERE
+# highlighted: operator <
+# highlighted: function now
+# highlighted: keyword AND
+# highlighted: keyword IN
+# highlighted: number 1
+```
+
+### SQLite
+
+```toml
+[tool.sqlty]
+dialect = "sqlite"
+```
+
+```python
+q = "--sql\nSELECT count(*), ifnull(name, ''), count FROM users WHERE id IN (VALUES (1))"
+# highlighted: comment --sql
+# highlighted: keyword SELECT
+# highlighted: function count
+# highlighted: operator *
+# highlighted: function ifnull
+# highlighted: string ''
+# highlighted: keyword FROM
+# highlighted: keyword WHERE
+# highlighted: keyword IN
+# highlighted: keyword VALUES
+# highlighted: number 1
+```

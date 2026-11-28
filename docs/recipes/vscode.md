@@ -238,9 +238,9 @@ VS Code shows the hovers of every extension together, so sqlty's sits next to Py
 
 ## Highlighting
 
-A string marked `--sql` or `-- sql` is highlighted as SQL: keywords, strings, numbers,
-comments, operators and placeholders. Other strings stay Python strings, and so do
-raw strings and bytes:
+A string marked `--sql` or `-- sql` is highlighted as SQL: keywords, function names,
+strings, numbers, comments, operators and placeholders. Other strings stay Python
+strings, and so do raw strings and bytes:
 
 ```python
 q = "--sql\nSELECT name FROM users WHERE id = %(id)s"  # SQL

@@ -576,6 +576,7 @@ fn candidate_kind(kind: CandidateKind) -> &'static str {
 fn highlight_kind(kind: Highlight) -> &'static str {
     match kind {
         Highlight::Keyword => "keyword",
+        Highlight::Function => "function",
         Highlight::String => "string",
         Highlight::Number => "number",
         Highlight::Comment => "comment",
