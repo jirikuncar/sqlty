@@ -50,7 +50,7 @@ pub enum Highlight {
     Keyword,
     /// `count` in `count(*)`, `now` in `pg_catalog.now()`.
     Function {
-        /// Unless the schema defines it.
+        /// A schema is loaded and does not define it.
         builtin: bool,
     },
     /// A quoted string.
@@ -81,7 +81,7 @@ pub enum Highlight {
     },
     /// A cast's type: `int` in `x::int` or `CAST(x AS int)`.
     Type {
-        /// Unless the schema defines it.
+        /// A schema is loaded and does not define it.
         builtin: bool,
     },
 }
@@ -135,6 +135,10 @@ pub fn highlight(
     let (dialect, schema) = crate::analyzer::route(sql, dialect, schema);
     let names = crate::analyzer::parse(sql, dialect).names(schema);
     let schema = schema.unwrap_or_else(|| crate::catalog::empty(SqlDialect::from_name(dialect)));
+    // Without a schema, a function or type the database defines looks built in.
+    let builtin = |name: String, defines: fn(&SchemaData, &str) -> bool| {
+        !schema.is_empty() && !defines(schema, &name)
+    };
     let dialect = SqlDialect::from_name(dialect).parser_dialect();
     let tokens = match Tokenizer::new(dialect.as_ref(), sql).tokenize_with_location() {
         Ok(tokens) => tokens,
@@ -171,11 +175,14 @@ pub fn highlight(
                     Some(Highlight::Keyword)
                 } else if calls.binary_search(&at).is_ok() {
                     Some(Highlight::Function {
-                        builtin: !schema.defines_function(&qualified(&tokens, at, schema)),
+                        builtin: builtin(
+                            qualified(&tokens, at, schema),
+                            SchemaData::defines_function,
+                        ),
                     })
                 } else if types.binary_search(&at).is_ok() {
                     Some(Highlight::Type {
-                        builtin: !schema.defines_type(&qualified(&tokens, at, schema)),
+                        builtin: builtin(qualified(&tokens, at, schema), SchemaData::defines_type),
                     })
                 } else {
                     None
@@ -598,7 +605,7 @@ mod tests {
                 ("->>", Highlight::Operator),
                 ("'k'", Highlight::String),
                 ("::", Highlight::Operator),
-                ("int", Highlight::Type { builtin: true }),
+                ("int", Highlight::Type { builtin: false }),
                 ("/* c\n d */", Highlight::Comment),
                 ("FROM", Highlight::Keyword),
             ]

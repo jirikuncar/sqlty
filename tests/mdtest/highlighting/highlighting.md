@@ -151,14 +151,14 @@ takes parentheses stays a keyword, and so does a column named like a function.
 q = "--sql\nSELECT count(*), coalesce(name, ''), count FROM users WHERE created < pg_catalog.now() AND id IN (1) AND EXISTS (SELECT 1)"
 # highlighted: comment --sql
 # highlighted: keyword SELECT
-# highlighted: function.defaultLibrary count
+# highlighted: function count
 # highlighted: operator *
-# highlighted: function.defaultLibrary coalesce
+# highlighted: function coalesce
 # highlighted: string ''
 # highlighted: keyword FROM
 # highlighted: keyword WHERE
 # highlighted: operator <
-# highlighted: function.defaultLibrary now
+# highlighted: function now
 # highlighted: keyword AND
 # highlighted: keyword IN
 # highlighted: number 1
@@ -180,7 +180,7 @@ q = "--sql\nWITH c(a) AS (SELECT CAST(1 AS numeric(10, 2))) INSERT INTO users(id
 # highlighted: keyword CAST
 # highlighted: number 1
 # highlighted: keyword AS
-# highlighted: type.defaultLibrary numeric
+# highlighted: type numeric
 # highlighted: number 10
 # highlighted: number 2
 # highlighted: keyword INSERT
@@ -188,7 +188,7 @@ q = "--sql\nWITH c(a) AS (SELECT CAST(1 AS numeric(10, 2))) INSERT INTO users(id
 # highlighted: keyword SELECT
 # highlighted: property a
 # highlighted: operator ::
-# highlighted: type.defaultLibrary varchar
+# highlighted: type varchar
 # highlighted: number 3
 # highlighted: keyword FROM
 # highlighted: variable c
@@ -214,7 +214,7 @@ q = "--sql\nWITH a AS (SELECT 1), b(x) AS (SELECT 2) SELECT n FROM b, generate_s
 # highlighted: property n
 # highlighted: keyword FROM
 # highlighted: variable b
-# highlighted: function.defaultLibrary generate_series
+# highlighted: function generate_series
 # highlighted: number 1
 # highlighted: number 3
 # highlighted: variable.declaration g
@@ -231,14 +231,14 @@ dialect = "mysql"
 q = "--sql\nSELECT count(*), `my fn`(1), count FROM users WHERE created < now() AND id IN (1)"
 # highlighted: comment --sql
 # highlighted: keyword SELECT
-# highlighted: function.defaultLibrary count
+# highlighted: function count
 # highlighted: operator *
-# highlighted: function.defaultLibrary `my fn`
+# highlighted: function `my fn`
 # highlighted: number 1
 # highlighted: keyword FROM
 # highlighted: keyword WHERE
 # highlighted: operator <
-# highlighted: function.defaultLibrary now
+# highlighted: function now
 # highlighted: keyword AND
 # highlighted: keyword IN
 # highlighted: number 1
@@ -255,9 +255,9 @@ dialect = "sqlite"
 q = "--sql\nSELECT count(*), ifnull(name, ''), count FROM users WHERE id IN (VALUES (1))"
 # highlighted: comment --sql
 # highlighted: keyword SELECT
-# highlighted: function.defaultLibrary count
+# highlighted: function count
 # highlighted: operator *
-# highlighted: function.defaultLibrary ifnull
+# highlighted: function ifnull
 # highlighted: string ''
 # highlighted: keyword FROM
 # highlighted: keyword WHERE
