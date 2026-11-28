@@ -122,7 +122,8 @@ and 5000 tables.
 | Tables linked after `JOIN` | O(K + log F + k) per table in scope, for its K foreign keys and the F of the schema | entry counts |
 | `alias.` columns | O(1) + O(width of that table) | entry counts, Criterion and CodSpeed |
 | Unqualified column | O(sum of the widths of the tables in scope) | entry counts, Criterion and CodSpeed |
-| Index build | O(N log N + F log F) per schema load, two pointers per name and three words per foreign key | `index_shares_the_catalog_keys`, `bench-ci` `schema_load_5000` RSS |
+| Column before any `FROM` | O(log C + k) for the C columns of the schema, k capped | entry counts |
+| Index build | O(N log N + F log F + C log C) per schema load, two pointers per name, three words per foreign key and two `u32` per column | `index_shares_the_catalog_keys`, `bench-ci` `schema_load_5000` RSS |
 | Per keystroke | never O(N), never waiting behind a check | `completion_is_answered_while_a_check_runs` (`sqlty-lsp`) |
 
 ## The `--sql\n` convention

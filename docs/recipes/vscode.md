@@ -134,7 +134,9 @@ Inside a query string, the editor completes table names after `FROM` and `JOIN`,
 columns of the tables in scope after `alias.` and in `SELECT`, `WHERE`, `ON`,
 `GROUP BY` and `ORDER BY`. Each column shows its table or alias, and its type and
 nullability once selected. With nothing typed and several tables in scope, columns come
-qualified, `o.user_id` and `u.id`, so the inserted name is never ambiguous. Typing `.`
+qualified, `o.user_id` and `u.id`, so the inserted name is never ambiguous. Before the
+query has a `FROM`, a typed column name completes from every table that has it, each
+naming its table, so a query can be written columns first. Typing `.`
 opens the list. After `JOIN`, the tables a foreign
 key links to one in scope come first, with the `ON` clause that joins them:
 `orders ON orders.user_id = u.id`. A typed word in an expression also completes to the

@@ -207,6 +207,66 @@ q = "--sql\nSELECT <CURSOR> FROM users, users"
 # completions: name column users
 ```
 
+## Columns before FROM
+
+With no relation in scope yet, a typed column name completes from every table and view
+that has it, each naming its relation, the schema's own before the system catalogs.
+
+```python
+q = "--sql\nSELECT na<CURSOR>"
+# completions: name column user_names
+# completions: name column users
+# completions: name column pg_catalog.pg_available_extension_versions
+# completions: name column pg_catalog.pg_available_extensions
+# completions: name column pg_catalog.pg_backend_memory_contexts
+# completions: name column pg_catalog.pg_config
+# completions: name column pg_catalog.pg_cursors
+# completions: name column pg_catalog.pg_file_settings
+# completions: name column pg_catalog.pg_prepared_statements
+# completions: name column pg_catalog.pg_settings
+# completions: ...
+```
+
+```python
+q = "--sql\nSELECT id, user_<CURSOR>"
+# completions: user_id column orders
+# completions: user_defined_type_catalog column information_schema.tables
+# completions: user_defined_type_name column information_schema.tables
+# completions: user_defined_type_schema column information_schema.tables
+# completions: user_name column pg_catalog.pg_hba_file_rules
+```
+
+### Names without case
+
+Outside PostgreSQL, names compare without case, those of view columns too.
+
+```toml
+[tool.sqlty]
+dialect = "mysql"
+schema = "views.sql"
+```
+
+`views.sql`:
+
+```sql
+CREATE TABLE orders (id INT, user_id INT, total DECIMAL(10, 2));
+CREATE VIEW Totals AS SELECT user_id AS OwnerId, SUM(total) AS Spent FROM orders GROUP BY user_id;
+```
+
+```python
+q = "-- sql\nSELECT own<CURSOR>"
+# completions: OwnerId column totals
+```
+
+### With a FROM
+
+Once the query has a `FROM`, only the columns in scope complete.
+
+```python
+q = "--sql\nSELECT user_<CURSOR> FROM users"
+# completions: None
+```
+
 ## CTE and subquery scope
 
 ```python

@@ -9,7 +9,8 @@
 //! subqueries, `JOIN ... USING` included). When the query does not parse that way, a
 //! token scan of its `FROM` and `JOIN` items stands in. After `JOIN`, the tables a foreign
 //! key links to one already in scope come first, with their `ON` clause. An unqualified
-//! column with nothing typed is offered as `alias.column` when several relations are in scope.
+//! column with nothing typed is offered as `alias.column` when several relations are in scope;
+//! with none in scope, a typed one comes from the catalog's column index, O(log C + k).
 //! A typed word in an expression also completes to the functions the schema defines and the
 //! dialect's built-ins (see [`crate::signatures`]), after the columns; one in `FROM` or
 //! after `JOIN`, to the built-ins that return rows, after the relations.
@@ -35,7 +36,7 @@ use std::ops::Range;
 
 use super::nullability::Nullability;
 use super::{parse, SchemaData, SqlDialect};
-use crate::catalog::{Columns, RelationKind};
+use crate::catalog::{ColumnOf, Columns, RelationKind};
 use crate::signatures::Signature;
 
 /// The column name the cursor's word is replaced by, which no schema defines.
@@ -133,7 +134,7 @@ pub fn complete(
     };
     let typed = &query[prefix.clone()];
     let folded = schema.fold_typed(typed);
-    let mut candidates = match context {
+    let candidates = match context {
         Context::Relation(qualifier, join, rows) => {
             let relations = match &qualifier {
                 Some(qualifier) => schema.relations_with_prefix(typed, Some(qualifier), limit + 1),
@@ -184,6 +185,16 @@ pub fn complete(
                 .probe(schema)
                 .unwrap_or_else(|| scanned_columns(query, &before, schema));
             let blank = qualifier.is_none() && typed.is_empty();
+            if found.is_empty() && qualifier.is_none() && !blank && unscoped(query, &before, schema)
+            {
+                return finish(
+                    everywhere(typed, schema, dialect, limit + 1)
+                        .chain(functions(typed, schema, dialect, limit + 1))
+                        .collect(),
+                    prefix,
+                    limit,
+                );
+            }
             let qualifier = qualifier.map(|q| q.to_lowercase());
             let mut found: Vec<Candidate> = found
                 .into_iter()
@@ -211,12 +222,18 @@ pub fn complete(
             found
         }
     };
-    // The schema's own relations before PostgreSQL's system catalogs.
-    let builtin = |c: &Candidate| {
-        matches!(
-            c.detail.as_deref(),
-            Some("pg_catalog" | "information_schema")
-        ) && c.kind != CandidateKind::Column
+    finish(candidates, prefix, limit)
+}
+
+/// `candidates` in the order completion lists them, at most `limit`.
+fn finish(mut candidates: Vec<Candidate>, replace: Range<usize>, limit: usize) -> Completions {
+    // The schema's own relations before PostgreSQL's system catalogs, whose columns name
+    // their relation `schema.name`.
+    let builtin = |c: &Candidate| match (c.kind, c.detail.as_deref()) {
+        (CandidateKind::Column, Some(detail)) => {
+            detail.starts_with("pg_catalog.") || detail.starts_with("information_schema.")
+        }
+        (_, detail) => matches!(detail, Some("pg_catalog" | "information_schema")),
     };
     // A built-in function's detail is its first overload, `name(...)`.
     let signature = |c: &Candidate| {
@@ -238,9 +255,54 @@ pub fn complete(
     candidates.truncate(limit);
     Completions {
         candidates,
-        replace: prefix,
+        replace,
         incomplete,
     }
+}
+
+/// Whether no relation is in scope at the end of `before`: no `FROM` or `JOIN` item of
+/// `query` around it names one.
+fn unscoped(query: &str, before: &[Tok], schema: &SchemaData) -> bool {
+    lex(query)
+        .is_some_and(|tokens| named_relations(&tokens, cursor_depth(before), schema).is_empty())
+}
+
+/// The columns of every table and view whose name starts with `typed`, at most `limit`,
+/// each naming its relation: what a column completes to before the query has a `FROM`.
+/// O(log C + k) in the catalog's column index.
+fn everywhere<'a>(
+    typed: &str,
+    schema: &'a SchemaData,
+    dialect: SqlDialect,
+    limit: usize,
+) -> impl Iterator<Item = Candidate> + 'a {
+    schema
+        .columns_with_prefix(typed, limit)
+        .into_iter()
+        .map(move |found| {
+            let relation = match (found.qualified, found.relation.schema) {
+                (true, Some(owner)) => format!(
+                    "{}.{}",
+                    spelled(owner, dialect),
+                    spelled(found.relation.name, dialect)
+                ),
+                _ => spelled(found.relation.name, dialect),
+            };
+            match found.column {
+                ColumnOf::Table(column) => Candidate::column(
+                    &column.ident,
+                    &relation,
+                    Some(&column.sql_type),
+                    Nullability::declared(column.not_null),
+                ),
+                ColumnOf::View(column) => Candidate::column(
+                    &spelled(&column.name, dialect),
+                    &relation,
+                    column.sql_type.as_deref(),
+                    column.nullability,
+                ),
+            }
+        })
 }
 
 /// The functions whose name starts with `typed`, at most `limit` of each: the schema's, then
@@ -1028,6 +1090,7 @@ mod tests {
             ("SELECT o.| FROM users u JOIN t7 o ON", 50),
             ("SELECT * FROM users u JOIN t1|", 5),
             ("SELECT * FROM t7 x JOIN |", 5),
+            ("SELECT no|", 5),
         ];
         let runs: Vec<Vec<(usize, Vec<String>)>> = [50, 540, 5000]
             .into_iter()
@@ -1069,6 +1132,7 @@ mod tests {
             ["t1 ON t1.user_id = u.id", "t10 ON t10.user_id = u.id"]
         );
         assert_eq!(runs[2][6].1[0], "users ON users.id = x.user_id");
+        assert_eq!(runs[2][7].1, ["note", "note", "note", "note", "note"]);
         assert!(
             runs[2].iter().all(|(visited, _)| *visited <= 64),
             "{:?}",

@@ -31,6 +31,7 @@
 //! - `read`: statements into operations, and [`load`]
 
 mod alter;
+mod column_index;
 mod columns;
 mod index;
 mod joins;
@@ -41,6 +42,7 @@ mod policies;
 mod read;
 mod resolve;
 
+pub use column_index::{ColumnOf, NamedColumn};
 #[cfg(test)]
 pub(crate) use index::visited;
 pub use index::{Columns, NameRef, RelationKind, RelationRef};
