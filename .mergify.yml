@@ -1,0 +1,13 @@
+# Required checks come from main's branch protection (today: CI).
+queue_rules:
+  - name: main
+    queue_conditions:
+      - base = main
+      - -draft
+      - or:
+          - author = jirikuncar
+          - author = Kludex
+          - and:
+              - "#approved-reviews-by >= 1"
+              - "#changes-requested-reviews-by = 0"
+    merge_method: squash
