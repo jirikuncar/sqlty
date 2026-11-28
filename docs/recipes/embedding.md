@@ -69,7 +69,7 @@ engine in a Web Worker to keep a page responsive on large modules.
 
 [`npm/wasm/example`](https://github.com/jirikuncar/sqlty/tree/main/npm/wasm/example)
 is a CodeMirror editor that shows sqlty's diagnostics with their quick fixes,
-completes table and column names, and shows the row type of each query, in about 100
+completes table, column and function names, and shows the row type of each query, in about 100
 lines of JavaScript.
 
 ## Limits

@@ -95,6 +95,9 @@ export async function startEngine(
           );
           return answer.items.map((item: Candidate, index: number) => {
             const completion = new vscode.CompletionItem(item.label, KINDS[item.kind]);
+            if (item.kind === "function") {
+              completion.insertText = `${item.label}(`;
+            }
             completion.detail = item.detail;
             completion.range = range;
             completion.sortText = String(index).padStart(4, "0");
@@ -253,6 +256,7 @@ const KINDS: Record<string, vscode.CompletionItemKind> = {
   cte: vscode.CompletionItemKind.Variable,
   column: vscode.CompletionItemKind.Field,
   join: vscode.CompletionItemKind.Snippet,
+  function: vscode.CompletionItemKind.Function,
 };
 
 function diagnostic(document: vscode.TextDocument, found: Found): vscode.Diagnostic {

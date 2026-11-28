@@ -263,7 +263,7 @@ takes a `sqlty.core.HelperIndex` filled with `index.add("pkg.db", db_source)`.
 
 ## Completion
 
-`sqlty server` completes table and column names in the strings passed to a helper, as it
+`sqlty server` completes table, column and function names in the strings passed to a helper, as it
 does in `--sql` strings: a string completes exactly when `sqlty check` checks it.
 
 ```python

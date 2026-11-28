@@ -145,6 +145,12 @@ test("completion, hover and quick fixes come from the engine", async () => {
     ],
   );
   assert.equal(await completion.provideCompletionItems(q, new Position(0, 0)), undefined);
+  const upper = document(resolve("fixture", "upper.py"), 'q = "--sql\\nSELECT uppe"');
+  const [called] = await completion.provideCompletionItems(upper, upper.positionAt(22));
+  assert.deepEqual(
+    [called.label, called.kind, called.insertText, called.detail],
+    ["upper", 2, "upper(", "upper(text) -> text (+2 more)"],
+  );
 
   const [hover] = providers.hover;
   const shown = await hover.provideHover(q, q.positionAt(70));

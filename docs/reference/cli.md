@@ -252,7 +252,7 @@ a `warn` diagnostic, and `--exit-zero-on-warning` keeps the default; combining
 
 ## `sqlty complete`
 
-List the table and column names that can be typed at a cursor in a query
+List the table, column and function names that can be typed at a cursor in a query
 string: one per line, as `label`, `kind`, `detail` and `sql_type` separated by
 tabs. The cursor is `FILE:LINE:COL`, a 1-based line and a 1-based column in
 characters:

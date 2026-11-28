@@ -582,6 +582,11 @@ fn every_highlight_and_candidate_kind_has_a_name() {
         "op": "complete", "source": source, "offset": source.len() - 1, "schema": schema, "dialect": "postgres",
     }));
     assert_eq!(complete["items"][0]["kind"], "join");
+    let source = "q = \"--sql\\nSELECT uppe\"";
+    let complete = ask(&json!({
+        "op": "complete", "source": source, "offset": source.len() - 1, "dialect": "postgres",
+    }));
+    assert_eq!(complete["items"][0]["kind"], "function");
 }
 
 #[test]

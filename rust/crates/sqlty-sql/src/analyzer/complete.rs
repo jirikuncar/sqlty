@@ -658,7 +658,7 @@ mod tests {
         CREATE VIEW user_names AS SELECT id, name FROM users;
         CREATE TABLE legacy (LIKE missing);";
 
-    /// The labels completing at the `|` of `sql`, as `label:detail`.
+    /// The labels completing at the `|` of `sql`, as `label:detail`, functions left out.
     fn labels(sql: &str, catalog: &Catalog, dialect: &str) -> Vec<String> {
         let cursor = sql.find('|').expect("a cursor");
         let sql = sql.replacen('|', "", 1);
@@ -670,6 +670,7 @@ mod tests {
         found
             .candidates
             .iter()
+            .filter(|c| c.kind != CandidateKind::Function)
             .map(|c| format!("{}:{}", c.label, c.detail.as_deref().unwrap_or("")))
             .collect()
     }

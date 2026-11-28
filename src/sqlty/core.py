@@ -441,9 +441,10 @@ def breaking_source(
 class Completion(NamedTuple):
     """A name that can be typed at the cursor.
 
-    ``kind`` is ``table``, ``view``, ``cte``, ``column``, or ``join`` for a table a
-    foreign key links to one in scope, its ``ON`` clause included; ``detail`` the schema of
-    a relation or the alias (or table) of a column.
+    ``kind`` is ``table``, ``view``, ``cte``, ``column``, ``join`` for a table a
+    foreign key links to one in scope, its ``ON`` clause included, or ``function``;
+    ``detail`` the schema of a relation or function, the alias (or table) of a column, or a
+    built-in function's first overload.
     """
 
     label: str
@@ -470,7 +471,7 @@ def complete_source(
     *,
     limit: int = 200,
 ) -> Completions | None:
-    r"""The table and column names that complete at 1-based ``line`` and ``column`` of ``source``.
+    r"""The table, column and function names that complete at 1-based ``line`` and ``column`` of ``source``.
 
     ``column`` counts characters, as ``sqlty check --output-format json`` does. The cursor
     must be in a query ``check`` reads: a ``--sql`` marked string, the argument of

@@ -137,7 +137,9 @@ nullability once selected. With nothing typed and several tables in scope, colum
 qualified, `o.user_id` and `u.id`, so the inserted name is never ambiguous. Typing `.`
 opens the list. After `JOIN`, the tables a foreign
 key links to one in scope come first, with the `ON` clause that joins them:
-`orders ON orders.user_id = u.id`.
+`orders ON orders.user_id = u.id`. A typed word in an expression also completes to the
+functions the schema defines and the dialect's built-ins, after the columns, and inserts
+`name(`.
 
 A string completes exactly when `sqlty check` checks it, by the same rules:
 
@@ -212,7 +214,8 @@ work. It needs sqlty 0.4.0 or newer, and with an older one the output channel sa
 Hover a word of a query string to see what it is. A column shows its SQL type, whether
 it can be NULL and where it comes from; a table or view lists its columns; a word at the
 top level of a select item shows the result column, with the inference rule that typed
-it, as `sqlty check --explain` does:
+it, as `sqlty check --explain` does; a function name before `(` shows the overloads that
+take as many arguments as the call passes, with a link to its documentation:
 
 ```toml
 [tool.sqlty]
@@ -327,7 +330,7 @@ fix belongs to the migration or the code, depending on which ships first.
 | `sqlty.interpreter` | `[]` | The interpreter whose `sqlty` runs; empty is the one selected in the Python extension |
 | `sqlty.breaking.against` | empty | A baseline for `sqlty breaking`: a git revision, a `--save` snapshot or schema files |
 | `sqlty.breaking.direction` | `both` | `both`, `forward` or `backward` |
-| `sqlty.completion.enable` | `true` | Complete table and column names in query strings |
+| `sqlty.completion.enable` | `true` | Complete table, column and function names in query strings |
 | `sqlty.trace.server` | `off` | Log the protocol messages in the **sqlty** output channel |
 
 ## Restricted Mode

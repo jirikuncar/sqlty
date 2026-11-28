@@ -122,6 +122,7 @@ export class Disposable {
 }
 
 export enum CompletionItemKind {
+  Function = 2,
   Field = 4,
   Variable = 5,
   Class = 6,
@@ -131,6 +132,7 @@ export enum CompletionItemKind {
 
 export class CompletionItem {
   detail?: string;
+  insertText?: string;
   range?: Range;
   sortText?: string;
   constructor(

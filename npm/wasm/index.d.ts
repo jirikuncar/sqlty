@@ -98,7 +98,7 @@ export type Completions = {
   end: number;
   items: {
     label: string;
-    kind: "table" | "view" | "cte" | "column" | "join";
+    kind: "table" | "view" | "cte" | "column" | "join" | "function";
     detail: string;
     sql_type: string | null;
     nullable: boolean | null;

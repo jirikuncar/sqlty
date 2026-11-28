@@ -103,6 +103,13 @@ def test_completion_of_a_cte() -> None:
     assert found[3] == [("c", "cte", None, None, None)]
 
 
+def test_completion_of_a_function() -> None:
+    source = 'q = "--sql\\nSELECT uppe"\n'
+    found = _core.complete_source(source, len(source) - 2, limit=1)
+    assert found is not None
+    assert found[3] == [("upper", "function", "upper(text) -> text (+2 more)", None, None)]
+
+
 @pytest.mark.parametrize(
     ("sql", "labels"),
     [

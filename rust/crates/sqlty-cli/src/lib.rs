@@ -107,7 +107,7 @@ enum Command {
         #[command(flatten)]
         check: CheckArgs,
     },
-    /// List the table and column names that complete at FILE:LINE:COL in a query string
+    /// List the table, column and function names that complete at FILE:LINE:COL in a query string
     /// (sqlty complete app.py:12:30), for scripts and agents
     Complete {
         /// The cursor: a Python file, a 1-based line and a 1-based column in characters

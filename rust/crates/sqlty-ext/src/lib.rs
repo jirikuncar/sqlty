@@ -2063,6 +2063,7 @@ fn complete_source(
                     analyzer::CandidateKind::Cte => "cte",
                     analyzer::CandidateKind::Column => "column",
                     analyzer::CandidateKind::Join => "join",
+                    analyzer::CandidateKind::Function => "function",
                 };
                 (c.label, kind, c.detail, c.sql_type, c.nullable)
             })

@@ -127,6 +127,7 @@ fn kind(kind: CandidateKind) -> &'static str {
         CandidateKind::Cte => "cte",
         CandidateKind::Column => "column",
         CandidateKind::Join => "join",
+        CandidateKind::Function => "function",
     }
 }
 
@@ -170,8 +171,12 @@ mod tests {
             CandidateKind::Cte,
             CandidateKind::Column,
             CandidateKind::Join,
+            CandidateKind::Function,
         ];
-        assert_eq!(kinds.map(kind), ["table", "view", "cte", "column", "join"]);
+        assert_eq!(
+            kinds.map(kind),
+            ["table", "view", "cte", "column", "join", "function"]
+        );
     }
 
     #[test]

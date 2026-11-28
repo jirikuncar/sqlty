@@ -71,13 +71,16 @@ fn item(candidate: Candidate, rank: usize, range: lsp_types::Range) -> Completio
         CandidateKind::Cte => (CompletionItemKind::MODULE, "CTE of the query"),
         CandidateKind::Column => (CompletionItemKind::FIELD, "column"),
         CandidateKind::Join => (CompletionItemKind::STRUCT, "join on a foreign key"),
+        CandidateKind::Function => (CompletionItemKind::FUNCTION, "function"),
     };
+    let function = candidate.kind == CandidateKind::Function;
     let nullability = match candidate.nullable {
         Some(true) => " NULL",
         Some(false) => " NOT NULL",
         None => "",
     };
     let detail = match (&candidate.sql_type, &candidate.detail) {
+        (_, Some(signature)) if function => signature.clone(),
         (Some(sql_type), _) => format!("{sql_type}{nullability}"),
         (None, Some(schema)) => format!("{documentation} in {schema}"),
         (None, None) => documentation.to_string(),
@@ -100,8 +103,13 @@ fn item(candidate: Candidate, rank: usize, range: lsp_types::Range) -> Completio
         sort_text: Some(format!("{rank:04}")),
         text_edit: Some(CompletionTextEdit::Edit(TextEdit::new(
             range,
-            candidate.label.clone(),
+            if function {
+                format!("{}(", candidate.label)
+            } else {
+                candidate.label.clone()
+            },
         ))),
+
         data: Some(json!({"detail": detail, "documentation": documentation})),
         label: candidate.label,
         ..CompletionItem::default()
@@ -138,7 +146,7 @@ pub(crate) fn moved(starts: &[usize], old: &str, new: &str) -> Vec<usize> {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use lsp_types::{CompletionItem, CompletionItemKind, Range};
+    use lsp_types::{CompletionItem, CompletionItemKind, CompletionTextEdit, Range};
     use sqlty_sql::analyzer::{Candidate, CandidateKind};
 
     use super::{item, moved, resolve};
@@ -149,6 +157,8 @@ mod tests {
             (CandidateKind::View, Some("public")),
             (CandidateKind::Cte, None),
             (CandidateKind::Join, Some("public")),
+            (CandidateKind::Function, Some("upper(text) -> text")),
+            (CandidateKind::Function, None),
         ]
         .into_iter()
         .map(|(kind, detail)| {
@@ -160,17 +170,40 @@ mod tests {
                 nullable: None,
             };
             let item = item(candidate, 0, Range::default());
-            (item.kind, item.data.unwrap()["detail"].clone())
+            let text = match &item.text_edit {
+                Some(CompletionTextEdit::Edit(edit)) => edit.new_text.clone(),
+                _ => String::new(),
+            };
+            (item.kind, item.data.unwrap()["detail"].clone(), text)
         })
         .collect();
         assert_eq!(
             found,
             [
-                (Some(CompletionItemKind::STRUCT), "view in public".into()),
-                (Some(CompletionItemKind::MODULE), "CTE of the query".into()),
                 (
                     Some(CompletionItemKind::STRUCT),
-                    "join on a foreign key in public".into()
+                    "view in public".into(),
+                    "x".into()
+                ),
+                (
+                    Some(CompletionItemKind::MODULE),
+                    "CTE of the query".into(),
+                    "x".into()
+                ),
+                (
+                    Some(CompletionItemKind::STRUCT),
+                    "join on a foreign key in public".into(),
+                    "x".into()
+                ),
+                (
+                    Some(CompletionItemKind::FUNCTION),
+                    "upper(text) -> text".into(),
+                    "x(".into()
+                ),
+                (
+                    Some(CompletionItemKind::FUNCTION),
+                    "function".into(),
+                    "x(".into()
                 ),
             ]
         );

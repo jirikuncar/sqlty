@@ -68,7 +68,9 @@ pub fn hover(
         match select_item(&tokens, at) {
             Some(item) if word.depth == item.depth => {
                 match (result_column(query, &item, dialect, schema), function()) {
-                    (Some(column), Some(function)) => Some(format!("{column}\n\n---\n\n{function}")),
+                    (Some(column), Some(function)) => {
+                        Some(format!("{column}\n\n---\n\n{function}"))
+                    }
                     (column, function) => column
                         .or(function)
                         .or_else(|| named(query, word, dialect, schema)),
@@ -146,7 +148,7 @@ fn named(query: &str, word: &Tok, dialect: &str, schema: &SchemaData) -> Option<
 
 /// The function a word names: whether the schema defines it, and the overloads of the
 /// dialect's built-in that take `arguments` (all of them when none does or the count is
-/// unknown), with their documentation.
+/// unknown), with the documentation of the first.
 fn function(
     word: &Tok,
     arguments: Option<usize>,
@@ -182,15 +184,7 @@ fn function(
     for overload in &shown {
         let _ = writeln!(text, "{}", overload.label);
     }
-    text.push_str("```");
-    let mut urls: Vec<String> = Vec::new();
-    for overload in &shown {
-        let url = overload.url();
-        if !urls.contains(&url) {
-            let _ = write!(text, "\n\n[Documentation]({url})");
-            urls.push(url);
-        }
-    }
+    let _ = write!(text, "```\n\n[Documentation]({})", shown[0].url());
     Some(text)
 }
 

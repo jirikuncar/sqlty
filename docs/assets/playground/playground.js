@@ -296,9 +296,9 @@ monaco.languages.registerCompletionItemProvider("python", {
     return {
       suggestions: found.items.map((item, rank) => ({
         label: item.label,
-        kind: item.kind === "column" ? kinds.Field : item.kind === "cte" ? kinds.Module : kinds.Struct,
+        kind: { column: kinds.Field, cte: kinds.Module, function: kinds.Function }[item.kind] ?? kinds.Struct,
         detail: [item.kind, item.sql_type, item.detail].filter(Boolean).join(" "),
-        insertText: item.label,
+        insertText: item.kind === "function" ? `${item.label}(` : item.label,
         sortText: String(rank).padStart(4, "0"),
         range,
       })),

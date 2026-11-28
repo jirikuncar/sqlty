@@ -238,7 +238,7 @@ b'tuple[int]'
     Slice `source.encode()`, not `source`: the two differ once a line holds a
     character outside ASCII.
 
-`complete_source` lists the table and column names that complete at a 1-based
+`complete_source` lists the table, column and function names that complete at a 1-based
 line and column (in characters) of a query string, with the bytes they replace.
 A string is a query exactly when `check_source` checks it: a `--sql` marked string,
 the argument of `SQL[T](...)`, or a string literal passed to a
