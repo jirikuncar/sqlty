@@ -49,6 +49,7 @@ Untrusted:
 | `sqlty breaking` | `breaking.rs` | a ref, path or file name becoming a git option or a pathspec other than a literal path |
 | Language server | `sqlty-lsp`, `sqlty-cli/src/server.rs`, `sqlty-ext/src/server.rs` | a document crashing or stalling the server; a URI that reads or writes outside the workspace |
 | Playground | `docs/assets/playground/`, `sqlty-wasm` | script injection from a share link or a deck; a link loading a deck, engine or model from another origin |
+| Agent plugin hook | `hooks/` | running anything but `git` and the `sqlty` of the project's own `.venv` or `PATH`, or acting on an edit outside a sqlty project |
 | VS Code extension | `editors/vscode/src/` | running a binary or interpreter from the workspace (`sqlty.path`, `sqlty.interpreter`) before the workspace is trusted |
 | Runtime library | `src/sqlty/__init__.py`, `src/sqlty/drivers/` | a parameter value reaching SQL text instead of being bound; `row_factory` constructing anything other than the declared row type |
 | Releases | `.github/workflows/pypi.yml`, `vscode.yml` | a pull request or workflow input that reaches publishing credentials, or a published artifact not built from the tagged commit |
