@@ -3,7 +3,7 @@
 import pytest
 
 from sqlty import core
-from sqlty._lint import RULES
+from tests._core_views import RULES
 
 SOURCE = 'q = "--sql\\nSELECT 1::INTEGER"\n'
 
@@ -32,4 +32,4 @@ def test_valid_overrides_still_apply() -> None:
 def test_an_override_leaves_the_other_rules_at_their_defaults() -> None:
     [diagnostic] = core.check_source(SOURCE, core.Settings(rules={"stale-type": "error"}))
     assert diagnostic["rule"] == "stale-rewrite"
-    assert diagnostic["severity"] == RULES["stale-rewrite"].default_severity.value
+    assert diagnostic["severity"] == RULES["stale-rewrite"].default_severity

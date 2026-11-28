@@ -2,6 +2,7 @@ import { load } from "./engine.js";
 import { released, versions } from "./release.js";
 import { decode, encode, MAX_LINK } from "./share.js";
 import { fold, unfold } from "./steps.js";
+import { drivers, lint, tsType } from "./typescript.js";
 
 const MONACO = new URL("../vendor/monaco/vs", import.meta.url).href;
 const LEGEND = ["keyword", "string", "number", "comment", "operator", "parameter"];
@@ -44,6 +45,27 @@ stale = SQL[tuple[int, str]]("--sql\\nSELECT id, email FROM users")
 joined = "--sql\\nSELECT o.id, u.name FROM orders AS o JOIN users AS u ON u.id = o.user_id"
 `;
 
+const TYPESCRIPT = `import postgres from "postgres";
+
+// @sqlty/eslint-plugin checks the sql tagged templates of TypeScript in ESLint, with no
+// database: "Fix all" writes each row type, as eslint --fix does.
+const sql = postgres();
+
+export const user = (id: number) => sql\`SELECT id, name, email FROM users WHERE id = \${id}\`;
+
+// The drivers differ: numeric is a string in both, numeric[] is number[] in node-postgres.
+export const totals = (since: Date) => sql<{ name: string; spent: number }[]>\`
+  SELECT u.name, SUM(o.total) AS spent, MAX(o.placed_at) AS last_order
+  FROM users AS u
+  LEFT JOIN orders AS o ON o.user_id = u.id
+  WHERE o.placed_at > \${since}
+  GROUP BY u.name
+\`;
+
+// A typo in a column name.
+export const typo = sql\`SELECT nme FROM users\`;
+`;
+
 const CONFIG = `# The [tool.sqlty] keys that need no files: dialect, import-style and rules.
 [rules]
 stale-rewrite = "error"
@@ -66,6 +88,9 @@ const [monaco, ask, shared, examples, linkedDeck] = await Promise.all([
   fetch(new URL("examples.json", import.meta.url)).then((response) => response.json()),
   fetchDeck(new URLSearchParams(location.search).get("steps")).catch((error) => ({ error })),
 ]);
+// Monaco's TypeScript service starts once queries.ts is shown (speak), not for Python.
+monaco.typescript.typescriptDefaults.setModeConfiguration({});
+let typed = false;
 const SIZES = [11, 12, 13, 14, 16, 18, 20, 22, 24, 28, 32];
 const saved = remembered();
 let size = SIZES.includes(saved.size) ? saved.size : 13;
@@ -120,6 +145,8 @@ const output = monaco.editor.create(root.querySelector("[data-json]"), {
   readOnly: true,
 });
 const dialect = root.querySelector("[data-dialect]");
+const driver = root.querySelector("[data-driver]");
+let language = "python";
 const version = root.querySelector("[data-version]");
 const linked = root.querySelector("[data-link-status]");
 const example = root.querySelector("[data-example]");
@@ -129,6 +156,7 @@ const notes = root.querySelector("[data-notes]");
 const present = root.querySelector("[data-present]");
 const opener = root.querySelector("[data-open]");
 examples.unshift({ name: "Tour", source: SOURCE, schema: SCHEMA, dialect: "postgres", config: CONFIG });
+examples.push({ name: "TypeScript (ESLint plugin)", language: "typescript", source: TYPESCRIPT, schema: SCHEMA, dialect: "postgres", config: "" });
 examples.push({ name: "Tour in steps", deck: new URL("steps.json", import.meta.url) }, { name: "Open a file...", file: true });
 const option = (value, textContent) => Object.assign(document.createElement("option"), { value, textContent });
 const custom = Object.assign(option(-1, "Steps"), { hidden: true });
@@ -306,7 +334,7 @@ monaco.languages.registerCompletionItemProvider("python", {
   },
 });
 
-monaco.languages.registerCodeActionProvider("python", {
+const quickFixes = {
   provideCodeActions(model, range, context) {
     const actions = context.markers.flatMap((marker) => {
       const found = current.diagnostics.find(
@@ -341,7 +369,8 @@ monaco.languages.registerCodeActionProvider("python", {
     });
     return { actions, dispose() {} };
   },
-});
+};
+for (const id of ["python", "typescript"]) monaco.languages.registerCodeActionProvider(id, quickFixes);
 
 monaco.languages.registerHoverProvider("python", {
   provideHover(model, position) {
@@ -357,8 +386,66 @@ monaco.languages.registerHoverProvider("python", {
   },
 });
 
+// What @sqlty/eslint-plugin reports on queries.ts, in the shape `analyze` answers.
+function linted() {
+  const schema = models.schema.getValue();
+  const found = lint(models.python.getValue(), {
+    engine: ask,
+    schema: schema.trim() && { key: `schema.sql@${models.schema.getVersionId()}`, text: () => schema },
+    dialect: dialect.value,
+    config: models.config.getValue(),
+    driver: driver.value,
+    target: { tag: "sql", ...(driver.value === "postgres" && { transform: "{type}[]" }) },
+  });
+  const typed = (sqlType, nullable) => `${tsType(sqlType, drivers[driver.value])}${nullable ? " | null" : ""}`;
+  const queries = found.queries.map((query) => ({
+    ...query,
+    row_type: query.type,
+    columns: query.columns.map((column) => ({ ...column, type: typed(column.sql_type, column.nullable) })),
+    params: query.params.map((param) => ({ ...param, type: typed(param.sql_type) })),
+  }));
+  return { ...found, queries, highlights: [], fixed: fixed(models.python.getValue(), found.diagnostics) };
+}
+
+// `source` with the fixes of `diagnostics`, which do not overlap, as eslint --fix applies them.
+function fixed(source, diagnostics) {
+  for (const edit of diagnostics.flatMap((found) => found.fix).sort((a, b) => b.start - a.start)) {
+    source = source.slice(0, edit.start) + edit.replacement + source.slice(edit.end);
+  }
+  return source;
+}
+
+// queries.py, or queries.ts that @sqlty/eslint-plugin checks.
+function speak(name) {
+  if (name === "typescript" && !typed) {
+    typed = true;
+    // queries.ts is one module alone: what it imports is unknown, so only syntax is checked.
+    monaco.typescript.typescriptDefaults.setDiagnosticsOptions({ noSemanticValidation: true });
+    monaco.typescript.typescriptDefaults.setModeConfiguration({
+      completionItems: true,
+      hovers: true,
+      documentSymbols: true,
+      definitions: true,
+      references: true,
+      documentHighlights: true,
+      rename: true,
+      diagnostics: true,
+      documentRangeFormattingEdits: true,
+      signatureHelp: true,
+      onTypeFormattingEdits: true,
+      codeActions: true,
+      inlayHints: true,
+    });
+  }
+  language = name;
+  monaco.editor.setModelLanguage(models.python, name);
+  root.querySelector('[data-file="python"]').textContent = name === "typescript" ? "queries.ts" : "queries.py";
+  for (const python of root.querySelectorAll("[data-python]")) python.hidden = name === "typescript";
+  root.querySelector("[data-driver-label]").hidden = name !== "typescript";
+}
+
 function refresh() {
-  const answer = ask(request("analyze"));
+  const answer = language === "typescript" ? linted() : ask(request("analyze"));
   const problems = root.querySelector("[data-problems]");
   if (answer.error) {
     problems.textContent = answer.error;
@@ -377,7 +464,7 @@ function refresh() {
   ];
   output.setValue(JSON.stringify(json, null, 2));
   refreshed.fire();
-  refreshBreaking(answer.diagnostics.some((found) => found.rule === "internal-error"));
+  if (language === "python") refreshBreaking(answer.diagnostics.some((found) => found.rule === "internal-error"));
 }
 
 // Show `diagnostics` as markers of `model`.
@@ -480,11 +567,14 @@ function session() {
     ...(models.before.getValue() && { before: models.before.getValue() }),
     dialect: dialect.value,
     config: models.config.getValue(),
+    ...(language === "typescript" && { language, driver: driver.value }),
   };
   return steps.length ? { ...edited, steps: fold(steps).steps, step } : edited;
 }
 
 function restore(saved) {
+  speak(saved.language === "typescript" ? "typescript" : "python");
+  driver.value = saved.driver === "pg" ? "pg" : "postgres";
   const pairs = [[models.python, saved.source], [models.schema, saved.schema], [models.before, saved.before ?? ""], [models.config, saved.config]];
   for (const [model, value] of pairs) {
     if (typeof value === "string") replace(model, value);
@@ -586,6 +676,7 @@ const later = () => {
 };
 for (const model of Object.values(models)) model.onDidChangeContent(later);
 dialect.addEventListener("change", later);
+driver.addEventListener("change", later);
 for (const tab of files) tab.addEventListener("click", () => open(tab.dataset.file));
 for (const tab of tabs) tab.addEventListener("click", () => show(tab.dataset.tab));
 for (const button of root.querySelectorAll("[data-zoom]")) {
