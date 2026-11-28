@@ -97,6 +97,28 @@ def test_structured_data_dates_are_utc(monkeypatch: pytest.MonkeyPatch) -> None:
     assert script.modified() == {"docs/faq.md": "2026-11-23T08:42:28Z"}
 
 
+def test_structured_data_lists_the_problems_a_page_solves() -> None:
+    script = _script("structured_data")
+    page = script.parse(
+        '<link rel="canonical" href="https://example.com/recipes/eslint/"><article>'
+        '<h2 id="what-it-solves">What it solves</h2><p>Intro.</p>'
+        '<h3 id="drift">Row types drift<a class="headerlink" href="#drift">#</a></h3>'
+        "<p>The schema <code>--fix</code> writes them.</p>"
+        '<h2 id="configure">Configure</h2><h3 id="options">Options</h3></article>'
+    )
+    assert script.faq(page, script.subsections(page, "what-it-solves"))["mainEntity"] == [
+        {
+            "@type": "Question",
+            "name": "Row types drift",
+            "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "The schema --fix writes them.",
+                "url": "https://example.com/recipes/eslint/#drift",
+            },
+        }
+    ]
+
+
 def test_structured_data_groups_rules_in_llms_txt() -> None:
     script = _script("structured_data")
     root = "https://example.com/"
@@ -429,6 +451,8 @@ def test_bump_version_writes_every_place(tmp_path: Path) -> None:
         "npm/wasm/package.json": 1,
         "editors/vscode/package-lock.json": 1,
         "npm/wasm/example/package-lock.json": 1,
+        "npm/eslint-plugin/package.json": 2,
+        "npm/package-lock.json": 3,
     }
     for place in ["scripts/bump_version.py", *places]:
         (tmp_path / place).parent.mkdir(parents=True, exist_ok=True)
