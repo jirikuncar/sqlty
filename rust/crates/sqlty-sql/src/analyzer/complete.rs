@@ -212,11 +212,15 @@ pub fn complete(
             Some("pg_catalog" | "information_schema")
         ) && c.kind != CandidateKind::Column
     };
+    // A built-in function's detail is its first overload, `name(...)`.
+    let signature = |c: &Candidate| {
+        c.kind == CandidateKind::Function && c.detail.as_deref().is_some_and(|d| d.contains('('))
+    };
     candidates.sort_by_cached_key(|c| {
         (
             c.kind != CandidateKind::Join,
             c.kind == CandidateKind::Function,
-            builtin(c),
+            builtin(c) || signature(c),
             c.label.to_lowercase(),
             c.detail.clone(),
             c.label.clone(),

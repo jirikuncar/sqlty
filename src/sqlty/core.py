@@ -479,7 +479,8 @@ def complete_source(
     and the module of ``source`` as for ``check_source``); elsewhere the result is ``None``.
     In a query, ``items`` lists the relations (after ``FROM``, ``JOIN``, ``UPDATE``,
     ``INTO``) or the columns of the relations in scope (after ``alias.`` and in
-    ``SELECT``, ``WHERE``, ``ON``, ...) whose name starts with the word before the cursor,
+    ``SELECT``, ``WHERE``, ``ON``, ..., then the functions once a word is typed) whose name
+    starts with the word before the cursor,
     at most ``limit``, with ``incomplete`` set when there were more. ``start`` and ``end``
     are the byte offsets of that word, which a completion replaces.
 

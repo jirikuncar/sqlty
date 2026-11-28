@@ -52,6 +52,15 @@ fn functions_complete_after_columns() {
         completed("SELECT ltri|", "postgres")[0].2.as_deref(),
         Some("ltrim(string: text[, characters: text]) -> text (+1 more)")
     );
+    assert_eq!(
+        completed("SELECT low| FROM users", "postgres")
+            .iter()
+            .map(|c| c.2.as_deref().unwrap_or_default())
+            .take(2)
+            .collect::<Vec<_>>(),
+        ["public", "lower(text) -> text (+2 more)"],
+        "the schema's function first"
+    );
     assert!(completed("SELECT u.low| FROM users u", "postgres").is_empty());
     assert!(completed("SELECT | FROM users", "postgres")
         .iter()
@@ -80,6 +89,16 @@ fn a_called_function_hovers_its_fitting_overloads() {
     assert_eq!(
         hovered("SELECT id FROM users WHERE normalize_|email(email) = ''").as_deref(),
         Some("Function `normalize_email` the schema defines")
+    );
+    assert_eq!(
+        hovered("SELECT id FROM users WHERE NORMALIZE_|EMAIL(email) = ''").as_deref(),
+        Some("Function `normalize_email` the schema defines")
+    );
+    assert!(hovered("SELECT id FROM users WHERE \"NORMALIZE_|EMAIL\"(email) = ''").is_none());
+    assert_eq!(
+        hovered("SELECT 1 FROM users WHERE lt|rim(name ORDER BY id, name) = ''").as_deref(),
+        Some(one),
+        "ORDER BY ends the arguments"
     );
     let both = hovered("SELECT id FROM users WHERE low|er(id) = 1").unwrap_or_default();
     assert!(

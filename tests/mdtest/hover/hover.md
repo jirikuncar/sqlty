@@ -212,6 +212,18 @@ q = "--sql\nSELECT id FROM users WHERE normalize_<CURSOR>email(email) = ''"
 # hover: Function `normalize_email` the schema defines
 ```
 
+Its name folds as the dialect folds it.
+
+```python
+q = "--sql\nSELECT id FROM users WHERE NORMALIZE_<CURSOR>EMAIL(email) = ''"
+# hover: Function `normalize_email` the schema defines
+```
+
+```python
+q = '--sql\nSELECT id FROM users WHERE "normalize_<CURSOR>email"(email) = 1'
+# hover: Function `normalize_email` the schema defines
+```
+
 ## Nothing to show
 
 A keyword, a name the schema does not define, and a string `sqlty check` does not read

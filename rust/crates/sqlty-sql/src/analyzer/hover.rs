@@ -155,15 +155,17 @@ fn function(
     dialect: &str,
     schema: &SchemaData,
 ) -> Option<String> {
-    let name = unquoted(&word.text)?;
-    let overloads = signatures(SqlDialect::from_name(dialect), name);
-    let defined = schema.defines_function(&word.text);
+    let folded = schema.fold_typed(&word.text);
+    let defined = schema.defines_function(&folded);
+    let overloads = unquoted(&word.text).map_or(&[][..], |name| {
+        signatures(SqlDialect::from_name(dialect), name)
+    });
     if overloads.is_empty() && !defined {
         return None;
     }
     let mut text = String::new();
     if defined {
-        let _ = write!(text, "Function `{name}` the schema defines");
+        let _ = write!(text, "Function `{folded}` the schema defines");
     }
     let fitting: Vec<_> = overloads
         .iter()
@@ -188,7 +190,8 @@ fn function(
     Some(text)
 }
 
-/// How many arguments the call whose `(` is token `open` passes, up to its `)` or the end.
+/// How many arguments the call whose `(` is token `open` passes, up to its `ORDER BY`, `)` or
+/// the end.
 fn arguments(tokens: &[Tok], open: usize) -> usize {
     let inner = tokens[open].depth + 1;
     let mut brackets = 0usize;
@@ -196,6 +199,9 @@ fn arguments(tokens: &[Tok], open: usize) -> usize {
     let mut empty = true;
     for tok in &tokens[open + 1..] {
         if tok.depth < inner {
+            break;
+        }
+        if tok.depth == inner && brackets == 0 && tok.text.eq_ignore_ascii_case("ORDER") {
             break;
         }
         empty = false;

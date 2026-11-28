@@ -80,7 +80,7 @@ fn item(candidate: Candidate, rank: usize, range: lsp_types::Range) -> Completio
         None => "",
     };
     let detail = match (&candidate.sql_type, &candidate.detail) {
-        (_, Some(signature)) if function => signature.clone(),
+        (_, Some(signature)) if function && signature.contains('(') => signature.clone(),
         (Some(sql_type), _) => format!("{sql_type}{nullability}"),
         (None, Some(schema)) => format!("{documentation} in {schema}"),
         (None, None) => documentation.to_string(),
@@ -158,7 +158,7 @@ mod tests {
             (CandidateKind::Cte, None),
             (CandidateKind::Join, Some("public")),
             (CandidateKind::Function, Some("upper(text) -> text")),
-            (CandidateKind::Function, None),
+            (CandidateKind::Function, Some("public")),
         ]
         .into_iter()
         .map(|(kind, detail)| {
@@ -202,7 +202,7 @@ mod tests {
                 ),
                 (
                     Some(CompletionItemKind::FUNCTION),
-                    "function".into(),
+                    "function in public".into(),
                     "x(".into()
                 ),
             ]
