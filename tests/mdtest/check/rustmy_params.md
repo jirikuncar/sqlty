@@ -167,6 +167,8 @@ def run(conn: rustmy.Connection, ids: tuple[int, int]) -> None:
     scalar(conn, BY_ID, (1,))
     # error: [param-count-mismatch] "query has 2 parameters, the call passes 1"
     scalar(conn, "SELECT name FROM users WHERE id = %s AND age = %s", str, (1,))
+    # error: [param-count-mismatch] "query has 2 parameters, the call passes 1"
+    scalar(conn, "SELECT name FROM users WHERE id = %s AND age = %s", str, 1)
     execute(conn, BY_ID, ids)
     scalar(conn, BY_ID, ids)
     scalar(conn, BY_ID.bind((1, 2)))
