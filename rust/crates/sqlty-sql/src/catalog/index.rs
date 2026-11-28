@@ -7,7 +7,7 @@
 //! O(log N + k). It holds the catalog's own `Arc<str>` keys, so it adds pointers, not
 //! copies of the names. `load` builds it once.
 
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 
 use super::column_index::ColumnNames;
 use super::joins::ReferencedBy;
@@ -217,19 +217,19 @@ impl Catalog {
 #[derive(Clone, Default)]
 pub(super) struct NameIndex {
     pub(super) relations: Sorted,
-    /// Built on the first lookup, which `check` never makes.
-    pub(super) columns: OnceLock<ColumnNames>,
+    pub(super) columns: ColumnNames,
     functions: Sorted,
     types: Sorted,
     pub(super) referenced_by: ReferencedBy,
 }
 
 impl NameIndex {
-    /// The index of `catalog`'s names. O(N log N).
+    /// The index of `catalog`'s names and columns. O(N log N + C log C).
     pub(super) fn new(catalog: &Catalog) -> Self {
+        let relations = Sorted::new(catalog.relations.keys());
         NameIndex {
-            relations: Sorted::new(catalog.relations.keys()),
-            columns: OnceLock::new(),
+            columns: ColumnNames::new(catalog, &relations.by_key),
+            relations,
             functions: Sorted::new(
                 catalog
                     .functions

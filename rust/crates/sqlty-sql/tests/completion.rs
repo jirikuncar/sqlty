@@ -68,7 +68,8 @@ fn columns_by_prefix_fold_as_the_dialect_does() {
     assert_eq!(columns(&catalog, "\"Ki", 5), [r#""Kind":t"#]);
     for dialect in ["mysql", "sqlite", "duckdb"] {
         let catalog = load(
-            "CREATE TABLE Users (Name TEXT); CREATE TABLE b (name_2 INT);",
+            "CREATE TABLE Users (Name TEXT); CREATE TABLE b (name_2 INT);
+            CREATE VIEW V AS SELECT Name AS FullName FROM Users;",
             dialect,
         );
         assert_eq!(
@@ -76,6 +77,7 @@ fn columns_by_prefix_fold_as_the_dialect_does() {
             ["Name:users", "name_2:b"],
             "{dialect}"
         );
+        assert_eq!(columns(&catalog, "fu", 5), ["FullName:v"], "{dialect}");
     }
 }
 

@@ -236,6 +236,30 @@ q = "--sql\nSELECT id, user_<CURSOR>"
 # completions: user_name column pg_catalog.pg_hba_file_rules
 ```
 
+### Names without case
+
+Outside PostgreSQL, names compare without case, those of view columns too.
+
+```toml
+[tool.sqlty]
+dialect = "mysql"
+schema = "views.sql"
+```
+
+`views.sql`:
+
+```sql
+CREATE TABLE orders (id INT, user_id INT, total DECIMAL(10, 2));
+CREATE VIEW Totals AS SELECT user_id AS OwnerId, SUM(total) AS Spent FROM orders GROUP BY user_id;
+```
+
+```python
+q = "-- sql\nSELECT own<CURSOR>"
+# completions: OwnerId column totals
+```
+
+### With a FROM
+
 Once the query has a `FROM`, only the columns in scope complete.
 
 ```python
