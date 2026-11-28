@@ -238,7 +238,7 @@ EXPRESSIONS = [
     ("postgres", "SELECT * FROM f, LATERAL generate_series(1, i)", "i: int | None, tx: str | None, iv: datetime.timedelta | None, dt: datetime.date | None, vb: str | None, c: typing.Literal[1, 2] | None, generate_series: int", []),
     ("postgres", "SELECT x.* FROM f", "*: None", ["unknown-table"]),
     ("postgres", "SELECT *", "*: None", ["rejected-query"]),
-    ("postgres", "WITH w AS (SELECT DISTINCT i FROM f) SELECT * FROM (WITH w AS (SELECT i FROM f) SELECT * FROM w) x", "i: int | None", []),
+    ("postgres", "WITH w AS (SELECT DISTINCT i FROM f) SELECT * FROM (WITH w AS (SELECT i FROM f) SELECT * FROM w) x", "i: int | None", ["unused-cte"]),
     ("postgres", "SELECT 1 AS x FROM c WHERE c.pid IN (SELECT 1 UNION SELECT 2)", "x: int", []),
     ("postgres", "SELECT 1 AS x FROM c WHERE c.pid IN (SELECT * FROM p)", "x: int", []),
     ("mysql", "SELECT ADDDATE(dt, 1) AS a, ADDDATE(dtm, 1) AS b, ADDDATE(ui, 1) AS c FROM f, m", "a: datetime.date | None, b: datetime.datetime | None, c: None", ["unsupported-syntax"]),
