@@ -269,6 +269,15 @@ def _type_table() -> dict[str, str]:
     return {name: literal or constants[const] for name, literal, const in pairs if name != "ENUM"}
 
 
+def _postgres_extension_types() -> set[str]:
+    """``POSTGRES_EXTENSION_TYPES`` of the analyzer: mapped in PostgreSQL only."""
+    source = (
+        Path(__file__).resolve().parent.parent / "rust/crates/sqlty-sql/src/analyzer/sql_type.rs"
+    ).read_text()
+    start = source.index("const POSTGRES_EXTENSION_TYPES")
+    return set(re.findall(r'"(\w+)"', source[start : source.index("];", start)]))
+
+
 @pytest.mark.parametrize(
     ("spelling", "dialect", "sql_type"),
     [
@@ -345,6 +354,9 @@ def test_type_names(sql_type: str, python_type: str, dialect: str):
     schema = f"CREATE TABLE t (c {sql_type} NOT NULL);"
     cast = core.infer_type(f"SELECT CAST(x AS {sql_type}) FROM t", dialect=dialect)
     column = core.infer_type("SELECT c FROM t", dialect=dialect, schema_sql=schema)
+    if dialect != "postgres" and sql_type in _postgres_extension_types():
+        assert column != f"tuple[{python_type}]"
+        return
     assert cast == column == f"tuple[{python_type}]"
     expanded = core.expand_star("SELECT * FROM t", dialect=dialect, schema_sql=schema)
     assert expanded is not None
