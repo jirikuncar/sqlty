@@ -462,6 +462,7 @@ dialect = "duckdb"
 q = "--sql\nSELECT id, name FROM u<CURSOR>"
 # completions: user_names view -
 # completions: users table -
+# completions: unnest function unnest(list: ANY) -> TABLE
 ```
 
 ## MySQL and SQLite

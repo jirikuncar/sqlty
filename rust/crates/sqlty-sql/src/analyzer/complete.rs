@@ -135,6 +135,7 @@ pub fn complete(
     };
     let typed = &query[prefix.clone()];
     let folded = schema.fold_typed(typed);
+    let mut ranked = Vec::new();
     let candidates = match context {
         Context::Relation(qualifier, join, rows) => {
             let relations = match &qualifier {
@@ -148,14 +149,11 @@ pub fn complete(
             if qualifier.is_none() && rows && !join {
                 let selected =
                     selected_columns(&before[..before.len() - usize::from(!prefix.is_empty())]);
-                if !selected.is_empty() {
-                    let ranked = schema
-                        .relations_with_columns(&selected, typed, limit + 1)
-                        .into_iter()
-                        .map(|(relation, _)| relation_candidate(relation, dialect))
-                        .collect();
-                    return finish_ranked(ranked, found, prefix, limit);
-                }
+                ranked = schema
+                    .relations_with_columns(&selected, typed, limit + 1)
+                    .into_iter()
+                    .map(|(relation, _)| relation_candidate(relation, dialect))
+                    .collect();
             }
             if join {
                 let scope = &before[..before.len() - usize::from(!prefix.is_empty())];
@@ -226,7 +224,7 @@ pub fn complete(
             found
         }
     };
-    finish(candidates, prefix, limit)
+    finish_ranked(ranked, candidates, prefix, limit)
 }
 
 /// A relation as a candidate.
@@ -287,7 +285,25 @@ fn selected_columns(tokens: &[Tok]) -> Vec<&str> {
     };
     let list = &tokens[start + 1..tokens.len() - 1];
     let mut found = Vec::new();
+    let mut subquery = None;
     for (i, tok) in list.iter().enumerate() {
+        // A subquery's names are its own.
+        match subquery {
+            Some(depth) if tok.depth > depth || tok.text != ")" => continue,
+            Some(_) => {
+                subquery = None;
+                continue;
+            }
+            None if tok.text == "("
+                && list
+                    .get(i + 1)
+                    .is_some_and(|t| t.text.eq_ignore_ascii_case("SELECT")) =>
+            {
+                subquery = Some(tok.depth);
+                continue;
+            }
+            None => {}
+        }
         let next = list.get(i + 1).map(|t| t.text.as_str());
         let prev = i.checked_sub(1).map(|i| &list[i]);
         let alias = prev.is_some_and(|p| {
@@ -312,9 +328,39 @@ fn selected_columns(tokens: &[Tok]) -> Vec<&str> {
 }
 
 /// Words of a select list that are no column, or after which a column may follow.
-const SELECT_WORDS: [&str; 22] = [
-    "SELECT", "DISTINCT", "ALL", "AS", "AND", "OR", "NOT", "IS", "NULL", "IN", "LIKE", "ILIKE",
-    "BETWEEN", "CASE", "WHEN", "THEN", "ELSE", "END", "TRUE", "FALSE", "ON", "FILTER",
+const SELECT_WORDS: [&str; 32] = [
+    "SELECT",
+    "DISTINCT",
+    "ALL",
+    "AS",
+    "AND",
+    "OR",
+    "NOT",
+    "IS",
+    "NULL",
+    "IN",
+    "LIKE",
+    "ILIKE",
+    "BETWEEN",
+    "CASE",
+    "WHEN",
+    "THEN",
+    "ELSE",
+    "END",
+    "TRUE",
+    "FALSE",
+    "ON",
+    "FILTER",
+    "FROM",
+    "WHERE",
+    "INTERVAL",
+    "OVER",
+    "PARTITION",
+    "ORDER",
+    "BY",
+    "ASC",
+    "DESC",
+    "EXISTS",
 ];
 
 /// `candidates` in the order completion lists them, at most `limit`.
@@ -1185,6 +1231,8 @@ mod tests {
             ("SELECT no|", 5),
             ("SELECT note, user_id FROM |", 5),
             ("SELECT name, x.note FROM |", 5),
+            ("SELECT id FROM zz|", 5),
+            ("SELECT code FROM |", 5),
         ];
         let runs: Vec<Vec<(usize, Vec<String>)>> = [50, 540, 5000]
             .into_iter()
@@ -1193,7 +1241,8 @@ mod tests {
                 sql += "CREATE TABLE users (id INT PRIMARY KEY, name TEXT);\n";
                 for i in 0..tables {
                     sql += &format!(
-                        "CREATE TABLE t{i} (id INT, note TEXT, user_id INT REFERENCES users);\n"
+                        "CREATE TABLE t{i} (id INT, note TEXT, user_id INT REFERENCES users);
+                        CREATE TABLE hidden.h{i} (code INT);\n"
                     );
                 }
                 let catalog = load(&sql, "postgres").0;
@@ -1229,6 +1278,11 @@ mod tests {
         assert_eq!(runs[2][7].1, ["note", "note", "note", "note", "note"]);
         assert_eq!(runs[2][8].1, ["t0", "t1", "t10", "t100", "t1000"]);
         assert_eq!(runs[2][9].1[..2], ["t0", "t1"]);
+        assert!(runs[2][10].1.is_empty());
+        assert_eq!(
+            runs[2][11].1[0], "t0",
+            "no relation on the path has the column"
+        );
         assert!(
             runs[2].iter().all(|(visited, _)| *visited <= 64),
             "{:?}",

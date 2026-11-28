@@ -181,4 +181,19 @@ fn from_ranks_the_relations_that_have_the_selected_columns() {
     );
     let found = complete("SELECT email FROM |", &catalog, "postgres");
     assert_eq!(found[..2], ["accounts:Table:public", "signups:View:public"]);
+    let found = pg("WITH recent AS (SELECT 1) SELECT id FROM |");
+    assert!(found.contains(&"recent:Cte:".to_string()), "{found:?}");
+    assert_eq!(
+        pg("SELECT (SELECT max(id) FROM zoo) AS m, n FROM |")[0],
+        "zoo:Table:public"
+    );
+    assert_eq!(
+        pg("SELECT EXTRACT(year FROM created_at) FROM |")[0],
+        "events:Table:public"
+    );
+    let functions = complete("SELECT id FROM generate_s|", &catalog, "postgres");
+    assert!(
+        functions[0].starts_with("generate_series:Function:"),
+        "{functions:?}"
+    );
 }
