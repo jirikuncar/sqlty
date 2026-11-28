@@ -2,6 +2,8 @@
 
     uv run python scripts/generate_function_catalog.py postgres
     uv run --with duckdb==2.0.0 python scripts/generate_function_catalog.py duckdb
+    SQLTY_MYSQL_DSN=mysql://root@127.0.0.1:3306/ \
+        uv run --with pymysql python scripts/generate_function_catalog.py mysql
 
 Writes `rust/crates/sqlty-sql/functions/<dialect>.txt`, one overload per line:
 
@@ -24,13 +26,20 @@ parameter is `ANY`. A table function returns `TABLE`; `duckdb_functions()` lists
 it takes by name (`read_csv(path, header = true)`) after the positional ones, so only as many
 are written as DuckDB binds positionally.
 The page is the documentation page of the function's first category, or of its kind.
+
+MySQL: the syntax that the help tables (`mysql.help_topic`) of a MySQL 8.4 server give for
+each function, which the documentation's pages are generated with too; it names parameters
+but no types and no result. A form with keywords (`CAST(expr AS type)`, `COUNT(DISTINCT ...)`)
+is left out, an optional part with keywords (`[USING charset_name]`) and `[DISTINCT]` dropped.
 """
 
 from __future__ import annotations
 
 import argparse
 import html
+import os
 import re
+import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Any
@@ -218,6 +227,106 @@ def duckdb_catalog() -> list[str]:
     return [f"{line}\t{doc}" for line, doc in lines.items()]
 
 
+MYSQL_VERSION = "8.4"
+MYSQL_DOCS = f"https://dev.mysql.com/doc/refman/{MYSQL_VERSION}/en/"
+# Words after the arguments of a window or aggregate function.
+MYSQL_MODIFIERS = {"over_clause", "null_treatment", "from_first_last"}
+# Predicates the help tables write as calls.
+MYSQL_SYNTAX = {"exists"}
+MYSQL_CALL = re.compile(r"\s*([A-Za-z_]\w*)(\()?")
+MYSQL_MODIFIER = re.compile(r"\s*\[?(\w+)\]?")
+MYSQL_NEXT = re.compile(r"\s*(?:,|$)")
+# An optional part written with keywords or alternatives: `[USING charset_name]`.
+MYSQL_KEYWORD_OPTION = re.compile(r"\s*\[[^\[\]]*(?:[|{]|\b[A-Z]{2,}\b)[^\[\]]*\]")
+
+
+def mysql_calls(text: str) -> list[tuple[str, str]]:
+    """The `(name, arguments)` of each form of a help topic's syntax: `ROUND(X), ROUND(X,D)`."""
+    text = re.sub(r"\s+", " ", text)
+    calls = []
+    at = 0
+    while at < len(text):
+        found = MYSQL_CALL.match(text, at)
+        if not found:
+            break
+        name, paren = found.groups()
+        at = found.end()
+        if paren:
+            depth, start = 1, at
+            while at < len(text) and depth:
+                depth += {"(": 1, ")": -1}.get(text[at], 0)
+                at += 1
+            if depth:
+                break
+            calls.append((name, text[start : at - 1]))
+        elif not MYSQL_NEXT.match(text, at):
+            break
+        while (modifier := MYSQL_MODIFIER.match(text, at)) and modifier[1] in MYSQL_MODIFIERS:
+            at = modifier.end()
+        at = re.compile(r"\s*,?").match(text, at).end()  # type: ignore[union-attr]
+    return calls
+
+
+def mysql_parameters(arguments: str) -> str | None:
+    """`x[, y, ...]` of the arguments `x [,y] ...`; `None` for SQL syntax."""
+    if re.match(r"\s*DISTINCT\b", arguments):
+        return None
+    arguments = re.sub(r"^\s*\[DISTINCT\]\s+", "", arguments)
+    while (shorter := MYSQL_KEYWORD_OPTION.sub("", arguments)) != arguments:
+        arguments = shorter
+    if re.search(r"[{|(]|\b[A-Z]{2,}\b", arguments):
+        return None
+    for pattern, replacement in (
+        (r"\]\s*\.\.\.", ", ...]"),
+        (r"\s*,\s*", ", "),
+        (r"\s*\[\s*,\s*", "[, "),
+        (r"\s*\[\s*", "["),
+        (r"\s*\]", "]"),
+        (r"(\w)\s*\.\.\.", r"\1, ..."),
+        (r",\s*\[(?!,)", "[, "),
+        # A part after a parameter without a comma is not one: `str [flags]`.
+        (r"(\w)\[(?!,)[^\[\]]*\]", r"\1"),
+    ):
+        arguments = re.sub(pattern, replacement, arguments)
+    return arguments.strip()
+
+
+def mysql_catalog(dsn: str) -> tuple[str, list[str]]:
+    import pymysql  # noqa: PLC0415  # only this dialect needs it
+
+    url = urllib.parse.urlparse(dsn)
+    conn = pymysql.connect(
+        host=url.hostname or "localhost",
+        port=url.port or 3306,
+        user=url.username or "root",
+        password=url.password or "",
+    )
+    with conn.cursor() as cursor:
+        cursor.execute("SELECT version()")
+        (version,) = cursor.fetchone()
+        if not version.startswith(f"{MYSQL_VERSION}."):
+            raise SystemExit(f"MySQL {MYSQL_VERSION} expected, found {version}")
+        cursor.execute(
+            """
+            SELECT t.url, t.description FROM mysql.help_topic t JOIN mysql.help_category c
+            USING (help_category_id)
+            WHERE c.name LIKE '%Function%' OR c.name LIKE '%Operators%'
+                OR c.name IN ('Geometry Constructors', 'XML', 'GTID')
+            ORDER BY t.help_topic_id
+            """
+        )
+        topics = cursor.fetchall()
+    conn.close()
+    lines: dict[str, str] = {}
+    for url, description in topics:
+        syntax = description.removeprefix("Syntax:\n").split("\n\n", 1)[0]
+        for name, arguments in mysql_calls(syntax):
+            parameters = mysql_parameters(arguments)
+            if parameters is not None and name.lower() not in MYSQL_SYNTAX:
+                lines.setdefault(f"{name.lower()}({parameters})", url.removeprefix(MYSQL_DOCS))
+    return f"mysql.help_topic of MySQL {version}", [f"{line}\t{doc}" for line, doc in lines.items()]
+
+
 def render(dialect: str, docs: str, source: str, lines: list[str]) -> str:
     header = [
         f"# Built-in functions of {dialect}, from {source}.",
@@ -229,12 +338,14 @@ def render(dialect: str, docs: str, source: str, lines: list[str]) -> str:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
-    parser.add_argument("dialect", choices=["postgres", "duckdb"])
+    parser.add_argument("dialect", choices=["postgres", "duckdb", "mysql"])
     args = parser.parse_args()
     if args.dialect == "postgres":
         text = render("postgres", POSTGRES_DOCS, POSTGRES_SOURCE, postgres())
-    else:
+    elif args.dialect == "duckdb":
         text = render("duckdb", DUCKDB_DOCS, DUCKDB_SOURCE, duckdb_catalog())
+    else:
+        text = render("mysql", MYSQL_DOCS, *mysql_catalog(os.environ["SQLTY_MYSQL_DSN"]))
     (OUTPUT / f"{args.dialect}.txt").write_text(text)
 
 

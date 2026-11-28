@@ -24,9 +24,11 @@ use crate::analyzer::SqlDialect;
 pub struct Signature {
     /// The name, lower case.
     pub name: &'static str,
-    /// The overload as the documentation writes it: `name(parameters) -> result`.
+    /// The overload as the documentation writes it: `name(parameters) -> result`, or
+    /// `name(parameters)`.
     pub label: &'static str,
-    /// The result type, `setof ...` for a set-returning function.
+    /// The result type, `setof ...` for a set-returning function; empty when the documentation
+    /// gives none.
     pub returns: &'static str,
     /// The parameters, in order.
     pub parameters: &'static [Parameter],
@@ -88,9 +90,11 @@ impl Signature {
 fn catalogs(dialect: SqlDialect) -> &'static [&'static Catalog] {
     static PG: [&Catalog; 1] = [&POSTGRES];
     static DUCK: [&Catalog; 1] = [&DUCKDB];
+    static MY: [&Catalog; 1] = [&MYSQL];
     match dialect {
         SqlDialect::Postgres | SqlDialect::Other("generic") => &PG,
         SqlDialect::Other("duckdb") => &DUCK,
+        SqlDialect::MySql => &MY,
         _ => &[],
     }
 }

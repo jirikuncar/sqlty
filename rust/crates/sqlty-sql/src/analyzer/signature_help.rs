@@ -120,7 +120,8 @@ pub fn signature_help(
 /// [`NOT_A_CALL`], qualified or not, is a relation's.
 fn called(tokens: &[Tok], at: usize) -> Option<Call> {
     let name = at.checked_sub(1)?;
-    if !tokens[name].word {
+    // `VALUES (1, 2)` is a row, also in MySQL, whose `VALUES(column)` 8.4 deprecates.
+    if !tokens[name].word || tokens[name].text.eq_ignore_ascii_case("VALUES") {
         return None;
     }
     let mut first = name;

@@ -247,7 +247,7 @@ q = "--sql\nSELECT left(name, <CURSOR>) FROM users"
 # signature: > left(string: text, **n: integer**) -> text
 ```
 
-PostgreSQL's catalog comes from its documentation and DuckDB's from `duckdb_functions()`; MySQL and SQLite show none yet.
+PostgreSQL's and MySQL's catalogs come from their documentation and DuckDB's from `duckdb_functions()`; MySQL's names parameters without types. SQLite shows none yet.
 
 ## Highlighting
 
