@@ -26,6 +26,29 @@ use super::typed::Typed;
 use super::Candidate;
 use super::SchemaColumn;
 
+/// The first characters a misspelled table shares with the names [`Analyzer::meant_table`]
+/// considers.
+const SHARED_PREFIX: usize = 2;
+
+/// The most names [`Analyzer::meant_table`] compares.
+const MEANT_CANDIDATES: usize = 64;
+
+/// Whether `name` can replace an unquoted table name as it is: plain, and no keyword.
+fn unquoted(analyzer: &Analyzer<'_>, name: &str) -> bool {
+    analyzer.plain(name)
+        && sqlparser::keywords::ALL_KEYWORDS
+            .binary_search(&name.to_ascii_uppercase().as_str())
+            .is_err()
+}
+
+/// The character that closes an identifier `quote` opens.
+fn closing_quote(quote: char) -> char {
+    match quote {
+        '[' => ']',
+        other => other,
+    }
+}
+
 /// Where a resolved column comes from, for explaining why it is untyped.
 pub(super) enum Origin {
     /// A schema table's column, as `table.column`.
@@ -104,8 +127,9 @@ impl<'a> Analyzer<'a> {
         self.virtual_columns(table).is_some() || self.schema.table(table).is_some()
     }
 
-    /// Records `unknown-table` when a FROM item names no schema table, view or CTE.
-    pub(super) fn check_table(&self, table: &Table) {
+    /// Records `unknown-table` when a FROM item names no schema table, view or CTE, with the
+    /// closest one as a fix of its `written` name.
+    pub(super) fn check_table(&self, table: &Table, written: Option<&Ident>) {
         if !self.diag.enabled() {
             return;
         }
@@ -116,12 +140,25 @@ impl<'a> Analyzer<'a> {
             return;
         }
         if self.judges_names() {
-            self.diag.record_about(
-                Rule::UnknownTable,
-                format!("table `{table}` is not defined in the schema"),
-                Some(table),
-                None,
-            );
+            let mut message = format!("table `{table}` is not defined in the schema");
+            let meant = self.meant_table(table);
+            if let Some(meant) = &meant {
+                message.push_str(&format!("; did you mean `{meant}`?"));
+            }
+            let fix = meant.zip(written).filter(|(meant, ident)| {
+                // A name inside another is a hint, not a fix: the table may be missing.
+                suggest::is_typo(table.rsplit('.').next().unwrap_or(table), meant)
+                    && (ident.quote_style.is_some() || unquoted(self, meant))
+            });
+            let _at = fix.as_ref().and_then(|(_, ident)| self.diag.at(ident.span));
+            self.diag.push(NameDiagnostic {
+                table: Some(table.to_string()),
+                replacement: fix.map(|(meant, ident)| match ident.quote_style {
+                    Some(quote) => format!("{quote}{meant}{}", closing_quote(quote)),
+                    None => meant,
+                }),
+                ..NameDiagnostic::new(Rule::UnknownTable, message)
+            });
         } else {
             self.diag.explain_silently();
         }
@@ -650,6 +687,48 @@ impl<'a> Analyzer<'a> {
             .or_else(|| suggest::closest(qualifier, &references))
     }
 
+    /// Whether `name` reads as itself unquoted.
+    fn plain(&self, name: &str) -> bool {
+        name.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_')
+            && name.chars().all(|c| {
+                c.is_ascii_digit()
+                    || c == '_'
+                    || c.is_ascii_lowercase()
+                    || (c.is_ascii_uppercase() && self.dialect != SqlDialect::Postgres)
+            })
+    }
+
+    /// The table, view or CTE an unknown `table` most likely means. Only names sharing its
+    /// first [`SHARED_PREFIX`] characters are candidates, at most [`MEANT_CANDIDATES`], so
+    /// the catalog's name index finds them in O(log N + k).
+    fn meant_table(&self, table: &str) -> Option<String> {
+        let (schema, name) = match table.rsplit_once('.') {
+            Some((schema, name)) => (Some(schema), name),
+            None => (None, table),
+        };
+        let prefix: String = name.chars().take(SHARED_PREFIX).collect();
+        if prefix.chars().count() < SHARED_PREFIX {
+            return None;
+        }
+        // Quoted, the folded key keeps its case.
+        let relations = self.schema.catalog().relations_with_prefix(
+            &format!("\"{prefix}"),
+            schema.map(|schema| format!("\"{schema}\"")).as_deref(),
+            MEANT_CANDIDATES,
+        );
+        // A tie may lie past the cap: no guess then.
+        if relations.len() == MEANT_CANDIDATES {
+            return None;
+        }
+        let ctes = self.virtuals.names().filter(|_| schema.is_none());
+        let names: Vec<&str> = relations
+            .iter()
+            .map(|relation| relation.name.name)
+            .chain(ctes.filter(|cte| cte.starts_with(&prefix)))
+            .collect();
+        suggest::closest(name, &names).map(str::to_string)
+    }
+
     /// The column of `candidates` that `column` most likely misspells, and how SQL spells
     /// it when that is known.
     fn suggestion(
@@ -657,15 +736,7 @@ impl<'a> Analyzer<'a> {
         column: &Ident,
         candidates: &[&&Source],
     ) -> Option<(String, Option<String>)> {
-        let plain = |name: &str| {
-            name.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_')
-                && name.chars().all(|c| {
-                    c.is_ascii_digit()
-                        || c == '_'
-                        || c.is_ascii_lowercase()
-                        || (c.is_ascii_uppercase() && self.dialect != SqlDialect::Postgres)
-                })
-        };
+        let plain = |name: &str| self.plain(name);
         let mut names: Vec<(&str, Option<&str>)> = Vec::new();
         for source in candidates {
             let table = source.table.named()?;
@@ -835,8 +906,15 @@ impl<'a> Analyzer<'a> {
     }
 }
 
+/// Names quoted and joined; an unaliased subquery, whose reference is empty, by what it is.
 fn list(names: &[&str]) -> String {
-    let names: Vec<String> = names.iter().map(|name| format!("`{name}`")).collect();
+    let names: Vec<String> = names
+        .iter()
+        .map(|name| match *name {
+            "" => "the subquery".to_string(),
+            name => format!("`{name}`"),
+        })
+        .collect();
     names.join(", ")
 }
 

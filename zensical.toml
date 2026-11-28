@@ -49,6 +49,7 @@ nav = [
     { "VS Code" = "recipes/vscode.md" },
     { "Neovim, Vim, Helix and Emacs" = "recipes/editors.md" },
     { "Embedding in JavaScript" = "recipes/embedding.md" },
+    { "TypeScript and JavaScript (ESLint)" = "recipes/eslint.md" },
   ] },
   { "Reference" = [
     { "CLI" = "reference/cli.md" },
