@@ -16,9 +16,7 @@ import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
-from sqlty._helpers import HelperIndex
-from sqlty._source import ParsedSource
-from sqlty.core import _helper_sites
+from sqlty.core import HelperIndex, ParsedSource, helper_sites
 
 EXAMPLES = int(os.environ.get("SQLTY_FUZZ_EXAMPLES", "300"))
 HEADER = "from typing import Annotated\nfrom sqlty import SQL\n"
@@ -54,7 +52,7 @@ def both(text: str, index: HelperIndex, module: str = "app.use") -> list[tuple[i
             parsed.position(start)[0] if start is not None else lines and lines[0],
             next(iter(queries), None),
         )
-        for lines, queries, _, start in _helper_sites(parsed, index)
+        for lines, queries, _, start in helper_sites(parsed, index)
     ]
 
 

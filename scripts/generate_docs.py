@@ -6,8 +6,8 @@
 Only the text between ``<!-- generated:NAME -->`` and ``<!-- /generated:NAME -->``
 is owned by this script; everything else in the pages is hand-written. The
 sources are ``KEY_DOCS`` / ``FUNCTION_KEY_DOCS`` below, ``DEFAULT_EXCLUDE`` in
-``sqlty._config``, the clap commands of ``sqlty-cli`` (``sqlty._core.cli_reference``) and
-the rule pages' front matter (``sqlty._lint.RULES``).
+``sqlty._core``, the clap commands of ``sqlty-cli`` (``sqlty._core.cli_reference``) and
+the rule pages' front matter (``sqlty._core.rules``).
 ``tests/test_docs.py`` runs the ``--check`` comparison.
 """
 
@@ -248,11 +248,7 @@ def _anchor(key: str) -> str:
 
 
 def config_blocks() -> dict[str, str]:
-    from sqlty._config import (
-        DEFAULT_EXCLUDE,
-        DISCOVERY_KEYS,
-        TOOL_KEYS,
-    )
+    from sqlty._core import DEFAULT_EXCLUDE, DISCOVERY_KEYS, TOOL_KEYS
 
     assert set(KEY_DOCS) == {*TOOL_KEYS, *DISCOVERY_KEYS}, "KEY_DOCS is out of sync with the keys"
     keys = _table(
@@ -324,20 +320,20 @@ def _options(options: Iterable[tuple[str, str]]) -> str:
 
 
 def rules_blocks() -> dict[str, str]:
-    from sqlty._lint import RULES
+    from sqlty._core import rules
 
     return {
         "rules": _table(
             ("Rule", "Group", "Default", "Fixable", "Reports"),
             [
                 (
-                    f"[`{r.name}`](rules/{r.name}.md)",
-                    r.group,
-                    r.default_severity.value,
-                    "yes" if r.fixable else "no",
-                    r.description,
+                    f"[`{name}`](rules/{name}.md)",
+                    group,
+                    severity,
+                    "yes" if fixable else "no",
+                    summary,
                 )
-                for r in RULES.values()
+                for name, severity, fixable, summary, group in rules()
             ],
         )
     }
