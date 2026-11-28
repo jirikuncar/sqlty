@@ -685,6 +685,7 @@ fn other_sources() -> Source {
     Source {
         reference: String::new(),
         table: Table::ExtraSources,
+        span: sqlparser::tokenizer::Span::empty(),
     }
 }
 

@@ -214,6 +214,7 @@ type Found = {
   start: number;
   end: number;
   fix: Edit[];
+  related?: { start: number; end: number; message: string }[];
 };
 type Candidate = { label: string; kind: string; detail: string };
 
@@ -233,6 +234,16 @@ function diagnostic(document: vscode.TextDocument, found: Found): vscode.Diagnos
       : vscode.DiagnosticSeverity.Warning;
   const diagnostic = new vscode.Diagnostic(range, found.message, severity);
   diagnostic.source = "sqlty";
+  diagnostic.relatedInformation = found.related?.map(
+    (related) =>
+      new vscode.DiagnosticRelatedInformation(
+        new vscode.Location(
+          document.uri,
+          new vscode.Range(document.positionAt(related.start), document.positionAt(related.end)),
+        ),
+        related.message,
+      ),
+  );
   diagnostic.code = {
     value: found.rule,
     target: vscode.Uri.parse(`https://sqlty.kuncar.dev/reference/rules/${found.rule}/`),

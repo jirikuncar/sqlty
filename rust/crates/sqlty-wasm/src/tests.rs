@@ -66,6 +66,16 @@ fn analyze_reports_diagnostics_in_utf16_units() {
             "fix": [{"start": 35, "end": 38, "replacement": "name"}],
         }])
     );
+    let source = "é = SQL[tuple[int]](\"--sql\\nSELECT id FROM users u, users v\")\n";
+    let answer =
+        ask(&json!({"op": "analyze", "source": source, "schema": SCHEMA, "dialect": "postgres"}));
+    assert_eq!(
+        answer["diagnostics"][0]["related"],
+        json!([
+            {"start": 43, "end": 50, "message": "column `id` is here"},
+            {"start": 52, "end": 59, "message": "column `id` is here"},
+        ])
+    );
 }
 
 #[test]

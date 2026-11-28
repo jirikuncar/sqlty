@@ -915,6 +915,7 @@ fn report(host: &mut dyn Host, findings: &[Finding], head: &str, format: OutputF
                     line: found.line,
                     span: found.span.clone(),
                     fix: Vec::new(),
+                    related: Vec::new(),
                 };
                 host.out(&format!(
                     "{}\n",

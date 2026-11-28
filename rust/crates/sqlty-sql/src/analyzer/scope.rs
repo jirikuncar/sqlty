@@ -33,6 +33,8 @@ pub(super) struct Source {
     /// cannot be named.
     pub(super) reference: String,
     pub(super) table: Table,
+    /// Where the query names it: its alias, else its table name; empty when unknown.
+    pub(super) span: Span,
 }
 
 /// The relation behind a [`Source`].
@@ -73,7 +75,13 @@ impl Source {
         Source {
             reference,
             table: Table::Named(key),
+            span: Span::empty(),
         }
+    }
+
+    /// This source, written at `span`.
+    pub(super) fn at(self, span: Span) -> Self {
+        Source { span, ..self }
     }
 }
 
@@ -231,10 +239,31 @@ pub(super) fn table_source(factor: &TableFactor, dialect: SqlDialect) -> Source 
                 || object_name(name),
                 |alias| alias.name.value.to_lowercase(),
             );
-            Source::named(reference, table_key(name, dialect).into_owned())
+            Source::named(reference, table_key(name, dialect).into_owned()).at(written_at(factor))
         }
         other => opaque_source(other),
     }
+}
+
+/// Where a FROM item is written: its table and alias, or the alias of a subquery.
+/// O(1): neither spans a subquery nor a function's arguments.
+pub(super) fn written_at(factor: &TableFactor) -> Span {
+    let alias = match factor {
+        TableFactor::Table { name, alias, .. } => {
+            let name = name.0.iter().map(Spanned::span);
+            return Span::union_iter(name.chain(alias.iter().map(|alias| alias.name.span)));
+        }
+        TableFactor::Derived { alias, .. }
+        | TableFactor::TableFunction { alias, .. }
+        | TableFactor::Function { alias, .. }
+        | TableFactor::UNNEST { alias, .. }
+        | TableFactor::JsonTable { alias, .. }
+        | TableFactor::NestedJoin { alias, .. } => alias,
+        _ => &None,
+    };
+    alias
+        .as_ref()
+        .map_or(Span::empty(), |alias| alias.name.span)
 }
 
 /// The last part of a table's name, as the query writes it.
@@ -283,6 +312,7 @@ pub(super) fn opaque_source(factor: &TableFactor) -> Source {
     Source {
         reference,
         table: Table::Opaque(description),
+        span: written_at(factor),
     }
 }
 
@@ -677,7 +707,7 @@ impl<'a> Analyzer<'a> {
             if let Some((reference, columns)) = analyzer.defined_columns(factor) {
                 let table = format!("({reference})");
                 analyzer.virtuals.insert(table.clone(), columns);
-                scope.push(Source::named(reference, table));
+                scope.push(Source::named(reference, table).at(written_at(factor)));
                 continue;
             }
             // A built-in set-returning function, which may read the relations before it.
@@ -726,7 +756,7 @@ impl<'a> Analyzer<'a> {
                     .map_or(function, |alias| alias.name.value.to_lowercase());
                 let table = format!("({reference})");
                 analyzer.virtuals.insert(table.clone(), columns);
-                scope.push(Source::named(reference, table));
+                scope.push(Source::named(reference, table).at(written_at(factor)));
                 continue;
             }
             // `LATERAL f(x)` is a `Function`, `f(x)` a `Table` with arguments.
@@ -756,7 +786,7 @@ impl<'a> Analyzer<'a> {
                 );
                 let table = format!("({reference})");
                 analyzer.virtuals.insert(table.clone(), columns);
-                scope.push(Source::named(reference, table));
+                scope.push(Source::named(reference, table).at(written_at(factor)));
                 continue;
             }
             match factor {
@@ -766,7 +796,7 @@ impl<'a> Analyzer<'a> {
                         || object_name(name),
                         |alias| alias.name.value.to_lowercase(),
                     );
-                    scope.push(Source::named(reference, table.into_owned()));
+                    scope.push(Source::named(reference, table.into_owned()).at(written_at(factor)));
                 }
                 TableFactor::Derived {
                     subquery, alias, ..
@@ -793,7 +823,7 @@ impl<'a> Analyzer<'a> {
                         .as_ref()
                         .map(|alias| alias.name.value.to_lowercase())
                         .unwrap_or_default();
-                    scope.push(Source::named(reference, table));
+                    scope.push(Source::named(reference, table).at(written_at(factor)));
                 }
                 other => {
                     let entries = match other {
@@ -955,6 +985,7 @@ impl<'a> Analyzer<'a> {
             Some(reference) => vec![Source {
                 reference: reference.to_lowercase(),
                 table: resolve(reference, scope),
+                span: Span::empty(),
             }],
             None => scope
                 .iter()
@@ -981,7 +1012,10 @@ impl<'a> Analyzer<'a> {
     ) -> Option<Vec<Column>> {
         let sources = Some(Self::star_sources(reference, scope)).filter(|s| !s.is_empty())?;
         let mut star = Vec::new();
-        for Source { reference, table } in &sources {
+        for Source {
+            reference, table, ..
+        } in &sources
+        {
             if star.len() > MAX_COLUMNS {
                 break;
             }
@@ -1167,6 +1201,7 @@ mod tests {
             Source {
                 reference: "g".into(),
                 table: Table::Opaque("table function".into()),
+                span: Span::empty(),
             },
         ]
         .into();

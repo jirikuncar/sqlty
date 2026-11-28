@@ -495,7 +495,7 @@ fn reported(diagnostics: &[Diagnostic], utf16: impl Fn(usize) -> usize) -> Vec<V
     diagnostics
         .iter()
         .map(|found| {
-            json!({
+            let mut reported = json!({
                 "rule": found.rule.name(),
                 "message": found.message,
                 "severity": found.severity.as_str(),
@@ -507,7 +507,21 @@ fn reported(diagnostics: &[Diagnostic], utf16: impl Fn(usize) -> usize) -> Vec<V
                     "end": utf16(edit.range.end),
                     "replacement": edit.replacement,
                 })).collect::<Vec<_>>(),
-            })
+            });
+            if !found.related.is_empty() {
+                reported["related"] = found
+                    .related
+                    .iter()
+                    .map(|related| {
+                        json!({
+                            "start": utf16(related.span.start),
+                            "end": utf16(related.span.end),
+                            "message": related.message,
+                        })
+                    })
+                    .collect();
+            }
+            reported
         })
         .collect()
 }

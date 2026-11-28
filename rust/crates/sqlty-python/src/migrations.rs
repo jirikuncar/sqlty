@@ -96,6 +96,7 @@ fn diagnosed(
             line: lines.line_at(finding.span.start),
             span: finding.span,
             fix: Vec::new(),
+            related: Vec::new(),
         })
         .collect();
     let statements: Vec<_> = found.iter().map(|found| found.span.clone()).collect();

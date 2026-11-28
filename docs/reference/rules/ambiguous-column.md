@@ -37,6 +37,9 @@ from sqlty import SQL
 q = SQL[tuple[int]]("--sql\nSELECT id FROM users u JOIN orders o ON o.user_id = u.id")
 ```
 
+The diagnostic points at each table that has the column: the editor shows them as
+related information, `sqlty check` as notes under it.
+
 ## Why is this bad?
 
 The database rejects the query. sqlty types the column from the first table that has it, so the annotation can look right while the query fails.
