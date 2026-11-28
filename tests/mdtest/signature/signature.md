@@ -178,13 +178,35 @@ dialect = "duckdb"
 
 ```python
 q = "--sql\nSELECT list_value(1, 2, <CURSOR>)"
-# signature: list_value() -> "NULL"[]
+# signature: list_value() -> ANY[]
 # signature: > list_value(value: T[, **T**, ...]) -> T[]
 ```
 
 ```python
 q = "--sql\nSELECT concat_ws(', ', <CURSOR>) FROM users"
 # signature: > concat_ws(separator: VARCHAR, **string: ANY**[, ANY, ...]) -> VARCHAR
+```
+
+A type holds its brackets and parentheses, and a `[...]` or `{...}` literal holds its commas.
+
+```python
+q = "--sql\nSELECT array_distance([1.0, 2.0]::FLOAT[2], <CURSOR>)"
+# signature: > array_distance(array1: FLOAT[ANY], **array2: FLOAT[ANY]**) -> FLOAT
+# signature: array_distance(array1: DOUBLE[ANY], array2: DOUBLE[ANY]) -> DOUBLE
+```
+
+```python
+q = "--sql\nSELECT map_extract(MAP {'a': 1, 'b': 2}, <CURSOR>)"
+# signature: > map_extract(map: MAP(K, V), **key: K**) -> V[]
+```
+
+A table function shows the parameters it takes by position; the others are passed by name.
+
+```python
+q = "--sql\nSELECT * FROM read_csv(<CURSOR>)"
+# signature: > read_csv(**path: VARCHAR**) -> TABLE
+# signature: read_csv(path: VARIANT) -> TABLE
+# signature: read_csv(paths: ANY[]) -> TABLE
 ```
 
 ## Dialects without a catalog

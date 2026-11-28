@@ -320,7 +320,7 @@ count_star() -> BIGINT	aggregates.html
 countif(arg: BOOLEAN) -> HUGEINT	aggregates.html
 covar_pop(y: DOUBLE, x: DOUBLE) -> DOUBLE	aggregates.html
 covar_samp(y: DOUBLE, x: DOUBLE) -> DOUBLE	aggregates.html
-create_external_resource(type: VARCHAR, params: MAP(VARCHAR, VARCHAR), resource_name: VARCHAR, handle: ANY, teardown_on_failure: BOOLEAN, timeout_seconds: BIGINT, poll_interval_seconds: BIGINT) -> TABLE	overview.html
+create_external_resource(type: VARCHAR) -> TABLE	overview.html
 create_sort_key(key1: ANY[, ANY, ...]) -> BLOB	overview.html
 cume_dist() -> DOUBLE	window_functions.html
 current_catalog() -> ANY	overview.html
@@ -416,13 +416,13 @@ duckdb_extension_repositories() -> TABLE	overview.html
 duckdb_extensions() -> TABLE	overview.html
 duckdb_external_file_cache() -> TABLE	overview.html
 duckdb_external_resource_types() -> TABLE	overview.html
-duckdb_external_resources(discover: BOOLEAN) -> TABLE	overview.html
+duckdb_external_resources() -> TABLE	overview.html
 duckdb_functions() -> TABLE	overview.html
 duckdb_grammar_extensions() -> TABLE	overview.html
 duckdb_indexes() -> TABLE	overview.html
 duckdb_keywords() -> TABLE	overview.html
 duckdb_log_contexts() -> TABLE	overview.html
-duckdb_logs(denormalized_table: BOOLEAN) -> TABLE	overview.html
+duckdb_logs() -> TABLE	overview.html
 duckdb_logs_parsed(log_type: ANY) -> TABLE	overview.html
 duckdb_memory() -> TABLE	overview.html
 duckdb_optimizers() -> TABLE	overview.html
@@ -431,9 +431,9 @@ duckdb_profiling_settings() -> TABLE	overview.html
 duckdb_schemas() -> TABLE	overview.html
 duckdb_secret_type_parameters() -> TABLE	overview.html
 duckdb_secret_types() -> TABLE	overview.html
-duckdb_secrets(redact: BOOLEAN) -> TABLE	overview.html
+duckdb_secrets() -> TABLE	overview.html
 duckdb_sequences() -> TABLE	overview.html
-duckdb_settings(debug: BOOLEAN, deprecated: BOOLEAN, include_all: BOOLEAN) -> TABLE	overview.html
+duckdb_settings() -> TABLE	overview.html
 duckdb_table_sample(table_name: VARCHAR) -> TABLE	overview.html
 duckdb_tables() -> TABLE	overview.html
 duckdb_temporary_files() -> TABLE	overview.html
@@ -444,8 +444,8 @@ duckdb_views() -> TABLE	overview.html
 editdist3(s1: VARCHAR, s2: VARCHAR) -> BIGINT	text.html
 element_at(map: MAP(K, V), key: K) -> V[]	overview.html
 enable_logging(level: VARCHAR, storage: VARCHAR, storage_config: ANY, storage_path: VARCHAR, storage_normalize: BOOLEAN, storage_buffer_size: UBIGINT[, ANY, ...]) -> TABLE	overview.html
-enable_profiling(metrics: VARCHAR, format: VARCHAR, coverage: VARCHAR, save_location: VARCHAR, mode: VARCHAR) -> TABLE	overview.html
-enable_profiling(metrics: VARCHAR[], format: VARCHAR, coverage: VARCHAR, save_location: VARCHAR, mode: VARCHAR) -> TABLE	overview.html
+enable_profiling(metrics: VARCHAR) -> TABLE	overview.html
+enable_profiling(metrics: VARCHAR[]) -> TABLE	overview.html
 encode(string: VARCHAR) -> BLOB	blob.html
 ends_with(string: VARCHAR, search_string: VARCHAR) -> BOOLEAN	text.html
 entropy(x: ANY) -> DOUBLE	aggregates.html
@@ -467,7 +467,7 @@ era(ts: DATE) -> BIGINT	overview.html
 era(ts: INTERVAL) -> BIGINT	overview.html
 era(ts: TIMESTAMP) -> BIGINT	overview.html
 era(ts: TIMESTAMP WITH TIME ZONE) -> BIGINT	overview.html
-error(message: VARCHAR) -> "NULL"	overview.html
+error(message: VARCHAR) -> ANY	overview.html
 even(x: DOUBLE) -> DOUBLE	overview.html
 exp(x: DOUBLE) -> DOUBLE	overview.html
 factorial(x: INTEGER) -> HUGEINT	overview.html
@@ -921,7 +921,7 @@ list_negative_dot_product(list1: DOUBLE[], list2: DOUBLE[]) -> DOUBLE	list.html
 list_negative_dot_product(list1: FLOAT[], list2: FLOAT[]) -> FLOAT	list.html
 list_negative_inner_product(list1: FLOAT[], list2: FLOAT[]) -> FLOAT	list.html
 list_negative_inner_product(list1: DOUBLE[], list2: DOUBLE[]) -> DOUBLE	list.html
-list_pack() -> "NULL"[]	list.html
+list_pack() -> ANY[]	list.html
 list_pack(value: T[, T, ...]) -> T[]	list.html
 list_position(list: T[], element: T) -> INTEGER	list.html
 list_prepend(e: ANY, l: ANY) -> ANY	overview.html
@@ -947,7 +947,7 @@ list_string_agg(l: ANY) -> ANY	overview.html
 list_sum(l: ANY) -> ANY	overview.html
 list_transform(list: ANY[], lambda: LAMBDA) -> ANY[]	list.html
 list_unique(list: ANY[]) -> UBIGINT	list.html
-list_value() -> "NULL"[]	list.html
+list_value() -> ANY[]	list.html
 list_value(value: T[, T, ...]) -> T[]	list.html
 list_var_pop(l: ANY) -> ANY	overview.html
 list_var_samp(l: ANY) -> ANY	overview.html
@@ -978,7 +978,7 @@ make_timestamptz(micros: BIGINT) -> TIMESTAMP WITH TIME ZONE	overview.html
 make_timestamptz(year: BIGINT, month: BIGINT, day: BIGINT, hour: BIGINT, minute: BIGINT, seconds: DOUBLE) -> TIMESTAMP WITH TIME ZONE	overview.html
 make_timestamptz(year: BIGINT, month: BIGINT, day: BIGINT, hour: BIGINT, minute: BIGINT, seconds: DOUBLE, timezone: VARCHAR) -> TIMESTAMP WITH TIME ZONE	overview.html
 make_type(name: VARCHAR[, ANY, ...]) -> TYPE	overview.html
-map() -> MAP("NULL", "NULL")	overview.html
+map() -> MAP(ANY, ANY)	overview.html
 map(keys: K[], values: V[]) -> MAP(K, V)	overview.html
 map_concat([ANY, ...]) -> LIST	overview.html
 map_contains(map: MAP(K, V), key: K) -> BOOLEAN	overview.html
@@ -1059,9 +1059,9 @@ parquet_kv_metadata(paths: ANY[]) -> TABLE	overview.html
 parquet_metadata(path: VARCHAR) -> TABLE	overview.html
 parquet_metadata(path: VARIANT) -> TABLE	overview.html
 parquet_metadata(paths: ANY[]) -> TABLE	overview.html
-parquet_scan(path: VARIANT, filename: ANY, hive_partitioning: BOOLEAN, union_by_name: BOOLEAN, hive_types: ANY, hive_types_autocast: BOOLEAN, schema: ANY, file_row_number: BOOLEAN, column_statistics: ANY, allow_empty: BOOLEAN, binary_as_string: BOOLEAN, debug_use_openssl: BOOLEAN, compression: VARCHAR, explicit_cardinality: UBIGINT, encryption_config: ANY, parquet_version: VARCHAR, can_have_nan: BOOLEAN, prefetch_strategy: VARCHAR, utf8_validation: VARCHAR, int96_as: VARCHAR, bound_schema: ANY) -> TABLE	overview.html
-parquet_scan(path: VARCHAR, filename: ANY, hive_partitioning: BOOLEAN, union_by_name: BOOLEAN, hive_types: ANY, hive_types_autocast: BOOLEAN, schema: ANY, file_row_number: BOOLEAN, column_statistics: ANY, allow_empty: BOOLEAN, binary_as_string: BOOLEAN, debug_use_openssl: BOOLEAN, compression: VARCHAR, explicit_cardinality: UBIGINT, encryption_config: ANY, parquet_version: VARCHAR, can_have_nan: BOOLEAN, prefetch_strategy: VARCHAR, utf8_validation: VARCHAR, int96_as: VARCHAR, bound_schema: ANY) -> TABLE	overview.html
-parquet_scan(paths: ANY[], filename: ANY, hive_partitioning: BOOLEAN, union_by_name: BOOLEAN, hive_types: ANY, hive_types_autocast: BOOLEAN, schema: ANY, file_row_number: BOOLEAN, column_statistics: ANY, allow_empty: BOOLEAN, binary_as_string: BOOLEAN, debug_use_openssl: BOOLEAN, compression: VARCHAR, explicit_cardinality: UBIGINT, encryption_config: ANY, parquet_version: VARCHAR, can_have_nan: BOOLEAN, prefetch_strategy: VARCHAR, utf8_validation: VARCHAR, int96_as: VARCHAR, bound_schema: ANY) -> TABLE	overview.html
+parquet_scan(path: VARIANT) -> TABLE	overview.html
+parquet_scan(path: VARCHAR) -> TABLE	overview.html
+parquet_scan(paths: ANY[]) -> TABLE	overview.html
 parquet_schema(path: VARCHAR) -> TABLE	overview.html
 parquet_schema(path: VARIANT) -> TABLE	overview.html
 parquet_schema(paths: ANY[]) -> TABLE	overview.html
@@ -1089,7 +1089,7 @@ pragma_metadata_info() -> TABLE	overview.html
 pragma_metadata_info(database: VARCHAR) -> TABLE	overview.html
 pragma_platform() -> TABLE	overview.html
 pragma_show(table_name: VARCHAR) -> TABLE	overview.html
-pragma_storage_info(table_name: VARCHAR, include_segment_info: BOOLEAN, loaded_segments_only: BOOLEAN) -> TABLE	overview.html
+pragma_storage_info(table_name: VARCHAR) -> TABLE	overview.html
 pragma_table_info(table_name: VARCHAR) -> TABLE	overview.html
 pragma_user_agent() -> TABLE	overview.html
 pragma_version() -> TABLE	overview.html
@@ -1128,48 +1128,48 @@ range(start: TIMESTAMP, stop: TIMESTAMP, step: INTERVAL) -> TIMESTAMP[]	list.htm
 range(start: TIMESTAMP WITH TIME ZONE, stop: TIMESTAMP WITH TIME ZONE, step: INTERVAL) -> TIMESTAMP WITH TIME ZONE[]	list.html
 rank() -> BIGINT	window_functions.html
 rank_dense() -> BIGINT	window_functions.html
-read_blob(path: VARCHAR, allow_empty: BOOLEAN) -> TABLE	overview.html
-read_blob(path: VARIANT, allow_empty: BOOLEAN) -> TABLE	overview.html
-read_blob(paths: ANY[], allow_empty: BOOLEAN) -> TABLE	overview.html
-read_csv(path: VARCHAR, filename: ANY, hive_partitioning: BOOLEAN, union_by_name: BOOLEAN, hive_types: ANY, hive_types_autocast: BOOLEAN, schema: ANY, file_row_number: BOOLEAN, column_statistics: ANY, allow_empty: BOOLEAN, sep: VARCHAR, delim: VARCHAR, separator: VARCHAR, delimiter: VARCHAR, null: ANY, date_format: VARCHAR, timestamp_format: VARCHAR, quote: VARCHAR, new_line: VARCHAR, escape: VARCHAR, nullstr: ANY, columns: ANY, auto_type_candidates: ANY, header: BOOLEAN, auto_detect: BOOLEAN, sample_size: BIGINT, all_varchar: BOOLEAN, dateformat: VARCHAR, timestampformat: VARCHAR, normalize_names: BOOLEAN, compression: VARCHAR, skip: BIGINT, max_line_size: BIGINT, maximum_line_size: BIGINT, ignore_errors: BOOLEAN, store_rejects: BOOLEAN, rejects_table: VARCHAR, rejects_scan: VARCHAR, rejects_limit: BIGINT, rejects_line_size_limit: BIGINT, force_not_null: VARCHAR[], buffer_size: BIGINT, decimal_separator: VARCHAR, parallel: BOOLEAN, null_padding: BOOLEAN, allow_quoted_nulls: BOOLEAN, column_types: ANY, dtypes: ANY, types: ANY, names: VARCHAR[], column_names: VARCHAR[], comment: VARCHAR, encoding: VARCHAR, strict_mode: BOOLEAN, thousands: VARCHAR, files_to_sniff: BIGINT) -> TABLE	overview.html
-read_csv(path: VARIANT, filename: ANY, hive_partitioning: BOOLEAN, union_by_name: BOOLEAN, hive_types: ANY, hive_types_autocast: BOOLEAN, schema: ANY, file_row_number: BOOLEAN, column_statistics: ANY, allow_empty: BOOLEAN, sep: VARCHAR, delim: VARCHAR, separator: VARCHAR, delimiter: VARCHAR, null: ANY, date_format: VARCHAR, timestamp_format: VARCHAR, quote: VARCHAR, new_line: VARCHAR, escape: VARCHAR, nullstr: ANY, columns: ANY, auto_type_candidates: ANY, header: BOOLEAN, auto_detect: BOOLEAN, sample_size: BIGINT, all_varchar: BOOLEAN, dateformat: VARCHAR, timestampformat: VARCHAR, normalize_names: BOOLEAN, compression: VARCHAR, skip: BIGINT, max_line_size: BIGINT, maximum_line_size: BIGINT, ignore_errors: BOOLEAN, store_rejects: BOOLEAN, rejects_table: VARCHAR, rejects_scan: VARCHAR, rejects_limit: BIGINT, rejects_line_size_limit: BIGINT, force_not_null: VARCHAR[], buffer_size: BIGINT, decimal_separator: VARCHAR, parallel: BOOLEAN, null_padding: BOOLEAN, allow_quoted_nulls: BOOLEAN, column_types: ANY, dtypes: ANY, types: ANY, names: VARCHAR[], column_names: VARCHAR[], comment: VARCHAR, encoding: VARCHAR, strict_mode: BOOLEAN, thousands: VARCHAR, files_to_sniff: BIGINT) -> TABLE	overview.html
-read_csv(paths: ANY[], filename: ANY, hive_partitioning: BOOLEAN, union_by_name: BOOLEAN, hive_types: ANY, hive_types_autocast: BOOLEAN, schema: ANY, file_row_number: BOOLEAN, column_statistics: ANY, allow_empty: BOOLEAN, sep: VARCHAR, delim: VARCHAR, separator: VARCHAR, delimiter: VARCHAR, null: ANY, date_format: VARCHAR, timestamp_format: VARCHAR, quote: VARCHAR, new_line: VARCHAR, escape: VARCHAR, nullstr: ANY, columns: ANY, auto_type_candidates: ANY, header: BOOLEAN, auto_detect: BOOLEAN, sample_size: BIGINT, all_varchar: BOOLEAN, dateformat: VARCHAR, timestampformat: VARCHAR, normalize_names: BOOLEAN, compression: VARCHAR, skip: BIGINT, max_line_size: BIGINT, maximum_line_size: BIGINT, ignore_errors: BOOLEAN, store_rejects: BOOLEAN, rejects_table: VARCHAR, rejects_scan: VARCHAR, rejects_limit: BIGINT, rejects_line_size_limit: BIGINT, force_not_null: VARCHAR[], buffer_size: BIGINT, decimal_separator: VARCHAR, parallel: BOOLEAN, null_padding: BOOLEAN, allow_quoted_nulls: BOOLEAN, column_types: ANY, dtypes: ANY, types: ANY, names: VARCHAR[], column_names: VARCHAR[], comment: VARCHAR, encoding: VARCHAR, strict_mode: BOOLEAN, thousands: VARCHAR, files_to_sniff: BIGINT) -> TABLE	overview.html
-read_csv_auto(path: VARCHAR, filename: ANY, hive_partitioning: BOOLEAN, union_by_name: BOOLEAN, hive_types: ANY, hive_types_autocast: BOOLEAN, schema: ANY, file_row_number: BOOLEAN, column_statistics: ANY, allow_empty: BOOLEAN, sep: VARCHAR, delim: VARCHAR, separator: VARCHAR, delimiter: VARCHAR, null: ANY, date_format: VARCHAR, timestamp_format: VARCHAR, quote: VARCHAR, new_line: VARCHAR, escape: VARCHAR, nullstr: ANY, columns: ANY, auto_type_candidates: ANY, header: BOOLEAN, auto_detect: BOOLEAN, sample_size: BIGINT, all_varchar: BOOLEAN, dateformat: VARCHAR, timestampformat: VARCHAR, normalize_names: BOOLEAN, compression: VARCHAR, skip: BIGINT, max_line_size: BIGINT, maximum_line_size: BIGINT, ignore_errors: BOOLEAN, store_rejects: BOOLEAN, rejects_table: VARCHAR, rejects_scan: VARCHAR, rejects_limit: BIGINT, rejects_line_size_limit: BIGINT, force_not_null: VARCHAR[], buffer_size: BIGINT, decimal_separator: VARCHAR, parallel: BOOLEAN, null_padding: BOOLEAN, allow_quoted_nulls: BOOLEAN, column_types: ANY, dtypes: ANY, types: ANY, names: VARCHAR[], column_names: VARCHAR[], comment: VARCHAR, encoding: VARCHAR, strict_mode: BOOLEAN, thousands: VARCHAR, files_to_sniff: BIGINT) -> TABLE	overview.html
-read_csv_auto(path: VARIANT, filename: ANY, hive_partitioning: BOOLEAN, union_by_name: BOOLEAN, hive_types: ANY, hive_types_autocast: BOOLEAN, schema: ANY, file_row_number: BOOLEAN, column_statistics: ANY, allow_empty: BOOLEAN, sep: VARCHAR, delim: VARCHAR, separator: VARCHAR, delimiter: VARCHAR, null: ANY, date_format: VARCHAR, timestamp_format: VARCHAR, quote: VARCHAR, new_line: VARCHAR, escape: VARCHAR, nullstr: ANY, columns: ANY, auto_type_candidates: ANY, header: BOOLEAN, auto_detect: BOOLEAN, sample_size: BIGINT, all_varchar: BOOLEAN, dateformat: VARCHAR, timestampformat: VARCHAR, normalize_names: BOOLEAN, compression: VARCHAR, skip: BIGINT, max_line_size: BIGINT, maximum_line_size: BIGINT, ignore_errors: BOOLEAN, store_rejects: BOOLEAN, rejects_table: VARCHAR, rejects_scan: VARCHAR, rejects_limit: BIGINT, rejects_line_size_limit: BIGINT, force_not_null: VARCHAR[], buffer_size: BIGINT, decimal_separator: VARCHAR, parallel: BOOLEAN, null_padding: BOOLEAN, allow_quoted_nulls: BOOLEAN, column_types: ANY, dtypes: ANY, types: ANY, names: VARCHAR[], column_names: VARCHAR[], comment: VARCHAR, encoding: VARCHAR, strict_mode: BOOLEAN, thousands: VARCHAR, files_to_sniff: BIGINT) -> TABLE	overview.html
-read_csv_auto(paths: ANY[], filename: ANY, hive_partitioning: BOOLEAN, union_by_name: BOOLEAN, hive_types: ANY, hive_types_autocast: BOOLEAN, schema: ANY, file_row_number: BOOLEAN, column_statistics: ANY, allow_empty: BOOLEAN, sep: VARCHAR, delim: VARCHAR, separator: VARCHAR, delimiter: VARCHAR, null: ANY, date_format: VARCHAR, timestamp_format: VARCHAR, quote: VARCHAR, new_line: VARCHAR, escape: VARCHAR, nullstr: ANY, columns: ANY, auto_type_candidates: ANY, header: BOOLEAN, auto_detect: BOOLEAN, sample_size: BIGINT, all_varchar: BOOLEAN, dateformat: VARCHAR, timestampformat: VARCHAR, normalize_names: BOOLEAN, compression: VARCHAR, skip: BIGINT, max_line_size: BIGINT, maximum_line_size: BIGINT, ignore_errors: BOOLEAN, store_rejects: BOOLEAN, rejects_table: VARCHAR, rejects_scan: VARCHAR, rejects_limit: BIGINT, rejects_line_size_limit: BIGINT, force_not_null: VARCHAR[], buffer_size: BIGINT, decimal_separator: VARCHAR, parallel: BOOLEAN, null_padding: BOOLEAN, allow_quoted_nulls: BOOLEAN, column_types: ANY, dtypes: ANY, types: ANY, names: VARCHAR[], column_names: VARCHAR[], comment: VARCHAR, encoding: VARCHAR, strict_mode: BOOLEAN, thousands: VARCHAR, files_to_sniff: BIGINT) -> TABLE	overview.html
-read_duckdb(path: VARCHAR, filename: ANY, hive_partitioning: BOOLEAN, union_by_name: BOOLEAN, hive_types: ANY, hive_types_autocast: BOOLEAN, schema: ANY, file_row_number: BOOLEAN, column_statistics: ANY, allow_empty: BOOLEAN, schema_name: VARCHAR, table_name: VARCHAR) -> TABLE	overview.html
-read_duckdb(path: VARIANT, filename: ANY, hive_partitioning: BOOLEAN, union_by_name: BOOLEAN, hive_types: ANY, hive_types_autocast: BOOLEAN, schema: ANY, file_row_number: BOOLEAN, column_statistics: ANY, allow_empty: BOOLEAN, schema_name: VARCHAR, table_name: VARCHAR) -> TABLE	overview.html
-read_duckdb(paths: ANY[], filename: ANY, hive_partitioning: BOOLEAN, union_by_name: BOOLEAN, hive_types: ANY, hive_types_autocast: BOOLEAN, schema: ANY, file_row_number: BOOLEAN, column_statistics: ANY, allow_empty: BOOLEAN, schema_name: VARCHAR, table_name: VARCHAR) -> TABLE	overview.html
-read_json(path: VARCHAR, filename: ANY, hive_partitioning: BOOLEAN, union_by_name: BOOLEAN, hive_types: ANY, hive_types_autocast: BOOLEAN, schema: ANY, file_row_number: BOOLEAN, column_statistics: ANY, allow_empty: BOOLEAN, maximum_object_size: UINTEGER, ignore_errors: BOOLEAN, format: VARCHAR, compression: VARCHAR, columns: ANY, auto_detect: BOOLEAN, geojson: BOOLEAN, sample_size: BIGINT, dateformat: VARCHAR, date_format: VARCHAR, timestampformat: VARCHAR, timestamp_format: VARCHAR, records: ANY, array: BOOLEAN, maximum_sample_files: BIGINT, maximum_depth: BIGINT, field_appearance_threshold: DOUBLE, convert_strings_to_integers: BOOLEAN, map_inference_threshold: BIGINT) -> TABLE	overview.html
-read_json(path: VARIANT, filename: ANY, hive_partitioning: BOOLEAN, union_by_name: BOOLEAN, hive_types: ANY, hive_types_autocast: BOOLEAN, schema: ANY, file_row_number: BOOLEAN, column_statistics: ANY, allow_empty: BOOLEAN, maximum_object_size: UINTEGER, ignore_errors: BOOLEAN, format: VARCHAR, compression: VARCHAR, columns: ANY, auto_detect: BOOLEAN, geojson: BOOLEAN, sample_size: BIGINT, dateformat: VARCHAR, date_format: VARCHAR, timestampformat: VARCHAR, timestamp_format: VARCHAR, records: ANY, array: BOOLEAN, maximum_sample_files: BIGINT, maximum_depth: BIGINT, field_appearance_threshold: DOUBLE, convert_strings_to_integers: BOOLEAN, map_inference_threshold: BIGINT) -> TABLE	overview.html
-read_json(paths: ANY[], filename: ANY, hive_partitioning: BOOLEAN, union_by_name: BOOLEAN, hive_types: ANY, hive_types_autocast: BOOLEAN, schema: ANY, file_row_number: BOOLEAN, column_statistics: ANY, allow_empty: BOOLEAN, maximum_object_size: UINTEGER, ignore_errors: BOOLEAN, format: VARCHAR, compression: VARCHAR, columns: ANY, auto_detect: BOOLEAN, geojson: BOOLEAN, sample_size: BIGINT, dateformat: VARCHAR, date_format: VARCHAR, timestampformat: VARCHAR, timestamp_format: VARCHAR, records: ANY, array: BOOLEAN, maximum_sample_files: BIGINT, maximum_depth: BIGINT, field_appearance_threshold: DOUBLE, convert_strings_to_integers: BOOLEAN, map_inference_threshold: BIGINT) -> TABLE	overview.html
-read_json_auto(path: VARCHAR, filename: ANY, hive_partitioning: BOOLEAN, union_by_name: BOOLEAN, hive_types: ANY, hive_types_autocast: BOOLEAN, schema: ANY, file_row_number: BOOLEAN, column_statistics: ANY, allow_empty: BOOLEAN, maximum_object_size: UINTEGER, ignore_errors: BOOLEAN, format: VARCHAR, compression: VARCHAR, columns: ANY, auto_detect: BOOLEAN, geojson: BOOLEAN, sample_size: BIGINT, dateformat: VARCHAR, date_format: VARCHAR, timestampformat: VARCHAR, timestamp_format: VARCHAR, records: ANY, array: BOOLEAN, maximum_sample_files: BIGINT, maximum_depth: BIGINT, field_appearance_threshold: DOUBLE, convert_strings_to_integers: BOOLEAN, map_inference_threshold: BIGINT) -> TABLE	overview.html
-read_json_auto(path: VARIANT, filename: ANY, hive_partitioning: BOOLEAN, union_by_name: BOOLEAN, hive_types: ANY, hive_types_autocast: BOOLEAN, schema: ANY, file_row_number: BOOLEAN, column_statistics: ANY, allow_empty: BOOLEAN, maximum_object_size: UINTEGER, ignore_errors: BOOLEAN, format: VARCHAR, compression: VARCHAR, columns: ANY, auto_detect: BOOLEAN, geojson: BOOLEAN, sample_size: BIGINT, dateformat: VARCHAR, date_format: VARCHAR, timestampformat: VARCHAR, timestamp_format: VARCHAR, records: ANY, array: BOOLEAN, maximum_sample_files: BIGINT, maximum_depth: BIGINT, field_appearance_threshold: DOUBLE, convert_strings_to_integers: BOOLEAN, map_inference_threshold: BIGINT) -> TABLE	overview.html
-read_json_auto(paths: ANY[], filename: ANY, hive_partitioning: BOOLEAN, union_by_name: BOOLEAN, hive_types: ANY, hive_types_autocast: BOOLEAN, schema: ANY, file_row_number: BOOLEAN, column_statistics: ANY, allow_empty: BOOLEAN, maximum_object_size: UINTEGER, ignore_errors: BOOLEAN, format: VARCHAR, compression: VARCHAR, columns: ANY, auto_detect: BOOLEAN, geojson: BOOLEAN, sample_size: BIGINT, dateformat: VARCHAR, date_format: VARCHAR, timestampformat: VARCHAR, timestamp_format: VARCHAR, records: ANY, array: BOOLEAN, maximum_sample_files: BIGINT, maximum_depth: BIGINT, field_appearance_threshold: DOUBLE, convert_strings_to_integers: BOOLEAN, map_inference_threshold: BIGINT) -> TABLE	overview.html
-read_json_objects(path: VARCHAR, filename: ANY, hive_partitioning: BOOLEAN, union_by_name: BOOLEAN, hive_types: ANY, hive_types_autocast: BOOLEAN, schema: ANY, file_row_number: BOOLEAN, column_statistics: ANY, allow_empty: BOOLEAN, maximum_object_size: UINTEGER, ignore_errors: BOOLEAN, format: VARCHAR, compression: VARCHAR) -> TABLE	overview.html
-read_json_objects(path: VARIANT, filename: ANY, hive_partitioning: BOOLEAN, union_by_name: BOOLEAN, hive_types: ANY, hive_types_autocast: BOOLEAN, schema: ANY, file_row_number: BOOLEAN, column_statistics: ANY, allow_empty: BOOLEAN, maximum_object_size: UINTEGER, ignore_errors: BOOLEAN, format: VARCHAR, compression: VARCHAR) -> TABLE	overview.html
-read_json_objects(paths: ANY[], filename: ANY, hive_partitioning: BOOLEAN, union_by_name: BOOLEAN, hive_types: ANY, hive_types_autocast: BOOLEAN, schema: ANY, file_row_number: BOOLEAN, column_statistics: ANY, allow_empty: BOOLEAN, maximum_object_size: UINTEGER, ignore_errors: BOOLEAN, format: VARCHAR, compression: VARCHAR) -> TABLE	overview.html
-read_json_objects_auto(paths: ANY[], filename: ANY, hive_partitioning: BOOLEAN, union_by_name: BOOLEAN, hive_types: ANY, hive_types_autocast: BOOLEAN, schema: ANY, file_row_number: BOOLEAN, column_statistics: ANY, allow_empty: BOOLEAN, maximum_object_size: UINTEGER, ignore_errors: BOOLEAN, format: VARCHAR, compression: VARCHAR) -> TABLE	overview.html
-read_json_objects_auto(path: VARIANT, filename: ANY, hive_partitioning: BOOLEAN, union_by_name: BOOLEAN, hive_types: ANY, hive_types_autocast: BOOLEAN, schema: ANY, file_row_number: BOOLEAN, column_statistics: ANY, allow_empty: BOOLEAN, maximum_object_size: UINTEGER, ignore_errors: BOOLEAN, format: VARCHAR, compression: VARCHAR) -> TABLE	overview.html
-read_json_objects_auto(path: VARCHAR, filename: ANY, hive_partitioning: BOOLEAN, union_by_name: BOOLEAN, hive_types: ANY, hive_types_autocast: BOOLEAN, schema: ANY, file_row_number: BOOLEAN, column_statistics: ANY, allow_empty: BOOLEAN, maximum_object_size: UINTEGER, ignore_errors: BOOLEAN, format: VARCHAR, compression: VARCHAR) -> TABLE	overview.html
-read_ndjson(path: VARCHAR, filename: ANY, hive_partitioning: BOOLEAN, union_by_name: BOOLEAN, hive_types: ANY, hive_types_autocast: BOOLEAN, schema: ANY, file_row_number: BOOLEAN, column_statistics: ANY, allow_empty: BOOLEAN, maximum_object_size: UINTEGER, ignore_errors: BOOLEAN, format: VARCHAR, compression: VARCHAR, columns: ANY, auto_detect: BOOLEAN, geojson: BOOLEAN, sample_size: BIGINT, dateformat: VARCHAR, date_format: VARCHAR, timestampformat: VARCHAR, timestamp_format: VARCHAR, records: ANY, array: BOOLEAN, maximum_sample_files: BIGINT, maximum_depth: BIGINT, field_appearance_threshold: DOUBLE, convert_strings_to_integers: BOOLEAN, map_inference_threshold: BIGINT) -> TABLE	overview.html
-read_ndjson(path: VARIANT, filename: ANY, hive_partitioning: BOOLEAN, union_by_name: BOOLEAN, hive_types: ANY, hive_types_autocast: BOOLEAN, schema: ANY, file_row_number: BOOLEAN, column_statistics: ANY, allow_empty: BOOLEAN, maximum_object_size: UINTEGER, ignore_errors: BOOLEAN, format: VARCHAR, compression: VARCHAR, columns: ANY, auto_detect: BOOLEAN, geojson: BOOLEAN, sample_size: BIGINT, dateformat: VARCHAR, date_format: VARCHAR, timestampformat: VARCHAR, timestamp_format: VARCHAR, records: ANY, array: BOOLEAN, maximum_sample_files: BIGINT, maximum_depth: BIGINT, field_appearance_threshold: DOUBLE, convert_strings_to_integers: BOOLEAN, map_inference_threshold: BIGINT) -> TABLE	overview.html
-read_ndjson(paths: ANY[], filename: ANY, hive_partitioning: BOOLEAN, union_by_name: BOOLEAN, hive_types: ANY, hive_types_autocast: BOOLEAN, schema: ANY, file_row_number: BOOLEAN, column_statistics: ANY, allow_empty: BOOLEAN, maximum_object_size: UINTEGER, ignore_errors: BOOLEAN, format: VARCHAR, compression: VARCHAR, columns: ANY, auto_detect: BOOLEAN, geojson: BOOLEAN, sample_size: BIGINT, dateformat: VARCHAR, date_format: VARCHAR, timestampformat: VARCHAR, timestamp_format: VARCHAR, records: ANY, array: BOOLEAN, maximum_sample_files: BIGINT, maximum_depth: BIGINT, field_appearance_threshold: DOUBLE, convert_strings_to_integers: BOOLEAN, map_inference_threshold: BIGINT) -> TABLE	overview.html
-read_ndjson_auto(path: VARIANT, filename: ANY, hive_partitioning: BOOLEAN, union_by_name: BOOLEAN, hive_types: ANY, hive_types_autocast: BOOLEAN, schema: ANY, file_row_number: BOOLEAN, column_statistics: ANY, allow_empty: BOOLEAN, maximum_object_size: UINTEGER, ignore_errors: BOOLEAN, format: VARCHAR, compression: VARCHAR, columns: ANY, auto_detect: BOOLEAN, geojson: BOOLEAN, sample_size: BIGINT, dateformat: VARCHAR, date_format: VARCHAR, timestampformat: VARCHAR, timestamp_format: VARCHAR, records: ANY, array: BOOLEAN, maximum_sample_files: BIGINT, maximum_depth: BIGINT, field_appearance_threshold: DOUBLE, convert_strings_to_integers: BOOLEAN, map_inference_threshold: BIGINT) -> TABLE	overview.html
-read_ndjson_auto(path: VARCHAR, filename: ANY, hive_partitioning: BOOLEAN, union_by_name: BOOLEAN, hive_types: ANY, hive_types_autocast: BOOLEAN, schema: ANY, file_row_number: BOOLEAN, column_statistics: ANY, allow_empty: BOOLEAN, maximum_object_size: UINTEGER, ignore_errors: BOOLEAN, format: VARCHAR, compression: VARCHAR, columns: ANY, auto_detect: BOOLEAN, geojson: BOOLEAN, sample_size: BIGINT, dateformat: VARCHAR, date_format: VARCHAR, timestampformat: VARCHAR, timestamp_format: VARCHAR, records: ANY, array: BOOLEAN, maximum_sample_files: BIGINT, maximum_depth: BIGINT, field_appearance_threshold: DOUBLE, convert_strings_to_integers: BOOLEAN, map_inference_threshold: BIGINT) -> TABLE	overview.html
-read_ndjson_auto(paths: ANY[], filename: ANY, hive_partitioning: BOOLEAN, union_by_name: BOOLEAN, hive_types: ANY, hive_types_autocast: BOOLEAN, schema: ANY, file_row_number: BOOLEAN, column_statistics: ANY, allow_empty: BOOLEAN, maximum_object_size: UINTEGER, ignore_errors: BOOLEAN, format: VARCHAR, compression: VARCHAR, columns: ANY, auto_detect: BOOLEAN, geojson: BOOLEAN, sample_size: BIGINT, dateformat: VARCHAR, date_format: VARCHAR, timestampformat: VARCHAR, timestamp_format: VARCHAR, records: ANY, array: BOOLEAN, maximum_sample_files: BIGINT, maximum_depth: BIGINT, field_appearance_threshold: DOUBLE, convert_strings_to_integers: BOOLEAN, map_inference_threshold: BIGINT) -> TABLE	overview.html
-read_ndjson_objects(paths: ANY[], filename: ANY, hive_partitioning: BOOLEAN, union_by_name: BOOLEAN, hive_types: ANY, hive_types_autocast: BOOLEAN, schema: ANY, file_row_number: BOOLEAN, column_statistics: ANY, allow_empty: BOOLEAN, maximum_object_size: UINTEGER, ignore_errors: BOOLEAN, format: VARCHAR, compression: VARCHAR) -> TABLE	overview.html
-read_ndjson_objects(path: VARIANT, filename: ANY, hive_partitioning: BOOLEAN, union_by_name: BOOLEAN, hive_types: ANY, hive_types_autocast: BOOLEAN, schema: ANY, file_row_number: BOOLEAN, column_statistics: ANY, allow_empty: BOOLEAN, maximum_object_size: UINTEGER, ignore_errors: BOOLEAN, format: VARCHAR, compression: VARCHAR) -> TABLE	overview.html
-read_ndjson_objects(path: VARCHAR, filename: ANY, hive_partitioning: BOOLEAN, union_by_name: BOOLEAN, hive_types: ANY, hive_types_autocast: BOOLEAN, schema: ANY, file_row_number: BOOLEAN, column_statistics: ANY, allow_empty: BOOLEAN, maximum_object_size: UINTEGER, ignore_errors: BOOLEAN, format: VARCHAR, compression: VARCHAR) -> TABLE	overview.html
-read_parquet(paths: ANY[], filename: ANY, hive_partitioning: BOOLEAN, union_by_name: BOOLEAN, hive_types: ANY, hive_types_autocast: BOOLEAN, schema: ANY, file_row_number: BOOLEAN, column_statistics: ANY, allow_empty: BOOLEAN, binary_as_string: BOOLEAN, debug_use_openssl: BOOLEAN, compression: VARCHAR, explicit_cardinality: UBIGINT, encryption_config: ANY, parquet_version: VARCHAR, can_have_nan: BOOLEAN, prefetch_strategy: VARCHAR, utf8_validation: VARCHAR, int96_as: VARCHAR, bound_schema: ANY) -> TABLE	overview.html
-read_parquet(path: VARCHAR, filename: ANY, hive_partitioning: BOOLEAN, union_by_name: BOOLEAN, hive_types: ANY, hive_types_autocast: BOOLEAN, schema: ANY, file_row_number: BOOLEAN, column_statistics: ANY, allow_empty: BOOLEAN, binary_as_string: BOOLEAN, debug_use_openssl: BOOLEAN, compression: VARCHAR, explicit_cardinality: UBIGINT, encryption_config: ANY, parquet_version: VARCHAR, can_have_nan: BOOLEAN, prefetch_strategy: VARCHAR, utf8_validation: VARCHAR, int96_as: VARCHAR, bound_schema: ANY) -> TABLE	overview.html
-read_parquet(path: VARIANT, filename: ANY, hive_partitioning: BOOLEAN, union_by_name: BOOLEAN, hive_types: ANY, hive_types_autocast: BOOLEAN, schema: ANY, file_row_number: BOOLEAN, column_statistics: ANY, allow_empty: BOOLEAN, binary_as_string: BOOLEAN, debug_use_openssl: BOOLEAN, compression: VARCHAR, explicit_cardinality: UBIGINT, encryption_config: ANY, parquet_version: VARCHAR, can_have_nan: BOOLEAN, prefetch_strategy: VARCHAR, utf8_validation: VARCHAR, int96_as: VARCHAR, bound_schema: ANY) -> TABLE	overview.html
-read_single_csv_file(file: ANY, sep: VARCHAR, delim: VARCHAR, separator: VARCHAR, delimiter: VARCHAR, null: ANY, date_format: VARCHAR, timestamp_format: VARCHAR, quote: VARCHAR, new_line: VARCHAR, escape: VARCHAR, nullstr: ANY, columns: ANY, auto_type_candidates: ANY, header: BOOLEAN, auto_detect: BOOLEAN, sample_size: BIGINT, all_varchar: BOOLEAN, dateformat: VARCHAR, timestampformat: VARCHAR, normalize_names: BOOLEAN, compression: VARCHAR, skip: BIGINT, max_line_size: BIGINT, maximum_line_size: BIGINT, ignore_errors: BOOLEAN, store_rejects: BOOLEAN, rejects_table: VARCHAR, rejects_scan: VARCHAR, rejects_limit: BIGINT, rejects_line_size_limit: BIGINT, force_not_null: VARCHAR[], buffer_size: BIGINT, decimal_separator: VARCHAR, parallel: BOOLEAN, null_padding: BOOLEAN, allow_quoted_nulls: BOOLEAN, column_types: ANY, dtypes: ANY, types: ANY, names: VARCHAR[], column_names: VARCHAR[], comment: VARCHAR, encoding: VARCHAR, strict_mode: BOOLEAN, thousands: VARCHAR, files_to_sniff: BIGINT) -> TABLE	overview.html
-read_single_json_file(file: ANY, maximum_object_size: UINTEGER, ignore_errors: BOOLEAN, format: VARCHAR, compression: VARCHAR, columns: ANY, auto_detect: BOOLEAN, geojson: BOOLEAN, sample_size: BIGINT, dateformat: VARCHAR, date_format: VARCHAR, timestampformat: VARCHAR, timestamp_format: VARCHAR, records: ANY, array: BOOLEAN, maximum_sample_files: BIGINT, maximum_depth: BIGINT, field_appearance_threshold: DOUBLE, convert_strings_to_integers: BOOLEAN, map_inference_threshold: BIGINT) -> TABLE	overview.html
-read_single_parquet_file(file: ANY, binary_as_string: BOOLEAN, debug_use_openssl: BOOLEAN, compression: VARCHAR, explicit_cardinality: UBIGINT, encryption_config: ANY, parquet_version: VARCHAR, can_have_nan: BOOLEAN, prefetch_strategy: VARCHAR, utf8_validation: VARCHAR, int96_as: VARCHAR) -> TABLE	overview.html
-read_text(path: VARCHAR, allow_empty: BOOLEAN) -> TABLE	overview.html
-read_text(path: VARIANT, allow_empty: BOOLEAN) -> TABLE	overview.html
-read_text(paths: ANY[], allow_empty: BOOLEAN) -> TABLE	overview.html
+read_blob(path: VARCHAR) -> TABLE	overview.html
+read_blob(path: VARIANT) -> TABLE	overview.html
+read_blob(paths: ANY[]) -> TABLE	overview.html
+read_csv(path: VARCHAR) -> TABLE	overview.html
+read_csv(path: VARIANT) -> TABLE	overview.html
+read_csv(paths: ANY[]) -> TABLE	overview.html
+read_csv_auto(path: VARCHAR) -> TABLE	overview.html
+read_csv_auto(path: VARIANT) -> TABLE	overview.html
+read_csv_auto(paths: ANY[]) -> TABLE	overview.html
+read_duckdb(path: VARCHAR) -> TABLE	overview.html
+read_duckdb(path: VARIANT) -> TABLE	overview.html
+read_duckdb(paths: ANY[]) -> TABLE	overview.html
+read_json(path: VARCHAR) -> TABLE	overview.html
+read_json(path: VARIANT) -> TABLE	overview.html
+read_json(paths: ANY[]) -> TABLE	overview.html
+read_json_auto(path: VARCHAR) -> TABLE	overview.html
+read_json_auto(path: VARIANT) -> TABLE	overview.html
+read_json_auto(paths: ANY[]) -> TABLE	overview.html
+read_json_objects(path: VARCHAR) -> TABLE	overview.html
+read_json_objects(path: VARIANT) -> TABLE	overview.html
+read_json_objects(paths: ANY[]) -> TABLE	overview.html
+read_json_objects_auto(paths: ANY[]) -> TABLE	overview.html
+read_json_objects_auto(path: VARIANT) -> TABLE	overview.html
+read_json_objects_auto(path: VARCHAR) -> TABLE	overview.html
+read_ndjson(path: VARCHAR) -> TABLE	overview.html
+read_ndjson(path: VARIANT) -> TABLE	overview.html
+read_ndjson(paths: ANY[]) -> TABLE	overview.html
+read_ndjson_auto(path: VARIANT) -> TABLE	overview.html
+read_ndjson_auto(path: VARCHAR) -> TABLE	overview.html
+read_ndjson_auto(paths: ANY[]) -> TABLE	overview.html
+read_ndjson_objects(paths: ANY[]) -> TABLE	overview.html
+read_ndjson_objects(path: VARIANT) -> TABLE	overview.html
+read_ndjson_objects(path: VARCHAR) -> TABLE	overview.html
+read_parquet(paths: ANY[]) -> TABLE	overview.html
+read_parquet(path: VARCHAR) -> TABLE	overview.html
+read_parquet(path: VARIANT) -> TABLE	overview.html
+read_single_csv_file(file: ANY) -> TABLE	overview.html
+read_single_json_file(file: ANY) -> TABLE	overview.html
+read_single_parquet_file(file: ANY) -> TABLE	overview.html
+read_text(path: VARCHAR) -> TABLE	overview.html
+read_text(path: VARIANT) -> TABLE	overview.html
+read_text(paths: ANY[]) -> TABLE	overview.html
 reduce(list: ANY[], lambda: LAMBDA) -> ANY	list.html
 reduce(list: ANY[], lambda: LAMBDA, initial_value: ANY) -> ANY	list.html
 regexp_escape(string: VARCHAR) -> VARCHAR	regular_expressions.html
@@ -1193,7 +1193,7 @@ regexp_replace(string: VARCHAR, regex: VARCHAR, replacement: VARCHAR, options: V
 regexp_split_to_array(string: VARCHAR, regex: VARCHAR) -> VARCHAR[]	regular_expressions.html
 regexp_split_to_array(string: VARCHAR, regex: VARCHAR, options: VARCHAR) -> VARCHAR[]	regular_expressions.html
 regexp_split_to_table(text: ANY, pattern: ANY) -> ANY	overview.html
-register_external_resource(type: VARCHAR, name: VARCHAR, handle: MAP(VARCHAR, VARCHAR), uri: VARCHAR, attached_db_type: VARCHAR, deleter_function: VARCHAR) -> TABLE	overview.html
+register_external_resource(type: VARCHAR, name: VARCHAR, handle: MAP(VARCHAR, VARCHAR)) -> TABLE	overview.html
 register_external_resource_type(name: VARCHAR, kind: VARCHAR, create_function: VARCHAR, status_function: VARCHAR, destroy_function: VARCHAR, resolve_function: VARCHAR, list_function: VARCHAR) -> TABLE	overview.html
 regr_avgx(y: DOUBLE, x: DOUBLE) -> DOUBLE	aggregates.html
 regr_avgy(y: DOUBLE, x: DOUBLE) -> DOUBLE	aggregates.html
@@ -1231,7 +1231,7 @@ sem(x: DOUBLE) -> DOUBLE	aggregates.html
 seq_scan() -> TABLE	overview.html
 session_user() -> ANY	overview.html
 set_bit(bitstring: BIT, index: INTEGER, new_value: INTEGER) -> BIT	overview.html
-setseed(seed: DOUBLE) -> "NULL"	overview.html
+setseed(seed: DOUBLE) -> ANY	overview.html
 setval(sequence_name: VARCHAR, value: BIGINT) -> BIGINT	overview.html
 setval(sequence_name: VARCHAR, value: BIGINT, is_called: BOOLEAN) -> BIGINT	overview.html
 sha1(value: VARCHAR) -> VARCHAR	text.html
@@ -1245,8 +1245,8 @@ signbit(x: DOUBLE) -> BOOLEAN	overview.html
 sin(x: DOUBLE) -> DOUBLE	overview.html
 sinh(x: DOUBLE) -> DOUBLE	overview.html
 skewness(x: DOUBLE) -> DOUBLE	aggregates.html
-sleep_ms(milliseconds: BIGINT) -> "NULL"	overview.html
-sniff_csv(path: VARCHAR, sep: VARCHAR, delim: VARCHAR, separator: VARCHAR, delimiter: VARCHAR, null: ANY, date_format: VARCHAR, timestamp_format: VARCHAR, quote: VARCHAR, new_line: VARCHAR, escape: VARCHAR, nullstr: ANY, columns: ANY, auto_type_candidates: ANY, header: BOOLEAN, auto_detect: BOOLEAN, sample_size: BIGINT, all_varchar: BOOLEAN, dateformat: VARCHAR, timestampformat: VARCHAR, normalize_names: BOOLEAN, compression: VARCHAR, skip: BIGINT, max_line_size: BIGINT, maximum_line_size: BIGINT, ignore_errors: BOOLEAN, store_rejects: BOOLEAN, rejects_table: VARCHAR, rejects_scan: VARCHAR, rejects_limit: BIGINT, rejects_line_size_limit: BIGINT, force_not_null: VARCHAR[], buffer_size: BIGINT, decimal_separator: VARCHAR, parallel: BOOLEAN, null_padding: BOOLEAN, allow_quoted_nulls: BOOLEAN, column_types: ANY, dtypes: ANY, types: ANY, names: VARCHAR[], column_names: VARCHAR[], comment: VARCHAR, encoding: VARCHAR, strict_mode: BOOLEAN, thousands: VARCHAR, files_to_sniff: BIGINT, filename: ANY, hive_partitioning: BOOLEAN, union_by_name: BOOLEAN, hive_types: ANY, hive_types_autocast: BOOLEAN, schema: ANY, file_row_number: BOOLEAN, column_statistics: ANY, allow_empty: BOOLEAN, force_match: BOOLEAN) -> TABLE	overview.html
+sleep_ms(milliseconds: BIGINT) -> ANY	overview.html
+sniff_csv(path: VARCHAR) -> TABLE	overview.html
 split(string: VARCHAR, separator: VARCHAR) -> VARCHAR[]	text.html
 split_part(string: ANY, delimiter: ANY, position: ANY) -> ANY	overview.html
 sqrt(x: DOUBLE) -> DOUBLE	overview.html
@@ -1316,7 +1316,7 @@ switch(map: MAP(K, V), value: V) -> V	overview.html
 switch(key: K, map: MAP(K, V), value: V) -> V	overview.html
 tan(x: DOUBLE) -> DOUBLE	overview.html
 tanh(x: DOUBLE) -> DOUBLE	overview.html
-test_all_types(use_large_enum: BOOLEAN, use_large_bignum: BOOLEAN) -> TABLE	overview.html
+test_all_types() -> TABLE	overview.html
 test_vector_types(column: ANY, all_flat: BOOLEAN[, ANY, ...]) -> TABLE	overview.html
 time_bucket(bucket_width: INTERVAL, timestamp: DATE) -> DATE	overview.html
 time_bucket(bucket_width: INTERVAL, timestamp: TIMESTAMP WITH TIME ZONE) -> TIMESTAMP WITH TIME ZONE	overview.html

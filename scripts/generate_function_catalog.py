@@ -1,7 +1,7 @@
 """Write the signatures of each dialect's built-in functions, read from its documentation.
 
     uv run python scripts/generate_function_catalog.py postgres
-    uv run --with duckdb python scripts/generate_function_catalog.py duckdb
+    uv run --with duckdb==2.0.0 python scripts/generate_function_catalog.py duckdb
 
 Writes `rust/crates/sqlty-sql/functions/<dialect>.txt`, one overload per line:
 
@@ -18,8 +18,11 @@ rules cite. A signature written with keywords (`substring(s FROM n)`, `trim(BOTH
 is SQL syntax, not a call, and is left out.
 
 DuckDB: `duckdb_functions()` of the version the rules cite, with an overload per arity, and
-`varargs` as optional repeated arguments, `[, type, ...]`. More than four overloads with the same parameter names are written as
-one, `ANY` where their types differ. A table function returns `TABLE`; a macro's untyped parameter is `ANY`.
+`varargs` as optional repeated arguments, `[, type, ...]`. More than four overloads with the
+same parameter names are written as one, `ANY` where their types differ. A macro's untyped
+parameter is `ANY`. A table function returns `TABLE`; `duckdb_functions()` lists the parameters
+it takes by name (`read_csv(path, header = true)`) after the positional ones, so only as many
+are written as DuckDB binds positionally.
 The page is the documentation page of the function's first category, or of its kind.
 """
 
@@ -30,6 +33,7 @@ import html
 import re
 import urllib.request
 from pathlib import Path
+from typing import Any
 
 ROOT = Path(__file__).resolve().parent.parent
 OUTPUT = ROOT / "rust" / "crates" / "sqlty-sql" / "functions"
@@ -146,6 +150,22 @@ DUCKDB_KINDS = ("scalar", "aggregate", "window", "macro", "table", "table_macro"
 # More overloads than this with the same parameter names are one, typed where they agree.
 DUCKDB_OVERLOADS = 4
 DUCKDB_NAME = re.compile(r"[a-z][a-z0-9_]*")
+DUCKDB_NO_MATCH = ("No function matches", "does not support the supplied arguments")
+
+
+def duckdb_positional(con: Any, name: str, types: list[str]) -> int:
+    """How many of a table function's parameters a call binds positionally, the rest by name."""
+    import duckdb  # noqa: PLC0415
+
+    def binds(count: int) -> bool:
+        args = ", ".join("NULL" if "ANY" in t else f"CAST(NULL AS {t})" for t in types[:count])
+        try:
+            con.execute(f"DESCRIBE SELECT * FROM {name}({args})")
+        except duckdb.Error as error:
+            return not any(message in str(error) for message in DUCKDB_NO_MATCH)
+        return True
+
+    return max((count for count in range(len(types) + 1) if binds(count)), default=len(types))
 
 
 def duckdb_catalog() -> list[str]:
@@ -153,26 +173,27 @@ def duckdb_catalog() -> list[str]:
 
     if duckdb.__version__ != DUCKDB_VERSION:
         raise SystemExit(f"DuckDB {DUCKDB_VERSION} expected, found {duckdb.__version__}")
-    rows = (
-        duckdb.connect()
-        .execute(
-            """
+    con = duckdb.connect()
+    rows = con.execute(
+        """
         SELECT function_name, function_type, parameters, parameter_types, varargs, return_type,
             categories
         FROM duckdb_functions()
         WHERE schema_name IN ('main', 'pg_catalog') AND function_type IN ?
         ORDER BY function_name, len(parameters), function_oid
         """,
-            [list(DUCKDB_KINDS)],
-        )
-        .fetchall()
-    )
+        [list(DUCKDB_KINDS)],
+    ).fetchall()
     groups: dict[tuple[object, ...], list[tuple[list[str], str, str]]] = {}
     for name, kind, names, types, varargs, returns, categories in rows:
         if not DUCKDB_NAME.fullmatch(name) or name.startswith(("__", "pg_")):
             continue
-        types = [t or "ANY" for t in (types or [None] * len(names))]
+        types = [(t or "ANY").replace('"NULL"', "ANY") for t in (types or [None] * len(names))]
         result = "TABLE" if kind in ("table", "table_macro") else (returns or "ANY")
+        if result == "TABLE":
+            names = names[: duckdb_positional(con, name, types)]
+            types = types[: len(names)]
+        result = result.replace('"NULL"', "ANY")
         page = next((DUCKDB_PAGES[c] for c in categories if c in DUCKDB_PAGES), None)
         page = page or DUCKDB_PAGES.get(kind, "overview")
         key = (name, kind in ("table", "table_macro"), tuple(names), varargs)

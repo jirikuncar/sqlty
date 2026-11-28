@@ -54,8 +54,8 @@ struct Call {
 
 /// The built-in function whose argument list holds byte `cursor` of `query`, in the
 /// dialect `schema` routes it to; the innermost call; `None` outside one, in grouping
-/// parentheses, or in a `'...'` string or a comment. An argument passed by name
-/// (`days => 1`) makes that parameter active, and no parameter is active after one. O(length
+/// parentheses, in a `[...]` or `{...}` literal, or in a `'...'` string or a comment. An argument
+/// passed by name (`days => 1`) makes that parameter active, and no parameter is active after one. O(length
 /// of the query) to read the context, then O(log n) in the size of the catalog.
 pub fn signature_help(
     query: &str,
@@ -69,7 +69,8 @@ pub fn signature_help(
     for (at, tok) in tokens.iter().enumerate() {
         match tok.text.as_str() {
             "(" => open.push(called(&tokens, at)),
-            ")" => {
+            "[" | "{" => open.push(None),
+            ")" | "]" | "}" => {
                 open.pop();
             }
             "," => {
@@ -138,10 +139,13 @@ fn called(tokens: &[Tok], at: usize) -> Option<Call> {
     })
 }
 
-/// The parameter name an argument's tokens pass it by: `name => value`.
+/// The parameter name an argument's tokens pass it by: `name => value` or `name := value`.
 fn named(argument: &[Tok]) -> Option<&str> {
     match argument {
-        [name, eq, gt, ..] if name.word && eq.text == "=" && gt.text == ">" => {
+        [name, a, b, ..]
+            if name.word
+                && matches!((a.text.as_str(), b.text.as_str()), ("=", ">") | (":", "=")) =>
+        {
             Some(name.text.as_str())
         }
         _ => None,
