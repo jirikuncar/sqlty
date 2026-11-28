@@ -136,13 +136,15 @@ run("DELETE FROM users WHERE age = %(age)s", age=b"1")
 ## Driver calls
 
 `cursor.execute(query, params)`, `executemany` (each row), and
-`connection.execute(...)` are checked on psycopg, sqlite3, aiosqlite and rustmy
-receivers, `execute_fetchall` and `execute_insert` on aiosqlite ones, and
+`connection.execute(...)` are checked on psycopg, sqlite3 and aiosqlite
+receivers, `cursor.execute` and `executemany` on rustmy ones,
+`execute_fetchall` and `execute_insert` on aiosqlite ones, and
 `execute`, `fetch`, `fetchrow`, `fetchval`, `executemany` and `fetchmany` (each
 row) on asyncpg ones. The receiver must be evident in the file: bound to
 `psycopg.connect(...)`, `sqlite3.connect(...)`, `aiosqlite.connect(...)`,
 `asyncpg.connect(...)`, `rustmy.connect(...)`, `rustmy.aio.connect(...)`,
-`<connection>.cursor()` or `<pool>.acquire()` (also as `with ... as name` and
+`rustmy.Pool(...)`, `rustmy.aio.create_pool(...)`, `<connection>.cursor()` or
+`<pool>.acquire()` (also as `with ... as name` and
 awaited), or annotated with a driver class, directly or through an alias or a
 `NewType` the file binds once. The `execute` and `scalar` helpers
 of `sqlty.drivers.psycopg` are checked the same way, with no receiver to see.

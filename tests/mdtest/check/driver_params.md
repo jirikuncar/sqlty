@@ -53,6 +53,18 @@ conn = psycopg.connect("dbname=x")
 conn.execute("DELETE FROM users WHERE name = %s", (-1.5,))
 ```
 
+## A connection an asyncpg pool lends
+
+```python
+import asyncpg
+
+async def main() -> None:
+    pool = await asyncpg.create_pool()
+    async with pool.acquire() as conn:
+        # error: [param-count-mismatch] "query has 1 parameter, the call passes 0"
+        await conn.fetch("SELECT id FROM users WHERE id = $1")
+```
+
 ## executemany checks each row
 
 ```python

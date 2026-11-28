@@ -51,6 +51,10 @@ def find(cur: rustmy.Cursor, user_id: int, name: str) -> None:
     cur.execute("SELECT id FROM users WHERE id = %s AND name = %s", user_id)
     # error: [param-type-mismatch] "parameter 1 expects str, got int"
     cur.execute("SELECT id FROM users WHERE name = %s", user_id)
+    # error: [param-type-mismatch] "parameters are a single int, which rustmy binds only to `%s`: pass a mapping"
+    cur.execute("SELECT id FROM users WHERE id = %(id)s", user_id)
+    # error: [param-type-mismatch] "parameters are a single int, which rustmy binds only to `%s`: pass a mapping"
+    cur.executemany("DELETE FROM users WHERE id = %(id)s", [1])
 ```
 
 ## executemany checks each row
@@ -115,4 +119,21 @@ pool = rustmy.Pool(host="localhost", database="app")
 with pool.acquire() as conn, conn.cursor() as cur:
     # error: [param-count-mismatch] "query has 1 parameter, the call passes 0"
     cur.execute("SELECT id FROM users WHERE id = %s")
+```
+
+## Imported from the defining modules
+
+```python
+from rustmy.aio.connections import connect
+from rustmy.aio.pool import create_pool
+
+async def main() -> None:
+    conn = await connect(host="localhost", database="app")
+    pool = await create_pool(host="localhost", database="app")
+    async with conn.cursor() as cur, pool.acquire() as leased:
+        # error: [param-count-mismatch] "query has 1 parameter, the call passes 0"
+        await cur.execute("SELECT id FROM users WHERE id = %s")
+        async with leased.cursor() as other:
+            # error: [param-count-mismatch] "query has 1 parameter, the call passes 0"
+            await other.execute("SELECT id FROM users WHERE id = %s")
 ```

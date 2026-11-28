@@ -26,8 +26,9 @@ psycopg, sqlite3, aiosqlite or rustmy connection or cursor, `execute_fetchall` a
 `fetchrow`, `fetchval`, `executemany` and `fetchmany` (each row) on an asyncpg
 connection, when the file binds the receiver to `psycopg.connect(...)`,
 `sqlite3.connect(...)`, `aiosqlite.connect(...)`, `asyncpg.connect(...)`,
-`rustmy.connect(...)`, `rustmy.aio.connect(...)`, `<connection>.cursor()`,
-`<pool>.acquire()` or a driver class annotation, and the `execute` and
+`rustmy.connect(...)`, `rustmy.aio.connect(...)`, `rustmy.Pool(...)`,
+`rustmy.aio.create_pool(...)`, `<connection>.cursor()`, `<pool>.acquire()` or a
+driver class annotation, and the `execute` and
 `scalar` helpers of `sqlty.drivers.psycopg`. The query is a literal,
 `SQL[T]("...")` of one, or a name assigned once to one. A single value passed
 as a driver call's parameters, `execute(query, user_id)`, is reported too: the

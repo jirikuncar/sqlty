@@ -313,8 +313,8 @@ impl<'a> Finder<'a, '_> {
             (Some(arg), None) => self.types.arg_type(arg, stack),
             _ => None,
         };
-        // rustmy binds a single value to the one placeholder: `execute(query, 1)`.
-        if driver == "rustmy" {
+        // rustmy binds a single value to a `%s` placeholder: `execute(query, 1)`.
+        if driver == "rustmy" && !query.contains("%(") {
             if let Some(single) = kind.take().filter(|kind| is_scalar(kind)) {
                 params = Some(vec![Param {
                     key: Key::Index(1),
@@ -552,6 +552,10 @@ impl<'a> Finder<'a, '_> {
 fn rustmy_connect(name: &str) -> Option<&'static str> {
     let call = name.strip_prefix("rustmy.")?;
     let call = call.strip_prefix("aio.").unwrap_or(call);
+    let call = ["connections.", "pool."]
+        .iter()
+        .find_map(|module| call.strip_prefix(module))
+        .unwrap_or(call);
     matches!(call, "connect" | "create_pool")
         .then_some("rustmy")
         .or_else(|| class_driver(name))

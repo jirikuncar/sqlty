@@ -550,14 +550,12 @@ impl<'a> Module<'a, '_> {
             }
             singles.sort_by_key(|(line, single, driver, _)| (*line, *single, *driver));
             for (line, single, driver, span) in singles {
-                reports.push((
-                    Rule::ParamTypeMismatch,
-                    format!(
-                        "parameters are a single {single}, which {driver} rejects: pass a sequence, `(value,)`"
-                    ),
-                    line,
-                    span,
-                ));
+                let message = if driver == "rustmy" {
+                    format!("parameters are a single {single}, which rustmy binds only to `%s`: pass a mapping")
+                } else {
+                    format!("parameters are a single {single}, which {driver} rejects: pass a sequence, `(value,)`")
+                };
+                reports.push((Rule::ParamTypeMismatch, message, line, span));
             }
         }
         let calls = self.calls().map(|(call, _)| call).chain(&self.driver_calls);
