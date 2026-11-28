@@ -38,6 +38,25 @@ SELECT tags[1], users.tags[2], tags[1:2], tags[1]::TEXT, (tags)[1] FROM users
 -- columns: tags: str | None (TEXT)
 ```
 
+## A subscript of a multi-dimensional array is an element
+
+PostgreSQL does not track an array's dimensions: `text[][]` is `text[]`, and any
+subscript yields `text` ([Arrays](https://www.postgresql.org/docs/17/arrays.html)).
+
+```sql
+SELECT ('{{a,b},{c,d}}'::text[][])[1], ('{{a,b},{c,d}}'::text[][])[1][2]
+-- columns: text: str | None (TEXT)
+-- columns: text: str | None (TEXT)
+```
+
+A slice in any subscript makes every subscript a slice, so the result stays an array.
+
+```sql
+SELECT ('{{a,b},{c,d}}'::text[][])[1:2][1], ('{{a,b},{c,d}}'::text[][])[1][1:2]
+-- columns: text: list[list[str]] | None (ARRAY<ARRAY<TEXT>>)
+-- columns: text: list[list[str]] | None (ARRAY<ARRAY<TEXT>>)
+```
+
 ## Field access of a composite
 
 The field names the column, and a known composite types it.
@@ -45,6 +64,13 @@ The field names the column, and a known composite types it.
 ```sql
 SELECT (home).street, (users.home).zip FROM users
 -- columns: street: str | None (TEXT)
+-- columns: zip: int | None (INT)
+```
+
+A field after a subscript ends the run of subscripts.
+
+```sql
+SELECT (ARRAY[home])[1].zip FROM users
 -- columns: zip: int | None (INT)
 ```
 
