@@ -11,7 +11,10 @@ RUST_TEST = re.compile(r"^\s*#\[(?:\w+::)*test(?:_case)?\b", re.MULTILINE)
 
 def private(name: str) -> bool:
     """A private `sqlty._*` module or name: `sqlty._core` is sqlty-ext's public API."""
-    return any(part.startswith("_") and part != "_core" for part in name.split("."))
+    return any(
+        part.startswith("_") and part != "_core" and not part.endswith("__")
+        for part in name.split(".")
+    )
 
 
 def private_uses(source: str) -> int:
