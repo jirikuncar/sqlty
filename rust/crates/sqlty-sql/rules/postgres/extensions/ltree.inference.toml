@@ -1,0 +1,75 @@
+# The ltree extension: labels of a path in a tree.
+
+[[rule]]
+id = "postgres.ltree.ancestor"
+operators = ["AtArrow", "ArrowAt"]
+dialects = ["postgres"]
+left = ["LTREE"]
+right = ["LTREE"]
+type = "BOOLEAN"
+left-parameter = "LTREE"
+right-parameter = "LTREE"
+reference.postgres = "PostgreSQL 17 documentation, F.22.2 Operators and Functions, ltree Operators (ltree @> ltree → boolean)"
+reasoning = "A path is an ancestor or descendant of another path."
+
+[[rule]]
+id = "postgres.ltree.concat"
+operator = "StringConcat"
+dialects = ["postgres"]
+left = ["LTREE"]
+right = ["LTREE", "@text"]
+type = "LTREE"
+right-parameter = "LTREE"
+reference.postgres = "PostgreSQL 17 documentation, F.22.2 Operators and Functions, ltree Operators (ltree || ltree → ltree, ltree || text → ltree)"
+reasoning = "Concatenating a path with a path or text gives a path."
+
+[[rule]]
+id = "postgres.ltree.concat-text"
+operator = "StringConcat"
+dialects = ["postgres"]
+left = ["@text"]
+right = ["LTREE"]
+type = "LTREE"
+left-parameter = "LTREE"
+reference.postgres = "PostgreSQL 17 documentation, F.22.2 Operators and Functions, ltree Operators (text || ltree → ltree)"
+reasoning = "Text before a path gives a path."
+
+[[function]]
+id = "postgres.ltree.path"
+functions = ["SUBLTREE", "SUBPATH", "TEXT2LTREE"]
+dialects = ["postgres"]
+extension = "ltree"
+type = "LTREE"
+nullability = "strict"
+reference.postgres = "PostgreSQL 17 documentation, F.22.2 Operators and Functions, ltree Functions (subpath ( ltree, integer ) → ltree)"
+reasoning = "A part of a path, or text read as one, is a path, NULL only for a NULL argument."
+
+[[function]]
+id = "postgres.ltree.ancestor-of-all"
+function = "LCA"
+dialects = ["postgres"]
+extension = "ltree"
+type = "LTREE"
+nullability = "nullable"
+reference.postgres = "PostgreSQL 17 documentation, F.22.2 Operators and Functions, ltree Functions (lca ( ltree [, ltree [, ... ]] ) → ltree)"
+reasoning = "Paths with no common ancestor, such as an empty one, have a NULL `lca`."
+
+[[function]]
+id = "postgres.ltree.position"
+functions = ["NLEVEL", "INDEX"]
+dialects = ["postgres"]
+extension = "ltree"
+type = "INT"
+nullability = "strict"
+reference.postgres = "PostgreSQL 17 documentation, F.22.2 Operators and Functions, ltree Functions (nlevel ( ltree ) → integer, index ( a ltree, b ltree ) → integer)"
+reasoning = "A count of labels or a position is an `integer`, -1 when not found."
+
+[[function]]
+id = "postgres.ltree.text"
+function = "LTREE2TEXT"
+dialects = ["postgres"]
+extension = "ltree"
+type = "TEXT"
+nullability = "strict"
+reference.postgres = "PostgreSQL 17 documentation, F.22.2 Operators and Functions, ltree Functions (ltree2text ( ltree ) → text)"
+reasoning = "A path written as text."

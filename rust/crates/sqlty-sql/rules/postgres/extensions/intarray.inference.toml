@@ -1,0 +1,43 @@
+# The intarray extension: sets of integers as arrays.
+
+[[rule]]
+id = "postgres.intarray.combine"
+operators = ["BitwiseAnd", "BitwiseOr", "Plus", "Minus"]
+dialects = ["postgres"]
+extension = "intarray"
+left = ["@array"]
+right = ["@array", "@integer"]
+type = "ARRAY<INT>"
+reference.postgres = "PostgreSQL 17 documentation, F.19.1 intarray Functions and Operators, intarray Operators (integer[] | integer → integer[], integer[] & integer[] → integer[])"
+reasoning = "Union, intersection, adding and removing elements give an `integer[]`."
+
+[[rule]]
+id = "postgres.intarray.index"
+operator = "PGBitwiseXor"
+dialects = ["postgres"]
+extension = "intarray"
+left = ["@array"]
+right = ["@integer"]
+type = "INT"
+reference.postgres = "PostgreSQL 17 documentation, F.19.1 intarray Functions and Operators, intarray Operators (integer[] # integer → integer)"
+reasoning = "The index of the first matching element, 0 if none."
+
+[[function]]
+id = "postgres.intarray.count"
+functions = ["ICOUNT", "IDX"]
+dialects = ["postgres"]
+extension = "intarray"
+type = "INT"
+nullability = "strict"
+reference.postgres = "PostgreSQL 17 documentation, F.19.1 intarray Functions and Operators, intarray Functions (icount ( integer[] ) → integer, idx ( integer[], item integer ) → integer)"
+reasoning = "A count or an index is an `integer`, NULL only for a NULL argument."
+
+[[function]]
+id = "postgres.intarray.array"
+functions = ["SORT", "SORT_ASC", "SORT_DESC", "UNIQ", "SUBARRAY", "INTSET"]
+dialects = ["postgres"]
+extension = "intarray"
+type = "ARRAY<INT>"
+nullability = "strict"
+reference.postgres = "PostgreSQL 17 documentation, F.19.1 intarray Functions and Operators, intarray Functions (sort ( integer[] ) → integer[], intset ( integer ) → integer[])"
+reasoning = "Each gives an `integer[]`, NULL only for a NULL argument."

@@ -541,6 +541,10 @@ static SQL_TO_PYTHON_TYPE: LazyLock<HashMap<&'static str, &'static str>> = LazyL
         ("CITEXT", "str"),
         // psycopg's `register_hstore` loads hstore as a dict; a value may be NULL.
         ("HSTORE", "dict[str, str | None]"),
+        ("LTREE", "str"),
+        ("LQUERY", "str"),
+        ("LTXTQUERY", "str"),
+        ("QUERY_INT", "str"),
         ("BPCHAR", "str"),
         ("XML", "str"),
         ("MONEY", "str"),

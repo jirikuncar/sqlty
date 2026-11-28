@@ -467,8 +467,10 @@ and `DROP SCHEMA ... CASCADE` remove it again. An `hstore` value is
 (`->`, `?`, `@>`, `||`, ...) are typed whatever the schema says; `[tool.sqlty.types]`
 changes the Python type (`HSTORE = "str"` without the adapter). `pg_trgm` (`similarity`,
 `%`, `<->`), `fuzzystrmatch` (`levenshtein`, `soundex`, ...) and `pgcrypto` (`crypt`,
-`gen_salt`, `pgp_sym_encrypt`, ...) are known the same way. Other extensions keep their
-functions unknown.
+`gen_salt`, `pgp_sym_encrypt`, ...), `ltree` (`subpath`, `nlevel`, `lca`, `@>`, `||`, ...)
+and `intarray` (`icount`, `sort`, `uniq`, `&`, `|`, ...) are known the same way; an
+`ltree`, `lquery` or `ltxtquery` value is a `str`. Other extensions keep their functions
+unknown.
 
 ```toml
 [tool.sqlty]
