@@ -396,6 +396,7 @@ impl Parsed {
         analyzer.diag = Diagnostics::collecting();
         analyzer.source = text_source(&self.input.source, self.dialect);
         let Ok(columns) = analyzer.statement_columns(stmt);
+        analyzer.check_argument_counts(stmt);
         let found = analyzer.diag.located().into_iter().map(|(mut found, at)| {
             found.span = self.as_written.then(|| self.bytes(at)).flatten();
             found

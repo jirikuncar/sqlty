@@ -380,6 +380,7 @@ mod tests {
                 "ambiguous-column",
                 "duplicate-alias",
                 "unknown-function",
+                "argument-count-mismatch",
                 "unknown-type",
                 "unsupported-syntax",
                 "insert-missing-column",
