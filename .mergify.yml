@@ -1,0 +1,14 @@
+# Required checks come from main's branch protection (today: CI).
+queue_rules:
+  - name: main
+    queue_conditions:
+      - base = main
+      - -draft
+    merge_method: squash
+
+pull_request_rules:
+  - name: Queue labelled pull requests
+    conditions:
+      - label = queue
+    actions:
+      queue:
