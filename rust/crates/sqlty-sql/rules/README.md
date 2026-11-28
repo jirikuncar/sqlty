@@ -36,7 +36,7 @@ reasoning = "`->` on a json value gives json; a missing member gives NULL."
 
 Operand types are the canonical names the analyzer gives (`INT`, `BIGINT`,
 `DECIMAL`, `TEXT`, `JSONB`, `TIMESTAMPTZ`, ...; see `SQL_TYPES` in
-`compile.rs`), `ARRAY` for any array, or a class: `@integer`, `@numeric`,
+`compile.rs`), `ARRAY` for any array, `ARRAY<INT>` for an integer array (which `ARRAY` also matches), or a class: `@integer`, `@numeric`,
 `@unsigned` (MySQL's unsigned integers), `@text`, `@temporal` (dates, times and
 timestamps), `@json`, `@address` (`INET`, `CIDR`), `@array`, `@binary`, `@range`. A string literal is
 `TEXT`, a number literal `INT`, `DECIMAL` or `DOUBLE`. In arithmetic, a

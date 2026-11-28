@@ -273,6 +273,7 @@ Per dialect, with the driver each follows and why some types differ, see
 | DuckDB `STRUCT(a T, b U)`, `MAP(K, V)`, `UNION(a T, b U)` | `dict[str, T \| U]`, `dict[K, V]`, `T \| U` |
 | `SERIAL`, `SMALLSERIAL`, `BIGSERIAL` | `int` |
 | `HSTORE` | `dict[str, str \| None]`, as psycopg's `register_hstore` loads it |
+| `LTREE`, `LQUERY`, `LTXTQUERY`, `QUERY_INT` | `str` |
 | `ENUM` (MySQL), `CITEXT`, `NAME`, `BPCHAR`, `XML`, `MONEY`, `MACADDR`, `MACADDR8`, `TSVECTOR`, `TSQUERY` | `str` |
 | Arrays: `INT[]`, `INT[3]`, `INT ARRAY`, `INT ARRAY[3]`, `INT MULTISET` | `list[T]` with the element type mapped, `list[list[int]]` for `INT[][]` |
 | `POINT`, `POLYGON` and the other geometric types | `str` (psycopg); `bytes` in MySQL |

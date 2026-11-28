@@ -835,7 +835,7 @@ impl<'a> Analyzer<'a> {
         };
         let Ok(typed) = self.expr(other, scope);
         let other_type = operand_type(&typed);
-        let other = operand(other_type);
+        let other = operand(typed.sql().or(other_type));
         let ruled = binary_rules(op)
             .iter()
             .find_map(|rule| rule.parameter(self.dialect, self.schema.extensions(), left, other));

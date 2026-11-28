@@ -4,7 +4,7 @@ use sqlparser::ast::{BinaryOperator, Expr, UnaryOperator, Value};
 
 use super::dialect::SqlDialect;
 use super::expr::{array_element, from_sql_type};
-use super::inference::{binary_rules, operand, prefix_rules, BinaryRule, RuleType};
+use super::inference::{binary_rules, operand, prefix_rules, BinaryRule, Operand, RuleType};
 use super::literals::{merge, python_kind, strip};
 use super::query::Analyzer;
 use super::scope::Scope;
@@ -114,7 +114,7 @@ impl Analyzer<'_> {
                 self.dialect,
                 self.schema.extensions(),
                 None,
-                operand(rule_type(typed)),
+                rule_operand(typed),
             )
         })
     }
@@ -157,7 +157,7 @@ impl Analyzer<'_> {
         // Arithmetic reads both sides: a placeholder takes the other operand's type.
         if reads_left && reads_right || (reads_left || reads_right) && is_arithmetic(op) {
             let typed = self.rule_operands(left, op, right, scope)?;
-            let (l, r) = (operand(rule_type(&typed.0)), operand(rule_type(&typed.1)));
+            let (l, r) = (rule_operand(&typed.0), rule_operand(&typed.1));
             let found = rules
                 .iter()
                 .find(|rule| rule.applies(self.dialect, self.schema.extensions(), l, r));
@@ -168,8 +168,8 @@ impl Analyzer<'_> {
         };
         let (l, r) = (side(reads_left, left)?, side(reads_right, right)?);
         let (l, r) = (
-            operand(l.as_ref().and_then(rule_type)),
-            operand(r.as_ref().and_then(rule_type)),
+            l.as_ref().and_then(rule_operand),
+            r.as_ref().and_then(rule_operand),
         );
         let found = rules
             .iter()
@@ -185,6 +185,11 @@ type RuleMatch = (&'static BinaryRule, Option<(Typed, Typed)>);
 /// any array), or that of a literal (`TEXT` for a string).
 fn rule_type(typed: &Typed) -> Option<&str> {
     operand_type(typed).or_else(|| (python_kind(typed) == Some("str")).then_some("TEXT"))
+}
+
+/// The [`Operand`] an inference rule sees: [`rule_type`], with an array's element type.
+fn rule_operand(typed: &Typed) -> Option<Operand> {
+    operand(typed.sql().or_else(|| rule_type(typed)))
 }
 
 pub(super) fn type_base(sql_type: &str) -> &str {

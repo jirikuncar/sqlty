@@ -541,6 +541,10 @@ static SQL_TO_PYTHON_TYPE: LazyLock<HashMap<&'static str, &'static str>> = LazyL
         ("CITEXT", "str"),
         // psycopg's `register_hstore` loads hstore as a dict; a value may be NULL.
         ("HSTORE", "dict[str, str | None]"),
+        ("LTREE", "str"),
+        ("LQUERY", "str"),
+        ("LTXTQUERY", "str"),
+        ("QUERY_INT", "str"),
         ("BPCHAR", "str"),
         ("XML", "str"),
         ("MONEY", "str"),
@@ -752,7 +756,7 @@ pub(super) fn decimal_type(dialect: SqlDialect) -> &'static str {
 }
 
 /// Types that PostgreSQL extensions define, mapped in PostgreSQL only.
-const POSTGRES_EXTENSION_TYPES: [&str; 1] = ["HSTORE"];
+const POSTGRES_EXTENSION_TYPES: [&str; 5] = ["HSTORE", "LTREE", "LQUERY", "LTXTQUERY", "QUERY_INT"];
 
 /// The Python type of a scalar type by its canonical spelling; unknown types are `None`.
 fn scalar_python(sql_type: &str, dialect: SqlDialect) -> Option<String> {

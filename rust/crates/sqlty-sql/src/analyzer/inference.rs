@@ -10,6 +10,7 @@ use sqlparser::ast::{BinaryOperator, UnaryOperator};
 
 use super::dialect::SqlDialect;
 use super::functions::Returns;
+use super::operators::type_base;
 
 /// The result type of a rule.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -317,9 +318,10 @@ pub(crate) fn typed_by_rule(name: &str, dialect: SqlDialect, extensions: Extensi
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct Operand(u128);
 
-/// The [`Operand`] of SQL type `sql`; `None` for an untyped operand.
+/// The [`Operand`] of SQL type `sql`; `None` for an untyped operand. An element-typed array
+/// such as `ARRAY<INT>` matches both `ARRAY` and itself.
 pub(crate) fn operand(sql: Option<&str>) -> Option<Operand> {
-    sql.map(|sql| Operand(type_bit(sql)))
+    sql.map(|sql| Operand(type_bit(type_base(sql)) | type_bit(sql)))
 }
 
 /// Whether `operand` satisfies the predicate `types`, a mask of the SQL types it admits;
