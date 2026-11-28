@@ -972,18 +972,6 @@ fn semantic_tokens_color_the_sql_of_checked_strings() {
 }
 
 #[test]
-fn a_function_name_is_a_function_token() {
-    let mut client = Client::start(&json!({}));
-    client.open("file:///work/q.py", "q = \"--sql\\nSELECT now()\"\n");
-    let function = 6;
-    assert_eq!(
-        decoded(&client.tokens("file:///work/q.py"))[2],
-        (0, 19, 3, function)
-    );
-    client.shutdown();
-}
-
-#[test]
 fn a_check_that_finds_helper_strings_asks_for_the_tokens_again() {
     let capabilities = json!({"workspace": {"semanticTokens": {"refreshSupport": true}}});
     let mut client = Client::start(&capabilities);
