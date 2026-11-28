@@ -50,16 +50,17 @@ SELECT path @> parent AS above, path <@ 'a'::ltree AS below, path ~ '*.b.*'::lqu
 -- columns: rooted: str (LTREE)
 -- rules: above: postgres.ltree.ancestor / postgres.ltree.ancestor
 -- rules: below: postgres.ltree.ancestor / postgres.ltree.ancestor
--- rules: matches: common.pattern / common.pattern
+-- rules: matches: postgres.ltree.match / postgres.ltree.match
 -- rules: child: postgres.ltree.concat / postgres.ltree.concat
 -- rules: named: postgres.ltree.concat / postgres.ltree.concat
 -- rules: rooted: postgres.ltree.concat-text / postgres.ltree.concat-text
 ```
 
 ```sql
-SELECT id FROM nodes WHERE path <@ $1 AND $2 @> path
+SELECT id FROM nodes WHERE path <@ $1 AND $2 @> path AND path ~ $3
 -- params: 1: str (LTREE)
 -- params: 2: str (LTREE)
+-- params: 3: str (LQUERY)
 ```
 
 ## Without `CREATE EXTENSION`

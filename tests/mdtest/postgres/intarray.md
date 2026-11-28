@@ -7,7 +7,7 @@ schema runs `CREATE EXTENSION intarray`.
 
 ```sql
 CREATE EXTENSION intarray;
-CREATE TABLE posts (id int PRIMARY KEY, tags int[] NOT NULL, extra int[]);
+CREATE TABLE posts (id int PRIMARY KEY, tags int[] NOT NULL, extra int[], words text[] NOT NULL);
 ```
 
 ```toml
@@ -45,11 +45,28 @@ SELECT tags & extra AS common, tags | 5 AS with_five, tags + extra AS joined, ta
 -- columns: joined: list[int] | None (ARRAY<INT>)
 -- columns: without_five: list[int] (ARRAY<INT>)
 -- columns: position: int (INT)
--- rules: common: postgres.intarray.combine / postgres.intarray.combine
+-- rules: common: postgres.intarray.intersect / postgres.intarray.intersect
 -- rules: with_five: postgres.intarray.combine / postgres.intarray.combine
 -- rules: joined: postgres.intarray.combine / postgres.intarray.combine
 -- rules: without_five: postgres.intarray.combine / postgres.intarray.combine
 -- rules: position: postgres.intarray.index / postgres.intarray.index
+```
+
+Placeholders take `integer[]`, or `integer` after `#`:
+
+```sql
+SELECT id FROM posts WHERE icount(tags & $1) > 0 AND icount($2 | tags) > 0 AND tags # $3 > 0
+-- params: 1: list[int] (ARRAY<INT>)
+-- params: 2: list[int] (ARRAY<INT>)
+-- params: 3: int (INT)
+```
+
+The operators are those of integer arrays only:
+
+```sql
+SELECT words | words AS w, tags & 5 AS t FROM posts
+-- columns: w: None (None)
+-- columns: t: None (None)
 ```
 
 ## Without `CREATE EXTENSION`

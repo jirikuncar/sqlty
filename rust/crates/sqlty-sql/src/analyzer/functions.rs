@@ -443,7 +443,10 @@ fn str_to_date_type(format: &str) -> &'static str {
 
 /// An argument's SQL type as function rules match it: a string literal is `TEXT`.
 fn rule_operand(typed: &Typed) -> Option<&str> {
-    operand_type(typed).or_else(|| is_text(typed).then_some("TEXT"))
+    typed
+        .sql()
+        .or_else(|| operand_type(typed))
+        .or_else(|| is_text(typed).then_some("TEXT"))
 }
 
 /// The SQL type `EXTRACT(field FROM x)` gives, `None` when sqlty does not know it.

@@ -13,6 +13,16 @@ reference.postgres = "PostgreSQL 17 documentation, F.22.2 Operators and Function
 reasoning = "A path is an ancestor or descendant of another path."
 
 [[rule]]
+id = "postgres.ltree.match"
+operator = "PGRegexMatch"
+dialects = ["postgres"]
+left = ["LTREE"]
+type = "BOOLEAN"
+right-parameter = "LQUERY"
+reference.postgres = "PostgreSQL 17 documentation, F.22.2 Operators and Functions, ltree Operators (ltree ~ lquery → boolean)"
+reasoning = "A path matches an `lquery` or not."
+
+[[rule]]
 id = "postgres.ltree.concat"
 operator = "StringConcat"
 dialects = ["postgres"]
@@ -52,7 +62,7 @@ extension = "ltree"
 type = "LTREE"
 nullability = "nullable"
 reference.postgres = "PostgreSQL 17 documentation, F.22.2 Operators and Functions, ltree Functions (lca ( ltree [, ltree [, ... ]] ) → ltree)"
-reasoning = "Paths with no common ancestor, such as an empty one, have a NULL `lca`."
+reasoning = "An empty path among the arguments, or an empty array, has a NULL `lca`."
 
 [[function]]
 id = "postgres.ltree.position"

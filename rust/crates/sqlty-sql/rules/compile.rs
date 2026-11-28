@@ -32,8 +32,8 @@ const EXTENSIONS_DIR: &str = "rules/postgres/extensions/";
 const DOCUMENTED: [&str; 5] = ["postgres", "mysql", "sqlite", "duckdb", "clickhouse"];
 
 /// Canonical SQL types the analyzer gives operands, which `left` and `right` may name.
-/// `ARRAY` is any array.
-const SQL_TYPES: [&str; 92] = [
+/// `ARRAY` is any array, `ARRAY<INT>` an integer array (which also matches `ARRAY`).
+const SQL_TYPES: [&str; 94] = [
     "UDECIMAL",
     "UTINYINT",
     "USMALLINT",
@@ -76,6 +76,7 @@ const SQL_TYPES: [&str; 92] = [
     "MACADDR",
     "HSTORE",
     "LTREE",
+    "LQUERY",
     "TSVECTOR",
     "TSQUERY",
     "PATH",
@@ -126,6 +127,7 @@ const SQL_TYPES: [&str; 92] = [
     "ENUM",
     "SET",
     "ARRAY",
+    "ARRAY<INT>",
 ];
 
 /// Named sets of SQL types, `@name` in `left` and `right`.

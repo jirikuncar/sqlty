@@ -1,24 +1,40 @@
 # The intarray extension: sets of integers as arrays.
 
 [[rule]]
-id = "postgres.intarray.combine"
-operators = ["BitwiseAnd", "BitwiseOr", "Plus", "Minus"]
+id = "postgres.intarray.intersect"
+operator = "BitwiseAnd"
 dialects = ["postgres"]
 extension = "intarray"
-left = ["@array"]
-right = ["@array", "@integer"]
+left = ["ARRAY<INT>"]
+right = ["ARRAY<INT>"]
 type = "ARRAY<INT>"
-reference.postgres = "PostgreSQL 17 documentation, F.19.1 intarray Functions and Operators, intarray Operators (integer[] | integer → integer[], integer[] & integer[] → integer[])"
-reasoning = "Union, intersection, adding and removing elements give an `integer[]`."
+left-parameter = "ARRAY<INT>"
+right-parameter = "ARRAY<INT>"
+reference.postgres = "PostgreSQL 17 documentation, F.19.1 intarray Functions and Operators, intarray Operators (integer[] & integer[] → integer[])"
+reasoning = "The intersection of two `integer[]` is an `integer[]`."
+
+[[rule]]
+id = "postgres.intarray.combine"
+operators = ["BitwiseOr", "Plus", "Minus"]
+dialects = ["postgres"]
+extension = "intarray"
+left = ["ARRAY<INT>"]
+right = ["ARRAY<INT>", "INT", "SMALLINT"]
+type = "ARRAY<INT>"
+left-parameter = "ARRAY<INT>"
+right-parameter = "ARRAY<INT>"
+reference.postgres = "PostgreSQL 17 documentation, F.19.1 intarray Functions and Operators, intarray Operators (integer[] | integer → integer[], integer[] + integer[] → integer[])"
+reasoning = "Union, adding and removing elements or arrays give an `integer[]`."
 
 [[rule]]
 id = "postgres.intarray.index"
 operator = "PGBitwiseXor"
 dialects = ["postgres"]
 extension = "intarray"
-left = ["@array"]
-right = ["@integer"]
+left = ["ARRAY<INT>"]
+right = ["INT", "SMALLINT"]
 type = "INT"
+right-parameter = "INT"
 reference.postgres = "PostgreSQL 17 documentation, F.19.1 intarray Functions and Operators, intarray Operators (integer[] # integer → integer)"
 reasoning = "The index of the first matching element, 0 if none."
 

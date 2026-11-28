@@ -469,7 +469,7 @@ changes the Python type (`HSTORE = "str"` without the adapter). `pg_trgm` (`simi
 `%`, `<->`), `fuzzystrmatch` (`levenshtein`, `soundex`, ...) and `pgcrypto` (`crypt`,
 `gen_salt`, `pgp_sym_encrypt`, ...), `ltree` (`subpath`, `nlevel`, `lca`, `@>`, `||`, ...)
 and `intarray` (`icount`, `sort`, `uniq`, `&`, `|`, ...) are known the same way; an
-`ltree`, `lquery` or `ltxtquery` value is a `str`. Other extensions keep their functions
+`ltree`, `lquery`, `ltxtquery` or `query_int` value is a `str`. Other extensions keep their functions
 unknown.
 
 ```toml
