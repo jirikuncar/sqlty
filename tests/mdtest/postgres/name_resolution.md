@@ -186,6 +186,14 @@ d = SQL[tuple[str]]("--sql\nSELECT other.lower('A') AS v")
 e = SQL[tuple[str]]('--sql\nSELECT "LOWER"(id::text) AS v FROM t')
 ```
 
+A name with a database as well as a schema is no built-in.
+
+```sql
+SELECT pg_catalog.lower('A') AS a, db.pg_catalog.lower('A') AS b
+-- columns: a: str (TEXT)
+-- columns: b: None (None)
+```
+
 ## MySQL and SQLite are unchanged
 
 Names compare case-insensitively, a schema qualifier is dropped, and there is no
