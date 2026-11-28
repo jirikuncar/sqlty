@@ -9,10 +9,9 @@ import tokenize
 
 import pytest
 
-from sqlty._cli import main
 from sqlty._core import module_ignores, query_sites
-from sqlty._source import ParsedSource
-from sqlty.core import Settings, check_source
+from sqlty.core import ParsedSource, Settings, check_source
+from tests._core_views import main
 from tests.type_oracle.outline import classes, outline
 
 SCHEMA = "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL);\n"
@@ -196,6 +195,9 @@ def test_a_source_that_does_not_parse_is_read_by_its_strings(parses, tokenized):
     ],
 )
 def test_wrapper_name_of_each_import_style(style: str | None, wrapper: str | None) -> None:
-    from sqlty._source import _wrapper_name
+    decoy = "Q" if wrapper == "SQL" else "SQL"
+    source = f"import typing\nq = {wrapper or 'SQL'}[typing.Any](x)\nr = {decoy}[typing.Any](y)\n"
 
-    assert _wrapper_name(style) == wrapper
+    assert ParsedSource(source).any_calls(style) == (
+        [] if wrapper is None else [len("import typing\n") + 4]
+    )

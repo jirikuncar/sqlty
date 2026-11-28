@@ -6,7 +6,7 @@ import ast
 import warnings
 import weakref
 
-from sqlty._source import ParsedSource
+from sqlty.core import ParsedSource
 
 Outline = tuple[ast.Module, list[ast.ClassDef]]
 
