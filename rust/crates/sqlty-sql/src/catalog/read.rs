@@ -362,10 +362,9 @@ fn read_statement(
                         .map(|column| Commented::Column(name, column)),
                     _ => None,
                 };
-                if let Some(target) = target {
-                    let text = comment.filter(|text| !text.is_empty());
-                    push(OpKind::Comment(target, text.map(String::into_boxed_str)));
-                }
+                let text = comment.filter(|text| !text.is_empty());
+                let text = text.map(String::into_boxed_str);
+                (target.into_iter()).for_each(|target| push(OpKind::Comment(target, text.clone())));
             }
         } else if stmt.creates("index") {
             if let Some(Statement::CreateIndex(index)) =
