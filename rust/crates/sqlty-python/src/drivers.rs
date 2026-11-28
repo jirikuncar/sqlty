@@ -1,6 +1,6 @@
 //! Driver calls that pass a query and its parameters: `cursor.execute(query, params)` on a receiver the file shows is a
 //! psycopg, sqlite3, aiosqlite, asyncpg or rustmy connection or cursor, and the
-//! `sqlty.drivers.psycopg` helpers.
+//! `sqlty.drivers.psycopg` and `sqlty.drivers.rustmy` helpers.
 
 use std::collections::{HashMap, HashSet};
 
@@ -48,7 +48,11 @@ const CURSORS: [(&str, &str); 4] = [
     ("sqlite3.Cursor", "sqlite3"),
     ("aiosqlite.Cursor", "aiosqlite"),
 ];
-const BUNDLED_MODULE: &str = "sqlty.drivers.psycopg.";
+/// The helper modules sqlty bundles, and the driver each runs its queries on.
+const BUNDLED: [(&str, &str); 2] = [
+    ("sqlty.drivers.psycopg.", "psycopg"),
+    ("sqlty.drivers.rustmy.", "rustmy"),
+];
 fn methods(driver: &str) -> &'static [&'static str] {
     match driver {
         "psycopg" | "sqlite3" | "rustmy" => &["execute", "executemany"],
@@ -156,7 +160,9 @@ pub fn find_in<'a>(
 ) -> Vec<DriverCall> {
     let helpers = imported.values().any(|name| {
         let dotted = format!("{name}.");
-        dotted.starts_with(BUNDLED_MODULE) || BUNDLED_MODULE.starts_with(&dotted)
+        BUNDLED
+            .iter()
+            .any(|(module, _)| dotted.starts_with(module) || module.starts_with(&dotted))
     });
     let mut finder = Finder {
         scan,
@@ -196,10 +202,10 @@ impl<'a> Finder<'a, '_> {
         let chain: Vec<Scope> = std::iter::once(0)
             .chain(stack.iter().copied().filter(|&s| !self.scan.is_class(s)))
             .collect();
-        if let Some(bundled) = self.bundled(call) {
+        if let Some((driver, bundled)) = self.bundled(call) {
             for (first, arg) in bundled {
                 let query = self.query_of(first, &chain);
-                self.calls(call, first, arg, "psycopg", query, stack, false);
+                self.calls(call, first, arg, driver, query, stack, false);
             }
             return;
         }
@@ -359,12 +365,19 @@ impl<'a> Finder<'a, '_> {
             .line(offset)
     }
 
-    /// The query and parameters of a call to a `sqlty.drivers.psycopg` helper.
-    fn bundled(&self, call: &'a ExprCall) -> Option<Vec<(&'a Expr, Option<&'a Expr>)>> {
+    /// The driver, query and parameters of a call to a `sqlty.drivers` helper.
+    #[allow(clippy::type_complexity)]
+    fn bundled(
+        &self,
+        call: &'a ExprCall,
+    ) -> Option<(&'static str, Vec<(&'a Expr, Option<&'a Expr>)>)> {
         let name = self.types.qualified(&call.func)?;
-        let scalar = match name.strip_prefix(BUNDLED_MODULE)? {
-            "execute" => false,
-            "scalar" => true,
+        let (helper, driver) = BUNDLED
+            .iter()
+            .find_map(|(module, driver)| Some((name.strip_prefix(module)?, *driver)))?;
+        let scalar = match (helper, driver) {
+            ("execute", _) | ("execute_async", "rustmy") => false,
+            ("scalar", _) | ("scalar_async", "rustmy") => true,
             _ => return None,
         };
         let args = &call.arguments.args;
@@ -373,18 +386,18 @@ impl<'a> Finder<'a, '_> {
             || args.iter().any(|arg| matches!(arg, Expr::Starred(_)))
             || (params.is_none() && call.arguments.keywords.iter().any(|k| k.arg.is_none()))
         {
-            return Some(Vec::new());
+            return Some((driver, Vec::new()));
         }
         let mut rest = &args[2..];
         if scalar && rest.len() == 1 {
             if matches!(rest[0], Expr::Name(_)) && params.is_none() {
-                return Some(Vec::new());
+                return Some((driver, Vec::new()));
             }
             if !matches!(rest[0], Expr::Tuple(_) | Expr::List(_) | Expr::Dict(_)) {
                 rest = &[];
             }
         }
-        Some(vec![(&args[1], rest.last().or(params))])
+        Some((driver, vec![(&args[1], rest.last().or(params))]))
     }
 
     fn of(&mut self, scope: Scope) -> &HashMap<&'a str, Vec<Binding<'a>>> {

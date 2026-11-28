@@ -1,5 +1,5 @@
 ---
-description: "Reference for the sqlty Python API: SQL[T], UNTYPED and t-string templates, the psycopg driver helpers, and the sqlty.core analysis functions."
+description: "Reference for the sqlty Python API: SQL[T], UNTYPED and t-string templates, the psycopg and rustmy driver helpers, and the sqlty.core analysis functions."
 ---
 
 # Python API
@@ -119,6 +119,34 @@ Returns the only column of the first row, typed from `SQL[tuple[T]]` or from
 `form`. `form` accepts any type expression, including unions and `Literal`,
 and is not checked at runtime. Raises `LookupError` when the query returns no
 rows and `ValueError` when the row has more than one column.
+
+## `sqlty.drivers.rustmy`
+
+Requires `sqlty[rustmy]`. See [rustmy](../guide/rustmy.md).
+
+```python
+from sqlty.drivers.rustmy import execute, execute_async, scalar, scalar_async
+```
+
+### `execute(conn, query, params=None)`
+
+```python
+def execute[T](conn: rustmy.Connection, query: SQL[T], params: Params = None) -> Rows[T]: ...
+async def execute_async[T](conn: rustmy.aio.Connection, query: SQL[T], params: Params = None) -> AsyncRows[T]: ...
+```
+
+Runs `query` on a new cursor, a `DictCursor` when `T` is a `TypedDict`, a `dict` or a
+class other than a `tuple` or `Protocol`, and returns its rows as `T`: `fetchone`,
+`fetchmany`, `fetchall` and iteration. `cursor` is the rustmy cursor.
+
+### `scalar(conn, query, [form,] params=None)`
+
+```python
+def scalar[T](conn: rustmy.Connection, query: SQL[tuple[T]], /, params: Params = None) -> T: ...
+def scalar[T](conn: rustmy.Connection, query: LiteralString | SQL[Any], form: TypeForm[T], /, params: Params = None) -> T: ...
+```
+
+As `sqlty.drivers.psycopg.scalar`; `scalar_async` takes a `rustmy.aio.Connection`.
 
 ## `sqlty.core`
 

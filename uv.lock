@@ -968,6 +968,9 @@ dependencies = [
 psycopg = [
     { name = "psycopg" },
 ]
+rustmy = [
+    { name = "rustmy" },
+]
 
 [package.dev-dependencies]
 aiosqlite = [
@@ -1012,9 +1015,10 @@ rustmy = [
 [package.metadata]
 requires-dist = [
     { name = "psycopg", marker = "extra == 'psycopg'", specifier = ">=3.2.12" },
+    { name = "rustmy", marker = "extra == 'rustmy'", specifier = ">=1.5.1" },
     { name = "typing-extensions", marker = "python_full_version < '3.15'", specifier = ">=4.15.0" },
 ]
-provides-extras = ["psycopg"]
+provides-extras = ["psycopg", "rustmy"]
 
 [package.metadata.requires-dev]
 aiosqlite = [{ name = "aiosqlite", specifier = ">=0.22.1" }]

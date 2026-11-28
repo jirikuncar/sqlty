@@ -39,6 +39,7 @@ nav = [
     { "Query parameters" = "guide/parameters.md" },
     { "Formatting queries" = "guide/formatting.md" },
     { "psycopg" = "guide/psycopg.md" },
+    { "rustmy" = "guide/rustmy.md" },
     { "Magic codec" = "guide/magic-codec.md" },
   ] },
   { "Recipes" = [

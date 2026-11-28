@@ -137,3 +137,43 @@ async def main() -> None:
             # error: [param-count-mismatch] "query has 1 parameter, the call passes 0"
             await other.execute("SELECT id FROM users WHERE id = %s")
 ```
+
+## The `sqlty.drivers.rustmy` helpers
+
+`execute`, `scalar` and their `_async` versions are checked like the cursor methods. A
+single value is the parameters of `execute`; the one argument after the query of
+`scalar` is its parameters only when it is a literal of them, as it may be the row type.
+
+```python
+import rustmy
+from rustmy import aio
+from sqlty import SQL
+from sqlty.drivers import rustmy as typed
+from sqlty.drivers.rustmy import execute, execute_async, scalar, scalar_async
+
+BY_ID = SQL[tuple[str]]("-- sql\nSELECT name FROM users WHERE id = %s AND age = %s")
+
+def run(conn: rustmy.Connection, ids: tuple[int, int]) -> None:
+    # error: [param-count-mismatch] "query has 2 parameters, the call passes 1"
+    execute(conn, BY_ID, (1,))
+    # error: [param-count-mismatch] "query has 2 parameters, the call passes 1"
+    execute(conn, BY_ID, params=(1,))
+    # error: [param-count-mismatch] "query has 2 parameters, the call passes 0"
+    typed.execute(conn, BY_ID)
+    # error: [param-count-mismatch] "query has 2 parameters, the call passes 1"
+    execute(conn, BY_ID, 1)
+    execute(conn, "SELECT name FROM users WHERE id = %s", 1)
+    # error: [param-count-mismatch] "query has 2 parameters, the call passes 1"
+    scalar(conn, BY_ID, (1,))
+    # error: [param-count-mismatch] "query has 2 parameters, the call passes 1"
+    scalar(conn, "SELECT name FROM users WHERE id = %s AND age = %s", str, (1,))
+    execute(conn, BY_ID, ids)
+    scalar(conn, BY_ID, ids)
+    scalar(conn, BY_ID.bind((1, 2)))
+
+async def run_async(conn: aio.Connection) -> None:
+    # error: [param-count-mismatch] "query has 2 parameters, the call passes 1"
+    await execute_async(conn, BY_ID, (1,))
+    # error: [param-count-mismatch] "query has 2 parameters, the call passes 0"
+    await scalar_async(conn, BY_ID)
+```

@@ -61,6 +61,7 @@ sqlty = "sqlty.lexer:SQLTyLexer"
 
 [project.optional-dependencies]
 psycopg = ["psycopg>=3.2.12"]
+rustmy = ["rustmy>=1.5.1"]
 
 [build-system]
 requires = ["maturin>=1.15,<2.0"]
@@ -108,7 +109,7 @@ duckdb = ["duckdb>=1.4.0"]
 psycopg = ["psycopg>=3.2.12"]
 # The aiosqlite calls sqlty checks, run against aiosqlite (tests/test_aiosqlite.py).
 aiosqlite = ["aiosqlite>=0.22.1"]
-# The rustmy calls sqlty checks and the values it returns, run with SQLTY_MYSQL_DSN.
+# sqlty.drivers.rustmy, and the rustmy calls sqlty checks, run with SQLTY_MYSQL_DSN.
 rustmy = ["rustmy>=1.5.1"]
 fuzz = [
     "hypothesis>=6.140",
