@@ -29,6 +29,25 @@ pub(super) fn closest<'c>(name: &str, candidates: &[&'c str]) -> Option<&'c str>
     best.filter(|_| !tied).map(|(_, candidate)| candidate)
 }
 
+/// The nearest candidate `name` misspells by at most two typos, ignoring case: a stricter
+/// [`closest`], for names that may be real ones sqlty does not know, such as an extension's
+/// function. `None` on a tie.
+pub(super) fn misspelled<'c>(name: &str, candidates: &[&'c str]) -> Option<&'c str> {
+    let name = name.to_lowercase();
+    let mut best: Option<(usize, &str)> = None;
+    let mut tied = false;
+    for &candidate in candidates {
+        let distance = distance(&name, &candidate.to_lowercase());
+        match best {
+            _ if distance > 2 => {}
+            Some((least, _)) if distance == least => tied = true,
+            Some((least, _)) if distance > least => {}
+            _ => (best, tied) = (Some((distance, candidate)), false),
+        }
+    }
+    best.filter(|_| !tied).map(|(_, candidate)| candidate)
+}
+
 /// The optimal string alignment distance: insertions, deletions, substitutions and swaps of
 /// adjacent characters, the usual typos.
 fn distance(a: &str, b: &str) -> usize {

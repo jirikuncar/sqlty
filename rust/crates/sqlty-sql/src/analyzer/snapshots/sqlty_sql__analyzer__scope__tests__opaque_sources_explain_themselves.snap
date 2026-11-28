@@ -30,10 +30,12 @@ g: int | INT | NonNull
 
 SELECT * FROM ST_Dump(NULL) AS d
 *: ? | ? | Unknown
+[unknown-function] table function `st_dump` is not known to sqlty
 [unsupported-syntax] `*` reads table function st_dump, which sqlty does not read the columns of
 
 SELECT d.path FROM ST_Dump(NULL) AS d
 path: ? | ? | Unknown
+[unknown-function] table function `st_dump` is not known to sqlty
 [unsupported-syntax] column `path` may come from table function st_dump, which sqlty does not read the columns of
 
 SELECT * FROM a, LATERAL (SELECT a.id + 1 AS next) AS l

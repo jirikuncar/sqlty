@@ -561,6 +561,7 @@ b = SQL[tuple[int]]("--sql\nSELECT g.n FROM generate_series(1, 3) AS g(n)")
 c = SQL[tuple[int | None]]("--sql\nSELECT n FROM unnest(ARRAY[1, 2]) AS n")
 # error:
 e = SQL[tuple[str | None]]("--sql\nSELECT k.word FROM pg_get_keywords() AS k")
+# error: [unknown-function] "table function `st_dump` is not known to sqlty"
 # error: [unsupported-syntax] "column `path` may come from table function st_dump, which sqlty does not read the columns of"
 f = SQL[tuple[list[int]]]("--sql\nSELECT d.path FROM ST_Dump('POINT(0 0)') AS d")
 # error: [unsupported-syntax] "column `tgrelid` may come from system catalog pg_trigger, which sqlty does not read the columns of"
@@ -868,6 +869,7 @@ x = SQL[tuple[int, str]]("--sql\nSELECT * FROM a")
 y = SQL[tuple[int, str]]("--sql\nSELECT a.* FROM a, generate_series(1, 3) AS g(x)")
 # error: [unsupported-syntax] "view column `opaque.day` is not typed by the view's query"
 z = SQL[tuple[int, object]]("--sql\nSELECT * FROM opaque")
+# error: [unknown-function] "table function `st_dump` is not known to sqlty"
 # error: [unsupported-syntax] "`*` reads table function st_dump, which sqlty does not read the columns of"
 w = SQL[tuple[int, str, int]]("--sql\nSELECT * FROM a, ST_Dump(a.g) AS k")
 ```

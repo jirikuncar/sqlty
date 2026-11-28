@@ -113,6 +113,23 @@ pub fn signatures(dialect: SqlDialect, name: &str) -> &'static [Signature] {
     &[]
 }
 
+/// The built-in functions of `dialect` that return rows, each once; `None` for a dialect
+/// without a catalog. O(n) in the size of the catalog.
+pub(crate) fn set_returning(dialect: SqlDialect) -> Option<Vec<&'static str>> {
+    let catalogs = catalogs(dialect);
+    if catalogs.is_empty() {
+        return None;
+    }
+    let mut names: Vec<&str> = catalogs
+        .iter()
+        .flat_map(|catalog| catalog.signatures)
+        .filter(|s| s.returns.starts_with("setof ") || s.returns.starts_with("TABLE"))
+        .map(|s| s.name)
+        .collect();
+    names.dedup();
+    Some(names)
+}
+
 /// `lower` against `name` folded to lower case, without allocating.
 fn cmp_folded(lower: &str, name: &str) -> std::cmp::Ordering {
     lower

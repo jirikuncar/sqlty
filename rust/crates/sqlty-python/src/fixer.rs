@@ -18,7 +18,7 @@ use crate::suppress;
 use crate::types::symbols::Source;
 
 /// The rules whose diagnostics carry a fix.
-const FIXABLE: [Rule; 9] = [
+const FIXABLE: [Rule; 10] = [
     Rule::InlineSqlComment,
     Rule::MysqlSqlMarker,
     Rule::StaleRewrite,
@@ -28,6 +28,7 @@ const FIXABLE: [Rule; 9] = [
     Rule::OptionalRow,
     Rule::UntypedQuery,
     Rule::UnknownColumn,
+    Rule::UnknownFunction,
 ];
 
 /// Fixing one problem can reveal another (a `"--sql SELECT"` fixed into a query is then
@@ -64,8 +65,8 @@ pub fn fix_module(
 }
 
 /// `check_source` plus the edits of its diagnostics: fix `inline-sql-comment`,
-/// `mysql-sql-marker`, `stale-rewrite`, `select-star`, `stale-type`, `optional-row`, `untyped-query` and
-/// `unknown-column`,
+/// `mysql-sql-marker`, `stale-rewrite`, `select-star`, `stale-type`, `optional-row`, `untyped-query`,
+/// `unknown-column` and `unknown-function`,
 /// except where a `# sqlty: ignore` comment on the line the rule reports (`suppressed`, by
 /// line of `source`) suppresses that rule. The imports the fixes need are added last, so
 /// the lines of `suppressed` hold for every pass.

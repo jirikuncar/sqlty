@@ -488,10 +488,11 @@ fn test_name_diagnostics_stay_quiet() {
     ] {
         assert!(rules(sql).is_empty(), "{sql}: {:?}", diagnose(sql));
     }
-    // A table function's columns are not read, which is reported, not guessed.
+    // An extension's table function is not known, and its columns are not read: both are
+    // reported, not guessed.
     assert_eq!(
         rules("SELECT path FROM ST_Dump(NULL) AS d"),
-        ["unsupported-syntax"]
+        ["unknown-function", "unsupported-syntax"]
     );
 }
 
