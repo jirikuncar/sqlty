@@ -53,6 +53,14 @@ SELECT tags -> 'a' AS value, tags -> ARRAY['a', 'b'] AS values, tags || extra AS
 -- rules: within: postgres.hstore.contains / postgres.hstore.contains
 ```
 
+`||` joins two hstores; with text it is string concatenation:
+
+```sql
+SELECT tags || 'b=>2'::hstore AS merged, tags || name AS text FROM items
+-- columns: merged: dict[str, str | None] (HSTORE)
+-- columns: text: str (TEXT)
+```
+
 ## Functions
 
 ```sql

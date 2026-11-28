@@ -12,7 +12,7 @@ use sqlparser::tokenizer::Span;
 
 use super::dialect::SqlDialect;
 use super::functions::{arg_list, extract_type, positional_args, Returns};
-use super::inference::{extension_name, function_rules, FunctionType};
+use super::inference::{extension_name, function_rules, Extensions, FunctionType};
 use super::literals::{constant, python_kind, strip, value_set};
 use super::memo::{first_column, Reporting};
 use super::names::{split_access, table_key};
@@ -720,6 +720,7 @@ impl<'a> Analyzer<'a> {
             } else {
                 let extension = function_rules(&self.builtin_name(&func.name))
                     .iter()
+                    .filter(|rule| rule.available(self.dialect, Extensions(u32::MAX)))
                     .find_map(|rule| extension_name(rule.extension));
                 let hint = extension.map_or(String::new(), |name| {
                     format!("; it comes with `CREATE EXTENSION {name}`, which the schema lacks")

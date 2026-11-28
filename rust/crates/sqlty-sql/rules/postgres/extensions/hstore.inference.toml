@@ -9,7 +9,7 @@ left = ["HSTORE"]
 right = ["ARRAY"]
 type = "ARRAY<TEXT>"
 reference.postgres = "PostgreSQL 17 documentation, F.17.2 hstore Operators and Functions, hstore Operators (hstore -> text[] → text[])"
-reasoning = "Looking up an array of keys gives an array of their values, a NULL element for a missing key."
+reasoning = "Looking up an array of keys gives a `text[]` of their values."
 
 [[rule]]
 id = "postgres.hstore.arrow"
@@ -27,9 +27,10 @@ id = "postgres.hstore.concat"
 operator = "StringConcat"
 dialects = ["postgres"]
 left = ["HSTORE"]
+right = ["HSTORE"]
 type = "HSTORE"
+left-parameter = "HSTORE"
 right-parameter = "HSTORE"
-shadows = ["postgres.concat.jsonb-right-operand", "postgres.concat.array-right"]
 reference.postgres = "PostgreSQL 17 documentation, F.17.2 hstore Operators and Functions, hstore Operators (hstore || hstore → hstore)"
 reasoning = "Concatenating two hstores gives an hstore."
 
@@ -80,7 +81,7 @@ extension = "hstore"
 type = "ARRAY<TEXT>"
 nullability = "strict"
 reference.postgres = "PostgreSQL 17 documentation, F.17.2 hstore Operators and Functions, hstore Functions (akeys, avals, hstore_to_array → text[])"
-reasoning = "Each returns the keys, values or pairs as a `text[]`, NULL only for a NULL argument."
+reasoning = "Each returns keys, values or pairs as a `text[]`, NULL only for a NULL argument."
 
 [[function]]
 id = "postgres.hstore.matrix"

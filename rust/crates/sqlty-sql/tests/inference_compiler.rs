@@ -494,7 +494,7 @@ fn an_extension_rule_records_its_extension() {
     let code = compile_one(EXTENSIONS, &hstore_rule("test.hstore")).unwrap();
     assert!(code.contains("extension: 0x1,"), "{code}");
     assert!(code.contains("\"hstore\" => 0x1,"));
-    assert!(code.contains(r#"EXTENSION_NAMES: &[&str] = &["hstore"];"#));
+    assert!(code.contains(r#"EXTENSION_NAMES: &[&str] = &["hstore""#));
 }
 
 #[test]

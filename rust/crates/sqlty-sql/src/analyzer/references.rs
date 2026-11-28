@@ -124,7 +124,10 @@ impl Visitor for References<'_, '_> {
             let analyzer = self.analyzer;
             let unknown = !function_rules(&analyzer.builtin_name(&function.name))
                 .iter()
-                .any(|rule| rule.available(analyzer.dialect, analyzer.schema.extensions()))
+                .any(|rule| {
+                    rule.extension == 0
+                        || rule.available(analyzer.dialect, analyzer.schema.extensions())
+                })
                 && !analyzer.schema.is_empty()
                 && !analyzer
                     .schema
