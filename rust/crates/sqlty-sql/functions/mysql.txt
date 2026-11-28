@@ -5,8 +5,8 @@ abs(X)	mathematical-functions.html
 acos(X)	mathematical-functions.html
 adddate(date, days)	date-and-time-functions.html
 addtime(expr1, expr2)	date-and-time-functions.html
-aes_decrypt(crypt_str, key_str[, init_vector][, kdf_name][, salt])	encryption-functions.html
-aes_encrypt(str, key_str[, init_vector][, kdf_name][, salt])	encryption-functions.html
+aes_decrypt(crypt_str, key_str[, init_vector][, kdf_name][, salt][, info])	encryption-functions.html
+aes_encrypt(str, key_str[, init_vector][, kdf_name][, salt][, info])	encryption-functions.html
 any_value(arg)	miscellaneous-functions.html
 ascii(str)	string-functions.html
 asin(X)	mathematical-functions.html
