@@ -117,7 +117,7 @@
           "type": "boolean",
           "default": true,
           "scope": "resource",
-          "markdownDescription": "Complete table and column names in the query strings `sqlty check` checks. Needs sqlty 0.4.0 or newer; off, the server does no completion work."
+          "markdownDescription": "Complete table, column and function names in the query strings `sqlty check` checks. Needs sqlty 0.4.0 or newer; off, the server does no completion work."
         },
         "sqlty.trace.server": {
           "type": "string",

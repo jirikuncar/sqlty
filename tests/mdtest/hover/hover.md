@@ -150,6 +150,80 @@ fetch_all("SELECT id, em<CURSOR>ail FROM users", tuple[int, str | None])
 # hover: Result column `email`: `str | None` (`TEXT`)
 ```
 
+## Function
+
+A function name before `(` shows the overloads of the built-in that take as many
+arguments as the call passes, and the documentation of the first; anywhere in the query,
+nested too.
+
+```python
+q = "--sql\nSELECT name FROM users WHERE upper(co<CURSOR>alesce(email, '')) = 'A'"
+# hover: ```sql
+# hover: coalesce(value: anyelement, ...) -> anyelement
+# hover: ```
+# hover:
+# hover: [Documentation](https://www.postgresql.org/docs/17/functions-conditional.html#FUNCTIONS-COALESCE-NVL-IFNULL)
+```
+
+```python
+q = "--sql\nSELECT name FROM users WHERE lt<CURSOR>rim(name, 'x') = ''"
+# hover: ```sql
+# hover: ltrim(string: text[, characters: text]) -> text
+# hover: ltrim(bytes: bytea, bytesremoved: bytea) -> bytea
+# hover: ```
+# hover:
+# hover: [Documentation](https://www.postgresql.org/docs/17/functions-string.html#FUNCTIONS-STRING-SQL)
+```
+
+A whole select item shows its result column, with the function below it.
+
+```python
+q = "--sql\nSELECT LEN<CURSOR>GTH(name) AS n FROM users"
+# hover: Result column `n`: `int` (`INT`)
+# hover:
+# hover: Typed by `common.string.int`: The documentation gives each of these an `integer` result.
+# hover:
+# hover: PostgreSQL 17 documentation, 9.4 String Functions and Operators, Table 9.9 SQL String Functions and Operators, Table 9.10 Other String Functions and Operators; 9.5 Binary String Functions and Operators, Table 9.11 SQL Binary String Functions and Operators, Table 9.12 Other Binary String Functions; 9.6 Bit String Functions and Operators, Table 9.15 Bit String Functions; 9.13 Text Search Functions and Operators, Table 9.43 Text Search Functions
+# hover:
+# hover: ---
+# hover:
+# hover: ```sql
+# hover: length(text) -> integer
+# hover: length(bytea) -> integer
+# hover: length(bit) -> integer
+# hover: length(geometric_type) -> double precision
+# hover: length(tsvector) -> integer
+# hover: ```
+# hover:
+# hover: [Documentation](https://www.postgresql.org/docs/17/functions-string.html#FUNCTIONS-STRING-OTHER)
+```
+
+A function the schema defines says so.
+
+`schema.sql`:
+
+```sql
+CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, email TEXT);
+CREATE FUNCTION normalize_email(email TEXT) RETURNS TEXT LANGUAGE sql AS $$ SELECT lower(email) $$;
+```
+
+```python
+q = "--sql\nSELECT id FROM users WHERE normalize_<CURSOR>email(email) = ''"
+# hover: Function `normalize_email` the schema defines
+```
+
+Its name folds as the dialect folds it.
+
+```python
+q = "--sql\nSELECT id FROM users WHERE NORMALIZE_<CURSOR>EMAIL(email) = ''"
+# hover: Function `normalize_email` the schema defines
+```
+
+```python
+q = '--sql\nSELECT id FROM users WHERE "normalize_<CURSOR>email"(email) = 1'
+# hover: Function `normalize_email` the schema defines
+```
+
 ## Nothing to show
 
 A keyword, a name the schema does not define, and a string `sqlty check` does not read

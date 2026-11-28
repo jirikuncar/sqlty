@@ -580,6 +580,7 @@ fn candidate_kind(kind: CandidateKind) -> &'static str {
         CandidateKind::Cte => "cte",
         CandidateKind::Column => "column",
         CandidateKind::Join => "join",
+        CandidateKind::Function => "function",
     }
 }
 

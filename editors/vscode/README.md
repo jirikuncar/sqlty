@@ -2,7 +2,7 @@
 
 Type-check the SQL in your Python code as you type: the diagnostics of `sqlty check`, each
 on the span it is about, with a quick fix where `sqlty check --fix` has one, completion
-of table and column names in the query strings it checks, and SQL highlighting in strings
+of table, column and function names in the query strings it checks, and SQL highlighting in strings
 marked `--sql`. The `.sql` files of named queries that the
 [`queries`](https://sqlty.kuncar.dev/guide/sql-files/) key names get their diagnostics too.
 
@@ -34,7 +34,7 @@ colors each string.
 | `sqlty.interpreter` | `[]` | The interpreter whose `sqlty` runs; empty is the one selected in the Python extension |
 | `sqlty.breaking.against` | empty | A baseline for `sqlty breaking`: a git revision, a `--save` snapshot or schema files |
 | `sqlty.breaking.direction` | `both` | `both`, `forward` or `backward`, as `sqlty breaking --direction` |
-| `sqlty.completion.enable` | `true` | Complete table and column names in query strings; needs sqlty 0.4.0 or newer |
+| `sqlty.completion.enable` | `true` | Complete table, column and function names in query strings; needs sqlty 0.4.0 or newer |
 | `sqlty.trace.server` | `off` | Log the protocol messages in the output channel |
 
 `sqlty` is looked up in `sqlty.path`, then in the interpreter's environment, then on `PATH`.

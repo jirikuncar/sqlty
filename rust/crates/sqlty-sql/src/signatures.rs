@@ -113,6 +113,28 @@ pub fn signatures(dialect: SqlDialect, name: &str) -> &'static [Signature] {
     &[]
 }
 
+/// The built-in functions of `dialect` whose name starts with `prefix`, case-insensitively,
+/// by name, each as its overloads. O(log n) in the size of the catalog, then O(1) per overload.
+pub fn with_prefix(
+    dialect: SqlDialect,
+    prefix: &str,
+) -> impl Iterator<Item = &'static [Signature]> + '_ {
+    catalogs(dialect).iter().flat_map(move |catalog| {
+        let all = catalog.signatures;
+        let mut rest = &all[all.partition_point(|s| cmp_folded(s.name, prefix).is_lt())..];
+        std::iter::from_fn(move || {
+            let first = rest.first().filter(|s| {
+                s.name
+                    .get(..prefix.len())
+                    .is_some_and(|head| cmp_folded(head, prefix).is_eq())
+            })?;
+            let (found, tail) = rest.split_at(rest.partition_point(|s| s.name == first.name));
+            rest = tail;
+            Some(found)
+        })
+    })
+}
+
 /// `lower` against `name` folded to lower case, without allocating.
 fn cmp_folded(lower: &str, name: &str) -> std::cmp::Ordering {
     lower

@@ -154,7 +154,7 @@ fn named(argument: &[Tok]) -> Option<&str> {
 }
 
 /// The name a word spells: a quoted one only in lower case, as the catalog lists it.
-fn unquoted(word: &str) -> Option<&str> {
+pub(super) fn unquoted(word: &str) -> Option<&str> {
     match word.strip_prefix(['"', '`']) {
         Some(rest) => {
             let name = rest.trim_end_matches(['"', '`']);

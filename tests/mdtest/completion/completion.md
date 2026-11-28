@@ -1,6 +1,6 @@
 # Completion
 
-`core.complete_source` lists the table and column names that can be typed at a cursor in
+`core.complete_source` lists the table, column and function names that can be typed at a cursor in
 a query string. A string gets completion exactly when `sqlty check` checks it. The
 `<CURSOR>` marks where the cursor is; `# completions:` lists `label kind detail`.
 
@@ -173,6 +173,16 @@ q = "--sql\nSELECT id FROM users u JOIN orders o ON <CURSOR>"
 ```python
 q = "--sql\nSELECT id FROM users u JOIN orders o ON u.id = o.user_id WHERE to<CURSOR>"
 # completions: total column o
+# completions: to_ascii function to_ascii(string: text) -> text (+2 more)
+# completions: to_bin function to_bin(integer) -> text (+1 more)
+# completions: to_char function to_char(timestamp, text) -> text (+3 more)
+# completions: to_date function to_date(text, text) -> date
+# completions: to_hex function to_hex(integer) -> text (+1 more)
+# completions: to_json function to_json(anyelement) -> json
+# completions: to_jsonb function to_jsonb(anyelement) -> jsonb
+# completions: to_number function to_number(text, text) -> numeric
+# completions: to_oct function to_oct(integer) -> text (+1 more)
+# completions: ...
 ```
 
 ## Same column in several tables
@@ -206,6 +216,41 @@ SELECT r.<CURSOR> FROM recent r
 """
 # completions: amount column r
 # completions: id column r
+```
+
+## Functions
+
+A typed word in an expression also completes to functions, after the columns: those the
+schema defines (with their schema), then the dialect's built-ins (with their first
+overload). Editors insert `name(`.
+
+`schema.sql`:
+
+```sql
+CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, email TEXT);
+CREATE FUNCTION normalize_email(email TEXT) RETURNS TEXT LANGUAGE sql AS $$ SELECT lower(email) $$;
+```
+
+```python
+q = "--sql\nSELECT coal<CURSOR> FROM users"
+# completions: coalesce function coalesce(value: anyelement, ...) -> anyelement
+```
+
+```python
+q = "--sql\nSELECT id FROM users WHERE NOR<CURSOR>"
+# completions: normalize_email function public
+```
+
+```python
+q = "--sql\nSELECT id FROM users ORDER BY na<CURSOR>"
+# completions: name column users
+```
+
+Nothing typed, or a qualified name, offers no function.
+
+```python
+q = "--sql\nSELECT u.low<CURSOR> FROM users u"
+# completions: None
 ```
 
 ## Does not complete

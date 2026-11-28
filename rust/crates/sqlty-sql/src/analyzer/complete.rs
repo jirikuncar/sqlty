@@ -10,6 +10,8 @@
 //! token scan of its `FROM` and `JOIN` items stands in. After `JOIN`, the tables a foreign
 //! key links to one already in scope come first, with their `ON` clause. An unqualified
 //! column with nothing typed is offered as `alias.column` when several relations are in scope.
+//! A typed word in an expression also completes to the functions the schema defines and the
+//! dialect's built-ins (see [`crate::signatures`]), after the columns.
 //!
 //! ```
 //! use sqlty_sql::analyzer::{complete, load_schema_with_skipped, CandidateKind};
@@ -50,6 +52,8 @@ pub enum CandidateKind {
     Column,
     /// A table a foreign key links to one in scope, with the `ON` clause that joins them.
     Join,
+    /// A function: one the schema defines, or a built-in of the dialect.
+    Function,
 }
 
 /// One completion.
@@ -59,7 +63,8 @@ pub struct Candidate {
     pub label: String,
     /// What it is.
     pub kind: CandidateKind,
-    /// A relation's schema, or the alias or table a column belongs to.
+    /// A relation's or a function's schema, the alias or table a column belongs to, or a
+    /// built-in function's first overload.
     pub detail: Option<String>,
     /// A column's SQL type, when known.
     pub sql_type: Option<String>,
@@ -104,8 +109,10 @@ pub struct Completions {
 /// Costs O(length of the query) to read the context, then O(log N + k) for relations,
 /// or the widths of the relations in scope for columns: never a function of how many
 /// tables the schema has; after `JOIN`, also O(K + log F + k) per table in scope for the
-/// tables its K foreign keys and the F of the schema link to it. Nothing completes in a string, a comment, after a name that
-/// already ends an expression, or without a context this module knows.
+/// tables its K foreign keys and the F of the schema link to it. After the columns, the
+/// functions whose name starts with a typed word, O(log n + k) in each function catalog.
+/// Nothing completes in a string, a comment, after a name that already ends an expression,
+/// or without a context this module knows.
 pub fn complete(
     query: &str,
     cursor: usize,
@@ -192,6 +199,9 @@ pub fn complete(
                     }
                 }
             }
+            if qualifier.is_none() && !typed.is_empty() {
+                found.extend(functions(typed, schema, dialect, limit + 1));
+            }
             found
         }
     };
@@ -202,10 +212,15 @@ pub fn complete(
             Some("pg_catalog" | "information_schema")
         ) && c.kind != CandidateKind::Column
     };
+    // A built-in function's detail is its first overload, `name(...)`.
+    let signature = |c: &Candidate| {
+        c.kind == CandidateKind::Function && c.detail.as_deref().is_some_and(|d| d.contains('('))
+    };
     candidates.sort_by_cached_key(|c| {
         (
             c.kind != CandidateKind::Join,
-            builtin(c),
+            c.kind == CandidateKind::Function,
+            builtin(c) || signature(c),
             c.label.to_lowercase(),
             c.detail.clone(),
             c.label.clone(),
@@ -220,6 +235,39 @@ pub fn complete(
         replace: prefix,
         incomplete,
     }
+}
+
+/// The functions whose name starts with `typed`, at most `limit` of each: the schema's, then
+/// the dialect's built-ins. O(log n + k) in each catalog.
+fn functions<'a>(
+    typed: &'a str,
+    schema: &'a SchemaData,
+    dialect: SqlDialect,
+    limit: usize,
+) -> impl Iterator<Item = Candidate> + 'a {
+    let defined = schema
+        .functions_with_prefix(typed, None, limit)
+        .into_iter()
+        .map(move |function| Candidate {
+            label: spelled(function.name, dialect),
+            kind: CandidateKind::Function,
+            detail: function.schema.map(str::to_string),
+            sql_type: None,
+            nullable: None,
+        });
+    let builtin = crate::signatures::with_prefix(dialect, typed)
+        .take(limit)
+        .map(|overloads| Candidate {
+            label: overloads[0].name.to_string(),
+            kind: CandidateKind::Function,
+            detail: Some(match overloads.len() {
+                1 => overloads[0].label.to_string(),
+                n => format!("{} (+{} more)", overloads[0].label, n - 1),
+            }),
+            sql_type: None,
+            nullable: None,
+        });
+    defined.chain(builtin)
 }
 
 /// What the cursor stands for; the qualifier is the schema of a relation, the alias or
@@ -614,7 +662,7 @@ mod tests {
         CREATE VIEW user_names AS SELECT id, name FROM users;
         CREATE TABLE legacy (LIKE missing);";
 
-    /// The labels completing at the `|` of `sql`, as `label:detail`.
+    /// The labels completing at the `|` of `sql`, as `label:detail`, functions left out.
     fn labels(sql: &str, catalog: &Catalog, dialect: &str) -> Vec<String> {
         let cursor = sql.find('|').expect("a cursor");
         let sql = sql.replacen('|', "", 1);
@@ -626,6 +674,7 @@ mod tests {
         found
             .candidates
             .iter()
+            .filter(|c| c.kind != CandidateKind::Function)
             .map(|c| format!("{}:{}", c.label, c.detail.as_deref().unwrap_or("")))
             .collect()
     }
