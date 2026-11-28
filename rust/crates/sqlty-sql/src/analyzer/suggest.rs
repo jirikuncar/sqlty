@@ -29,6 +29,13 @@ pub(super) fn closest<'c>(name: &str, candidates: &[&'c str]) -> Option<&'c str>
     best.filter(|_| !tied).map(|(_, candidate)| candidate)
 }
 
+/// Whether `candidate` is `name` with a few typos: within the edit distance [`closest`]
+/// allows, ignoring case.
+pub(super) fn is_typo(name: &str, candidate: &str) -> bool {
+    let (name, candidate) = (name.to_lowercase(), candidate.to_lowercase());
+    3 * distance(&name, &candidate) <= name.chars().count().max(candidate.chars().count())
+}
+
 /// The optimal string alignment distance: insertions, deletions, substitutions and swaps of
 /// adjacent characters, the usual typos.
 fn distance(a: &str, b: &str) -> usize {

@@ -8,7 +8,7 @@ import functools
 import types
 import typing
 
-from sqlty._source import ParsedSource
+from sqlty.core import ParsedSource
 
 if typing.TYPE_CHECKING:
     from tests.type_oracle.resolver import Resolver

@@ -114,9 +114,7 @@ MODULES = {
 
 @pytest.mark.parametrize("jobs", [1, 3])
 def test_check_modules_reports_what_check_source_does(jobs: int) -> None:
-    from sqlty._helpers import HelperIndex
-    from sqlty._source import ParsedSource
-    from sqlty.core import RowUsage
+    from sqlty.core import HelperIndex, ParsedSource, RowUsage
 
     index = HelperIndex()
     parsed = {name: ParsedSource(text, name) for name, text in MODULES.items()}
