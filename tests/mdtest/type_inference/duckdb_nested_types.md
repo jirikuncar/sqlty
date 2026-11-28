@@ -28,6 +28,14 @@ SELECT CAST(x AS MAP(VARCHAR, INT)) AS m, CAST(x AS INTEGER[]) AS l, CAST(x AS I
 -- columns: fixed: tuple[int, ...] (ARRAY<INT>[3])
 ```
 
+An index of a list is an element, a slice the list.
+
+```sql
+SELECT (CAST(x AS INTEGER[]))[1] AS e, (CAST(x AS INTEGER[]))[1:2] AS s
+-- columns: e: int | None (INT)
+-- columns: s: list[int] (ARRAY<INT>)
+```
+
 ## UNION
 
 ```sql

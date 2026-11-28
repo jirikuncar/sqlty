@@ -67,6 +67,13 @@ SELECT (home).street, (users.home).zip FROM users
 -- columns: zip: int | None (INT)
 ```
 
+A field after a subscript ends the run of subscripts.
+
+```sql
+SELECT (ARRAY[home])[1].zip FROM users
+-- columns: zip: int | None (INT)
+```
+
 ## ARRAY literals resolve a common element type
 
 As for `UNION`, PostgreSQL resolves `ARRAY[1.5, 2]` to `numeric[]`; elements of
