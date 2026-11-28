@@ -29,6 +29,11 @@ impl<'a> Lookup<'a> {
         self.catalog
     }
 
+    /// The Python type the project sets for values of `sql_type`.
+    pub(crate) fn type_override(&self, sql_type: &str) -> Option<&'a str> {
+        self.catalog.overrides.for_type(sql_type)
+    }
+
     fn find(&self, name: &str) -> Option<&'a Relation> {
         if let Some(&found) = self.found.borrow().get(name) {
             return found;

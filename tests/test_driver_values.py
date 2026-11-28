@@ -4,7 +4,8 @@
 Each is stored in a one-column table, read back through the dialect's usual driver, and
 checked against the Python type sqlty infers for ``SELECT c FROM t``; a NULL read back
 must come from a column sqlty says can be NULL. SQLite runs in every test run; PostgreSQL
-with ``SQLTY_PG_DSN`` (the pg-fidelity job), MySQL with ``SQLTY_MYSQL_DSN``
+with ``SQLTY_PG_DSN`` (the pg-fidelity job), read through psycopg and through asyncpg with
+``driver = "asyncpg"``'s types, MySQL with ``SQLTY_MYSQL_DSN``
 (``mysql://user:password@host:port/database`` or ``unix_socket=...``, read by PyMySQL).
 
 A column sqlty leaves untyped is not checked; ``KNOWN_GAPS`` lists understood mismatches.
@@ -12,17 +13,19 @@ A column sqlty leaves untyped is not checked; ``KNOWN_GAPS`` lists understood mi
 
 from __future__ import annotations
 
+import asyncio
 import os
 import sqlite3
 import tomllib
 from collections.abc import Callable, Iterator
 from contextlib import closing
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
+import asyncpg
 import pytest
 
-from sqlty import core
+from sqlty import SQL, _core, core
 from tests._value_types import matches
 
 CASES: dict[str, dict[str, str]] = tomllib.loads(
@@ -37,9 +40,13 @@ KNOWN_GAPS: dict[str, str] = {
 Fetch = Callable[[str, str], list[Any]]
 
 
-def _check(dialect: str, sql_type: str, value_sql: str, fetch: Fetch) -> None:
+def _check(
+    dialect: str, sql_type: str, value_sql: str, fetch: Fetch, driver: str | None = None
+) -> None:
     schema = f"CREATE TABLE t (c {sql_type});"
-    [column] = core.analyze_select("SELECT c FROM t", dialect=dialect, schema_sql=schema) or [None]
+    types = dict(_core.driver_types(driver, dialect)) if driver else None
+    loaded = core.load_schema(schema, dialect=dialect, types=types)
+    [column] = core.analyze_select("SELECT c FROM t", dialect=dialect, schema_sql=loaded) or [None]
     assert column is not None
     values = fetch(schema, value_sql)
     python_type = column.python_type
@@ -52,9 +59,10 @@ def _check(dialect: str, sql_type: str, value_sql: str, fetch: Fetch) -> None:
             if not matches(value, python_type)
         ]
     )
-    if f"{dialect}: {sql_type}" in KNOWN_GAPS:
-        assert problems, f"{dialect}: {sql_type} matches now: remove it from KNOWN_GAPS"
-        pytest.xfail(KNOWN_GAPS[f"{dialect}: {sql_type}"])
+    gap = f"{driver or dialect}: {sql_type}"
+    if gap in KNOWN_GAPS:
+        assert problems, f"{gap} matches now: remove it from KNOWN_GAPS"
+        pytest.xfail(KNOWN_GAPS[gap])
     assert not problems, f"{dialect} {sql_type}: " + "; ".join(problems)
     assert python_type is None or python_type.endswith("| None") or python_type == "typing.Any"
 
@@ -91,6 +99,64 @@ def test_psycopg(pg: Any, sql_type: str, value_sql: str) -> None:
         return [row[0] for row in pg.execute("SELECT c FROM t", prepare=False).fetchall()]
 
     _check("postgres", sql_type, value_sql, fetch)
+
+
+@pytest.mark.pg
+@pytest.mark.parametrize(("sql_type", "value_sql"), CASES["postgres"].items())
+def test_asyncpg(pg: Any, sql_type: str, value_sql: str) -> None:
+    info = pg.info
+    server = {"host": info.host, "port": info.port, "user": info.user, "database": info.dbname}
+
+    async def read(schema: str, value: str) -> list[Any]:
+        conn = await asyncpg.connect(**server, password=info.password)
+        try:
+            await conn.execute(schema.replace("CREATE TABLE", "CREATE TEMP TABLE"))
+            await conn.execute(f"INSERT INTO t VALUES ({value}), (NULL)")
+            return [row[0] for row in await conn.fetch("SELECT c FROM t")]
+        finally:
+            await conn.close()
+
+    _check(
+        "postgres",
+        sql_type,
+        value_sql,
+        lambda schema, value: asyncio.run(read(schema, value)),
+        "asyncpg",
+    )
+
+
+@pytest.mark.pg
+def test_asyncpg_helpers_build_records(pg: Any) -> None:
+    from sqlty.drivers import asyncpg as helpers
+
+    class Row(NamedTuple):
+        id: int
+        name: str
+
+    info = pg.info
+    query = SQL[Row](
+        "--sql\nSELECT n::INTEGER AS id, 'u' || n AS name FROM generate_series(1, $1::INTEGER) n"
+    )
+
+    async def run() -> tuple[Any, ...]:
+        conn = await asyncpg.connect(
+            host=info.host,
+            port=info.port,
+            user=info.user,
+            database=info.dbname,
+            password=info.password,
+        )
+        try:
+            return (
+                await helpers.fetch(conn, query, 2),
+                await helpers.fetchrow(conn, query.bind((1,))),
+                await helpers.fetchval(conn, SQL[tuple[int]]("--sql\nSELECT $1::INTEGER + 1"), 1),
+                await helpers.execute(conn, SQL("--sql\nSELECT 1")),
+            )
+        finally:
+            await conn.close()
+
+    assert asyncio.run(run()) == ([Row(1, "u1"), Row(2, "u2")], Row(1, "u1"), 2, "SELECT 1")
 
 
 @pytest.fixture(scope="module")

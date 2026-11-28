@@ -114,6 +114,10 @@ CASES = {
         "from sqlty.drivers.psycopg import execute\nexecute(conn, 'SELECT 1')\n",
         [],
     ),
+    "asyncpg driver helper of the same name": (
+        "from sqlty.drivers.asyncpg import execute\nexecute(conn, 'SELECT 1')\n",
+        [],
+    ),
     "methods": (
         "from pkg.db import Db\n"
         "Db.run('SELECT 1')\nDb.make('SELECT 2')\nDb.fetch('SELECT 3')\n"

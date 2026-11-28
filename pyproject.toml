@@ -108,6 +108,8 @@ duckdb = ["duckdb>=1.4.0"]
 psycopg = ["psycopg>=3.2.12"]
 # The aiosqlite calls sqlty checks, run against aiosqlite (tests/test_aiosqlite.py).
 aiosqlite = ["aiosqlite>=0.22.1"]
+# The asyncpg values its driver types are checked against (tests/test_driver_values.py).
+asyncpg = ["asyncpg>=0.30.0"]
 fuzz = [
     "hypothesis>=6.140",
 ]
@@ -160,6 +162,10 @@ warn_no_return = true
 
 [[tool.mypy.overrides]]
 module = "psycopg.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "asyncpg.*"
 ignore_missing_imports = true
 
 [tool.ty.environment]

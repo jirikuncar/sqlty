@@ -535,6 +535,37 @@ impl<'a> Analyzer<'a> {
     /// One column per result column; a star may yield several, or one unknown `*`
     /// column when the schema cannot resolve it. `from` is the SELECT's FROM clause, and
     /// `keyword` where its `SELECT` is (`None` for `RETURNING`).
+    /// The Python type the project sets for an expression's SQL type, as a converter reads
+    /// it (`payload->'a'` of a `JSONB` the driver loads as `str`). A column reference keeps the
+    /// type its table gives it, a `table.column` type included. An array takes the `ARRAY` type,
+    /// or is a list of its elements' set type.
+    fn converted(&self, expr: &Expr, sql_type: Option<&str>) -> Option<String> {
+        let mut column = expr;
+        while let Expr::Nested(inner) = column {
+            column = inner;
+        }
+        if matches!(column, Expr::Identifier(_) | Expr::CompoundIdentifier(_)) {
+            return None;
+        }
+        self.converted_type(sql_type?)
+    }
+
+    fn converted_type(&self, sql_type: &str) -> Option<String> {
+        let Some(element) = sql_type
+            .strip_prefix("ARRAY<")
+            .and_then(|rest| rest.strip_suffix('>'))
+        else {
+            return self.schema.type_override(sql_type).map(str::to_string);
+        };
+        match self.schema.type_override("ARRAY") {
+            Some(converted) if converted != "list" => Some(converted.to_string()),
+            None if self.dialect == SqlDialect::Sqlite => None,
+            _ => self
+                .converted_type(element)
+                .map(|python| format!("list[{python}]")),
+        }
+    }
+
     pub(super) fn projection(
         &self,
         items: &[SelectItem],
@@ -667,8 +698,13 @@ impl<'a> Analyzer<'a> {
             }
             let sql_type = typed.sql.clone();
             let known = typed.is_known();
-            let values = typed.values.clone();
-            let (python_type, _) = typed.into_strings();
+            let mut values = typed.values.clone();
+            let (mut python_type, _) = typed.into_strings();
+            let converted = self.converted(expr, sql_type.as_deref());
+            if converted.is_some() {
+                python_type = converted.clone();
+                values = None;
+            }
             if !known && self.diag.enabled() && self.diag.explained() == explained && !is_wild(expr)
             {
                 self.diag.record(
@@ -698,7 +734,10 @@ impl<'a> Analyzer<'a> {
             {
                 nullability = Nullability::Nullable;
             }
-            let json = self.column_json(expr, sql_type.as_deref(), scope)?;
+            let json = match converted {
+                Some(_) => None,
+                None => self.column_json(expr, sql_type.as_deref(), scope)?,
+            };
             columns.push(Column {
                 name,
                 python_type,

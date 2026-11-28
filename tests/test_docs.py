@@ -220,7 +220,9 @@ def test_python_api_table_lists_every_core_function() -> None:
     assert public <= set(sqlty.core.__all__)
 
 
-@pytest.mark.parametrize("name", ["sqlty", "sqlty.drivers.psycopg", *MODULES, *ORACLE])
+@pytest.mark.parametrize(
+    "name", ["sqlty", "sqlty.drivers.psycopg", "sqlty.drivers.asyncpg", *MODULES, *ORACLE]
+)
 def test_module_doctests(name: str, monkeypatch: pytest.MonkeyPatch) -> None:
     """``>>>`` examples in docstrings match what the code returns."""
     monkeypatch.chdir(ROOT)

@@ -1,6 +1,6 @@
 //! Driver calls that pass a query and its parameters: `cursor.execute(query, params)` on a receiver the file shows is a
 //! psycopg, sqlite3, aiosqlite or asyncpg connection or cursor, and the
-//! `sqlty.drivers.psycopg` helpers.
+//! `sqlty.drivers.psycopg` and `sqlty.drivers.asyncpg` helpers.
 
 use std::collections::{HashMap, HashSet};
 
@@ -37,6 +37,7 @@ const CURSORS: [(&str, &str); 4] = [
     ("aiosqlite.Cursor", "aiosqlite"),
 ];
 const BUNDLED_MODULE: &str = "sqlty.drivers.psycopg.";
+const BUNDLED_ASYNCPG: &str = "sqlty.drivers.asyncpg.";
 fn methods(driver: &str) -> &'static [&'static str] {
     match driver {
         "psycopg" | "sqlite3" => &["execute", "executemany"],
@@ -126,7 +127,9 @@ pub fn find_in<'a>(
 ) -> Vec<DriverCall> {
     let helpers = imported.values().any(|name| {
         let dotted = format!("{name}.");
-        dotted.starts_with(BUNDLED_MODULE) || BUNDLED_MODULE.starts_with(&dotted)
+        [BUNDLED_MODULE, BUNDLED_ASYNCPG]
+            .iter()
+            .any(|module| dotted.starts_with(module) || module.starts_with(&dotted))
     });
     let mut finder = Finder {
         scan,
@@ -170,6 +173,20 @@ impl<'a> Finder<'a, '_> {
             for (first, arg) in bundled {
                 let query = self.query_of(first, &chain);
                 self.calls(call, first, arg, "psycopg", query, stack, false);
+            }
+            return;
+        }
+        if let Some((first, items)) = self.bundled_asyncpg(call) {
+            if let Some(query) = self.query_of(first, &chain) {
+                let params = items
+                    .iter()
+                    .enumerate()
+                    .map(|(i, item)| Param {
+                        key: Key::Index(i + 1),
+                        kind: self.types.arg_type(item, stack),
+                    })
+                    .collect();
+                self.push(call, first, query, Some(params), "asyncpg", None);
             }
             return;
         }
@@ -344,6 +361,18 @@ impl<'a> Finder<'a, '_> {
             }
         }
         Some(vec![(&args[1], rest.last().or(params))])
+    }
+
+    /// The query and arguments of a call to a `sqlty.drivers.asyncpg` helper, which passes
+    /// them as asyncpg does: `fetch(conn, query, *args)`. A starred argument hides them.
+    fn bundled_asyncpg(&self, call: &'a ExprCall) -> Option<(&'a Expr, &'a [Expr])> {
+        let name = self.types.qualified(&call.func)?;
+        let method = name.strip_prefix(BUNDLED_ASYNCPG)?;
+        let args = &call.arguments.args;
+        (matches!(method, "execute" | "fetch" | "fetchrow" | "fetchval")
+            && args.len() >= 2
+            && !args.iter().any(|arg| matches!(arg, Expr::Starred(_))))
+        .then(|| (&args[1], &args[2..]))
     }
 
     fn of(&mut self, scope: Scope) -> &HashMap<&'a str, Vec<Binding<'a>>> {

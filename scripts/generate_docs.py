@@ -62,10 +62,10 @@ KEY_DOCS: dict[str, KeyDoc] = {
         "SQL dialect of queries and schema",
     ),
     "driver": KeyDoc(
-        '`"psycopg"`',
+        '`"psycopg"`, `"asyncpg"`',
         "none",
         "`rewrite`, `check`",
-        "Driver whose own classes type the columns the default mapping leaves untyped: PostgreSQL ranges",
+        "Driver whose own loaders type PostgreSQL values: ranges, and with asyncpg JSON, bit strings and geometric types",
     ),
     "schema": KeyDoc(
         "string or list of strings",

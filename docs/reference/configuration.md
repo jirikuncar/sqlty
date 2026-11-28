@@ -100,7 +100,7 @@ A directory with more than one file reads the first of `sqlty.toml`,
 | Key | Type | Default | Used by | Summary |
 |-----|------|---------|---------|---------|
 | [`dialect`](#dialect) | `"postgres"`, `"sqlite"`, `"mysql"`, ... | `"postgres"` | `rewrite`, `check` | SQL dialect of queries and schema |
-| [`driver`](#driver) | `"psycopg"` | none | `rewrite`, `check` | Driver whose own classes type the columns the default mapping leaves untyped: PostgreSQL ranges |
+| [`driver`](#driver) | `"psycopg"`, `"asyncpg"` | none | `rewrite`, `check` | Driver whose own loaders type PostgreSQL values: ranges, and with asyncpg JSON, bit strings and geometric types |
 | [`schema`](#schema) | string or list of strings | none | `rewrite`, `check` | Schema `.sql` files, directories or globs, relative to the configuration file |
 | [`queries`](#queries) | string or list of strings | none | `check` | `.sql` files of named queries (aiosql, sqlc, PugSQL), directories or globs, relative to the configuration file |
 | [`query-format`](#query-format) | `"auto"`, `"aiosql"`, `"sqlc"`, `"pugsql"`, `"file"` | `"auto"` | `check` | How `queries` files name their queries; `auto` reads each file's first header |
@@ -134,8 +134,8 @@ SQL dialect for queries and the schema: `"postgres"` (default), `"sqlite"`,
 
 ## `driver`
 
-The driver your code reads rows with, when its own classes type columns that the
-default mapping leaves unknown. `"psycopg"` types PostgreSQL ranges and multiranges as
+The driver your code reads rows with, when it loads PostgreSQL values as its own classes
+or other than the default mapping does. `"psycopg"` types ranges and multiranges as
 psycopg loads them:
 
 | SQL | Python |
@@ -151,9 +151,22 @@ psycopg loads them:
 driver = "psycopg"
 ```
 
+`"asyncpg"` types them as [asyncpg](https://magicstack.github.io/asyncpg/current/usage.html#type-conversion)
+loads them, and its other codecs too:
+
+| SQL | Python |
+|-----|--------|
+| `json`, `jsonb` | `str`, columns and expressions alike (`doc -> 'a'`, `jsonb_build_object(...)`) |
+| `bit`, `varbit` | `asyncpg.BitString` |
+| `point`, `line`, `lseg`, `box`, `path`, `polygon`, `circle` | `asyncpg.Point`, `asyncpg.Line`, `asyncpg.LineSegment`, `asyncpg.Box`, `asyncpg.Path`, `asyncpg.Polygon`, `asyncpg.Circle` |
+| `int4range`, ... | `asyncpg.Range[int]`, ... |
+| `int4multirange`, ... | `list[asyncpg.Range[int]]`, ... |
+
+asyncpg also loads `"char"` as `bytes`, which sqlty cannot tell from `char(n)`: annotate it.
+
 The entries sit under [`types`](#types), which can replace any of them. Without
 `driver`, every type the mapping names is from the standard library, so a project
-that does not use psycopg never gets a psycopg import from `rewrite`. Other dialects
+that does not use a driver's classes never gets its import from `rewrite`. Other dialects
 ignore it.
 
 ## `schema`
@@ -390,8 +403,9 @@ BOOLEAN = "bool"
 
 A key with a dot is `table.column`; any other is a SQL type name, read in the
 project's dialect (`NUMERIC` covers `DECIMAL(10, 2)`). The type applies to
-schema columns and casts; an expression over a column keeps its type when it
-returns the column's values (`MAX(day)`). See
+every value of that SQL type a query returns: a column, a cast or an expression
+(`MAX(day)`, `doc -> 'a'`). An array takes `ARRAY`'s, or is a list of its elements'
+(`array_agg(price)`), and a column named by `table.column` keeps its own. See
 [Drivers and ORMs](../guide/drivers-and-orms.md#what-to-annotate).
 
 `ARRAY = "list"` types every array column as a list of its element's type, with

@@ -235,6 +235,27 @@ async def main(rows: list[tuple[int, str]]) -> None:
     await conn.fetchmany("INSERT INTO users (id, name) VALUES ($1, $2) RETURNING id", args=[[1, 2]])
 ```
 
+### `sqlty.drivers.asyncpg` helpers
+
+The helpers pass the arguments after the query as asyncpg does.
+
+```python
+import asyncpg
+
+from sqlty import SQL
+from sqlty.drivers.asyncpg import execute, fetch, fetchrow, fetchval
+
+async def main() -> None:
+    conn = await asyncpg.connect("postgres://x")
+    await fetch(conn, SQL[tuple[int]]("SELECT id FROM users WHERE id = $1"), 1)
+    # error: [param-type-mismatch] "parameter 1 expects int, got bytes"
+    await fetchrow(conn, SQL[tuple[int]]("SELECT id FROM users WHERE id = $1"), b"1")
+    # error: [param-type-mismatch] "parameter 1 expects int, got str"
+    await fetchval(conn, SQL[tuple[int]]("SELECT id FROM users WHERE id = $1"), "1")
+    # error: [param-count-mismatch] "query has 2 parameters, the call passes 1"
+    await execute(conn, "DELETE FROM users WHERE id = $1 AND age = $2", 1)
+```
+
 ### asyncpg does not convert text
 
 psycopg sends a `str` untyped, and the server converts it to the parameter's type.

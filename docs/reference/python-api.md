@@ -120,6 +120,53 @@ Returns the only column of the first row, typed from `SQL[tuple[T]]` or from
 and is not checked at runtime. Raises `LookupError` when the query returns no
 rows and `ValueError` when the row has more than one column.
 
+## `sqlty.drivers.asyncpg`
+
+Needs no extra: the helpers take any object with asyncpg's `fetch`, `fetchrow` and
+`execute`, such as an `asyncpg.Connection` or `Pool`. asyncpg takes only an exact `str`
+as a query, so they pass it `str(query)`; passing an `SQL[T]` to asyncpg itself raises
+`TypeError: Expected str, got SQL`.
+
+```python
+from sqlty.drivers.asyncpg import execute, fetch, fetchrow, fetchval, row_builder
+```
+
+### `fetch(conn, query, *args, timeout=None)`
+
+```python
+async def fetch[T](conn: Executor, query: SQL[T] | Bound[T], *args: Any, timeout: float | None = None) -> list[T]: ...
+```
+
+Runs `query` with `args` as `$1`, `$2`, ... and builds each record with
+`row_builder(row_form(query))`, or as a tuple when the query has no runtime row type.
+A `Bound` from `SQL.bind` passes its parameters, a tuple or list, before `args`.
+`conn` is an `Executor`: any object with asyncpg's `fetch`, `fetchrow` and `execute`.
+
+### `fetchrow(conn, query, *args, timeout=None)`
+
+Like `fetch`, for the first row: `T | None`.
+
+### `fetchval(conn, query, *args, timeout=None)`
+
+Returns the only column of the first row, typed from `SQL[tuple[T]]`. Raises
+`LookupError` when the query returns no rows and `ValueError` when the row has more
+than one column.
+
+### `execute(conn, query, *args, timeout=None)`
+
+Returns the status asyncpg returns, such as `"DELETE 1"`.
+
+### `row_builder(form)`
+
+| `form` | Builds a record as |
+|--------|--------------------|
+| `tuple[...]`, `NamedTuple` | its values in order |
+| `TypedDict`, `dict[...]` | `dict(record)` |
+| `Protocol` | a named tuple with every column as an attribute |
+| any other class (dataclass, Pydantic model) | `form(**record)` |
+
+Raises `TypeError` for anything else.
+
 ## `sqlty.core`
 
 ```python

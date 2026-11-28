@@ -16,7 +16,7 @@ expressions, and what each driver returns from live servers.
 
 | Dialect | sqlty follows | Other drivers |
 |---------|---------------|---------------|
-| `postgres` | psycopg 3 | asyncpg returns `json`/`jsonb` as `str`, `bit` as `asyncpg.BitString`, ranges as `asyncpg.Range`; psycopg2 returns `bytea` as `memoryview`, and `uuid` and `inet` as `str` unless you register their adapters |
+| `postgres` | psycopg 3 | asyncpg returns `json`/`jsonb` as `str`, `bit` as `asyncpg.BitString`, ranges as `asyncpg.Range`, which [`driver = "asyncpg"`](../reference/configuration.md#driver) types; psycopg2 returns `bytea` as `memoryview`, and `uuid` and `inet` as `str` unless you register their adapters |
 | `mysql` | PyMySQL | mysqlclient agrees, except that it returns a zero date as `None` where PyMySQL returns `str` |
 | `sqlite` | `sqlite3`, without `detect_types` | aiosqlite agrees |
 
