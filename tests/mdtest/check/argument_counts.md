@@ -1,7 +1,7 @@
 # Argument counts
 
 `argument-count-mismatch` reports a call of a built-in function whose arguments fit none of its
-overloads, wherever it is in the query.
+overloads, wherever it is in the query but `FROM`.
 
 ## PostgreSQL
 
@@ -45,6 +45,7 @@ q = SQL[tuple[str | None, str | None, str, str | None]](
 # error:
 q = SQL[tuple[int]]("--sql\nSELECT count(*) FROM users")
 q = SQL[tuple[str]]("--sql\nSELECT make_interval(days => 1)::text")
+r = SQL[tuple[str]]("--sql\nSELECT row_to_json(u.*)::text FROM users u")
 ```
 
 ## MySQL
@@ -87,6 +88,15 @@ from sqlty import SQL
 
 # error: [argument-count-mismatch] "`lower` takes 1 argument, got 2: lower(string: VARCHAR) -> VARCHAR"
 q = SQL[tuple[str | None]]("--sql\nSELECT lower(name, name) FROM users")
+```
+
+A star stands for the columns it reads, so it is not counted.
+
+```python
+from sqlty import SQL
+
+# error: [unknown-function] "function `struct_pack` is not known to sqlty"
+q = SQL("--sql\nSELECT struct_pack(*) FROM users")
 ```
 
 ## SQLite

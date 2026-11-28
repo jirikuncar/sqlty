@@ -8,6 +8,7 @@ use sqlparser::ast::{
     Statement,
 };
 
+use super::dialect::SqlDialect;
 use super::names::table_key;
 use super::query::Analyzer;
 use crate::diagnostics::Rule;
@@ -16,9 +17,6 @@ use crate::signatures::{signatures, Signature};
 impl Analyzer<'_> {
     /// Reports each call in `stmt` whose arguments fit no overload of its built-in.
     pub(super) fn check_argument_counts(&self, stmt: &Statement) {
-        if !self.diag.enabled() {
-            return;
-        }
         let _ = visit_expressions(stmt, |expr| {
             if let Expr::Function(func) = expr {
                 self.check_arguments(func);
@@ -48,14 +46,19 @@ impl Analyzer<'_> {
         {
             return;
         }
-        let star = list.args.iter().any(|arg| {
-            matches!(
-                arg,
-                FunctionArg::Unnamed(
-                    FunctionArgExpr::Wildcard | FunctionArgExpr::QualifiedWildcard(_)
-                )
-            )
-        });
+        let star = |arg: &FunctionArg| match arg {
+            FunctionArg::Unnamed(FunctionArgExpr::Wildcard) => Some(true),
+            FunctionArg::Unnamed(FunctionArgExpr::QualifiedWildcard(_)) => Some(false),
+            _ => None,
+        };
+        // DuckDB expands a star into the columns it reads (`struct_pack(*)`); elsewhere `t.*` is
+        // one row and `*` an argument of `count` only.
+        if self.dialect == SqlDialect::Other("duckdb")
+            && list.args.iter().any(|a| star(a).is_some())
+        {
+            return;
+        }
+        let star = list.args.iter().any(|arg| star(arg) == Some(true));
         let count = list.args.len();
         if !star && overloads.iter().any(|s| s.accepts(count)) {
             return;
@@ -79,19 +82,40 @@ impl Analyzer<'_> {
     }
 }
 
-/// How many arguments `overloads` take, from the fewest to the most: `1 or 2 arguments`.
+/// How many arguments `overloads` take: `1 or 2 arguments`, `2 to 4 arguments`, `at least 1
+/// argument`, `1, 3 or 6 arguments`.
 fn takes(overloads: &[Signature]) -> String {
-    let least = overloads.iter().map(|s| s.required).min().unwrap_or(0);
+    let repeated = overloads
+        .iter()
+        .filter(|s| s.variadic)
+        .map(|s| s.required)
+        .min();
     let most = overloads
         .iter()
-        .map(|s| (!s.variadic).then_some(s.parameters.len()))
-        .try_fold(0, |most, len| Some(most.max(len?)));
-    let counts = match most {
-        None => format!("at least {least}"),
-        Some(most) if most == least => most.to_string(),
-        Some(most) if most == least + 1 => format!("{least} or {most}"),
-        Some(most) => format!("{least} to {most}"),
+        .filter(|s| !s.variadic)
+        .map(|s| s.parameters.len())
+        .max()
+        .unwrap_or(0);
+    let counts: Vec<usize> = (0..=most)
+        .filter(|&n| repeated.is_none_or(|least| n < least))
+        .filter(|&n| overloads.iter().any(|s| s.accepts(n)))
+        .collect();
+    let mut words: Vec<String> = match counts.as_slice() {
+        [first, .., last] if counts.len() > 2 && last - first + 1 == counts.len() => {
+            vec![format!("{first} to {last}")]
+        }
+        _ => counts.iter().map(ToString::to_string).collect(),
     };
-    let plural = if most.unwrap_or(least) == 1 { "" } else { "s" };
-    format!("{counts} argument{plural}")
+    words.extend(repeated.map(|least| format!("at least {least}")));
+    let plural = if words == ["1"] || words == ["at least 1"] {
+        ""
+    } else {
+        "s"
+    };
+    let text = match words.split_last() {
+        Some((last, [])) => last.clone(),
+        Some((last, rest)) => format!("{} or {last}", rest.join(", ")),
+        None => String::new(),
+    };
+    format!("{text} argument{plural}")
 }

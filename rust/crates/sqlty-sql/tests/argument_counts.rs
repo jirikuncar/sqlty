@@ -45,6 +45,9 @@ fn a_call_no_overload_takes_is_reported_at_its_name() {
     );
     assert!(message("SELECT json_serialize_sql()", "duckdb")
         .starts_with("`json_serialize_sql` takes 1 to 5 arguments, got 0"));
+    assert!(message("SELECT make_timestamp(1, 2, 3)", "duckdb")
+        .starts_with("`make_timestamp` takes 1 or 6 arguments, got 3"));
+    assert!(message("SELECT random(1)", "postgres").starts_with("`random` takes 0 or 2 arguments"));
     assert_eq!(
         message("SELECT LEFT(name) FROM users", "mysql"),
         "`left` takes 2 arguments, got 1: left(str, len)"
@@ -56,6 +59,8 @@ fn a_star_is_an_argument_of_count_only() {
     assert!(message("SELECT upper(*) FROM users", "postgres")
         .starts_with("`upper` takes no `*`, only `count` does: upper(text) -> text"));
     assert!(reported("SELECT count(*) FROM users", "postgres").is_empty());
+    assert!(reported("SELECT row_to_json(u.*) FROM users u", "postgres").is_empty());
+    assert!(reported("SELECT lower(*) FROM users", "duckdb").is_empty());
 }
 
 #[test]

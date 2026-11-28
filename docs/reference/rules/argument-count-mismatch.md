@@ -48,5 +48,6 @@ Pass the arguments one of the listed overloads takes.
 ## Configuration
 
 Not checked for a function the schema defines with `CREATE FUNCTION`, which may take other
-arguments or have defaults, for a call with named arguments, or in a dialect without a function
-catalog (SQLite).
+arguments or have defaults, for a call with named arguments, for a table function in `FROM`, for
+a star argument in DuckDB, which expands to columns, or in a dialect without a function catalog
+(SQLite). The `generic` dialect reads PostgreSQL's catalog.

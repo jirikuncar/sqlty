@@ -1,12 +1,12 @@
 ---
-description: "Why a query column has no type: the six sqlty rules that report misspelled columns, unknown tables and functions, and valid SQL sqlty cannot type."
+description: "Why a query column has no type: the seven sqlty rules that report misspelled columns, unknown tables and functions, and valid SQL sqlty cannot type."
 ---
 
 # Name diagnostics
 
 A query that reads a misspelled column, an unknown table or a function sqlty
 does not know gets no type for that column, so its row type can't be checked.
-Six rules explain why a column is untyped. The three that report SQL the
+Seven rules explain why a column is untyped. The four that report SQL the
 database rejects are errors by default; the three that report valid SQL sqlty
 can't type are warnings.
 
@@ -15,6 +15,7 @@ can't type are warnings.
 | [`unknown-table`](../reference/rules/unknown-table.md) | error | A table the schema does not define |
 | [`unknown-column`](../reference/rules/unknown-column.md) | error | A column the table does not have |
 | [`ambiguous-column`](../reference/rules/ambiguous-column.md) | error | An unqualified column in more than one table |
+| [`argument-count-mismatch`](../reference/rules/argument-count-mismatch.md) | error | A call of a built-in function with arguments none of its overloads takes |
 | [`unknown-function`](../reference/rules/unknown-function.md) | warn | A function sqlty cannot type |
 | [`unknown-type`](../reference/rules/unknown-type.md) | warn | A cast or column type without a Python type |
 | [`unsupported-syntax`](../reference/rules/unsupported-syntax.md) | warn | A construct that parses but is not typed |
