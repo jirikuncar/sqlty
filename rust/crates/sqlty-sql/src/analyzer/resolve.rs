@@ -293,13 +293,7 @@ impl<'a> Analyzer<'a> {
                         });
                     }
                 }
-                let found = self.find_column(&qualifier, &column)?;
-                Some(Resolved {
-                    reference: qualifier.clone(),
-                    table: qualifier,
-                    column,
-                    found,
-                })
+                None
             }
             _ => None,
         }
@@ -604,9 +598,14 @@ impl<'a> Analyzer<'a> {
                 if matches!(qualifier.as_str(), "old" | "new" | "excluded") {
                     return self.diag.explain_silently();
                 }
+                let mut message =
+                    format!("`{qualifier}` is not a table or alias in the FROM clause");
+                if let Some(meant) = Self::meant_source(qualifier, &all) {
+                    message.push_str(&format!("; did you mean `{meant}`?"));
+                }
                 return self.diag.record_about(
                     Rule::UnknownTable,
-                    format!("`{qualifier}` is not a table or alias in the FROM clause"),
+                    message,
                     Some(qualifier),
                     Some(&column.value),
                 );
@@ -665,6 +664,27 @@ impl<'a> Analyzer<'a> {
             column: Some(column.value.clone()),
             shadowed_by: None,
         });
+    }
+
+    /// The FROM item a qualifier no FROM item names most likely means: the alias of the table
+    /// it names (PostgreSQL rejects `SELECT users.id FROM users AS u`), else the closest name.
+    fn meant_source<'s>(qualifier: &str, all: &[&'s Source]) -> Option<&'s str> {
+        let named = |source: &&Source| {
+            source.table.named().is_some_and(|table| {
+                table == qualifier || table.rsplit('.').next() == Some(qualifier)
+            })
+        };
+        let references: Vec<&str> = all
+            .iter()
+            .map(|source| source.reference.as_str())
+            .filter(|reference| !reference.is_empty())
+            .collect();
+        all.iter()
+            .copied()
+            .find(named)
+            .map(|source| source.reference.as_str())
+            .filter(|reference| !reference.is_empty())
+            .or_else(|| suggest::closest(qualifier, &references))
     }
 
     /// Whether `name` reads as itself unquoted.
